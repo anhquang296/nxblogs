@@ -2,8 +2,11 @@
 
 import React from 'react'
 import Giscus from '@giscus/react'
+import { useTheme } from 'nextra-theme-blog'
 
 const GiscusComments = () => {
+  const { theme } = useTheme()
+
   return (
     <Giscus
       id="comments"
@@ -15,7 +18,7 @@ const GiscusComments = () => {
       reactionsEnabled="1"
       emitMetadata="0"
       inputPosition="top"
-      theme="preferred_color_scheme"
+      theme={theme === 'dark' ? 'dark_tritanopia' : 'light_tritanopia'}
       lang="vi"
       loading="lazy"
     />
