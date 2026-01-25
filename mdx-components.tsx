@@ -2,6 +2,7 @@ import {useMDXComponents as getBlogMDXComponents} from 'nextra-theme-blog'
 import {useMDXComponents as getNextraComponents} from 'nextra/mdx-components'
 import {Posts} from "@/components/posts";
 import {Tags} from "@/components/tags";
+import {Avatar} from "@/components/avatar";
 
 const blogComponents = getBlogMDXComponents({
     h1: ({children}) => (
@@ -36,5 +37,6 @@ export function useMDXComponents() {
         ...defaultComponents,
         Posts: Posts,
         Tags: Tags,
+        Avatar: Avatar,
     }
 }
