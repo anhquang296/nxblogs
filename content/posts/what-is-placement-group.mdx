@@ -44,7 +44,7 @@ Hiện tại, AWS cung cấp 3 chiến lược (strategies) chính: **Cluster**,
 
 ### B. Spread Placement Group (Phân tán)
 
-Trái ngược với Cluster, đây là chiến lược "chia để trị" nhằm tối đa hóa sự an toàn.
+Trái ngược với Cluster, đây là chiến lược "chia để trị" nhằm tối đa hóa sự an toàn, tránh "bỏ trứng vào một giỏ".
 
 - **Cơ chế:** Các instances được đảm bảo đặt trên các phần cứng (tủ rack, nguồn điện, mạng) hoàn toàn khác nhau.
 - **Ưu điểm:** Độ sẵn sàng (Availability) cực cao. Việc hỏng hóc phần cứng ở instance này chắc chắn không ảnh hưởng đến instance kia.
@@ -84,7 +84,15 @@ Trái ngược với Cluster, đây là chiến lược "chia để trị" nhằ
 
 ---
 
-## 4. Những lưu ý quan trọng
+## 4. Cách sử dụng
+
+Một ví dụ điển hình là bạn cần triển khai 1 ứng dụng backend API cần tính sẳn sàng cao, bạn nghĩ ngay trong đầu đến chiến lược spread để phân bố các instance của bạn trên các rack khác nhau, thậm chí là AZ khác nhau.
+
+Bạn cần vào aws console tạo ngay 1 placement group spread
+
+Tiếp đó là triển khai các instance của bạn, mount các instance đó vào placement group vừa được tạo là xong, quá đơn giản
+
+## 5. Những lưu ý quan trọng
 
 Để sử dụng Placement Group hiệu quả, bạn cần ghi nhớ các "luật chơi" sau:
 
