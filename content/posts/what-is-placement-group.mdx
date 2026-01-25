@@ -1,0 +1,101 @@
+---
+title: 'Placement Group là gì? Chiến lược tối ưu vị trí Instance'
+date: '2026-01-26'
+tags: ['Devops', 'AWS', 'SAA', 'SAP']
+enableComment: true
+---
+
+# Placement Group là gì? Chiến lược tối ưu vị trí Instance
+
+![Placement group diagram](/ec2-instance-placement-groups-diagram.jpg)
+
+Khi làm việc với hạ tầng vật lý truyền thống, bạn có toàn quyền quyết định server A đặt cạnh server B (cắm chung switch để mạng nhanh) hay đặt server C ở tòa nhà khác (để phòng cháy nổ). Nhưng khi lên Cloud, mọi thứ được ảo hóa, làm sao chúng ta kiểm soát được điều này?
+
+Câu trả lời chính là **Placement Group**.
+
+Hôm nay, hãy cùng tìm hiểu xem Placement Group là gì và làm thế nào để sử dụng nó để tối ưu hiệu năng hoặc độ an toàn cho hệ thống của bạn trên AWS.
+
+## 1. Placement Group là gì?
+
+Hiểu đơn giản, **Placement Group (PG)** là một cấu hình logic cho phép bạn "gợi ý" với AWS về cách sắp xếp các EC2 Instances trên phần cứng vật lý.
+
+Khi bạn khởi tạo một nhóm các máy chủ ảo, mặc định AWS sẽ đặt chúng một cách ngẫu nhiên để tối ưu cho AWS. Tuy nhiên, với PG, bạn có thể yêu cầu AWS:
+
+- Đặt chúng **gần nhau nhất có thể** (để tối ưu throughput, giảm latency).
+- Hoặc đặt chúng **xa nhau nhất có thể** (để tối ưu availability, giảm rủi ro phần cứng).
+
+Hiện tại, AWS cung cấp 3 chiến lược (strategies) chính: **Cluster**, **Spread**, và **Partition**.
+
+---
+
+## 2. Các loại Placement Group
+
+### A. Cluster Placement Group (Gom cụm)
+
+Đây là chiến lược "đoàn kết là sức mạnh".
+
+- **Cơ chế:** AWS sẽ cố gắng đặt các instances của bạn nằm trong cùng một Availability Zone (AZ), thậm chí là nằm chung hoặc sát các tủ rack (giá đỡ server).
+- **Ưu điểm:**
+- Độ trễ mạng (Latency) cực thấp.
+- Băng thông (Throughput) cực cao giữa các node (lên đến 10-100 Gbps).
+
+- **Nhược điểm:** "Được ăn cả, ngã về không". Vì nằm chụm lại một chỗ, nếu tủ rack đó gặp sự cố về điện hoặc mạng, toàn bộ cụm instance của bạn có thể "sập" cùng lúc.
+- **Use Case:** Phù hợp cho các ứng dụng tính toán hiệu năng cao (HPC), render đồ họa, hoặc các ứng dụng xử lý dữ liệu lớn cần giao tiếp mạng liên tục và tức thì.
+
+### B. Spread Placement Group (Phân tán)
+
+Trái ngược với Cluster, đây là chiến lược "chia để trị" nhằm tối đa hóa sự an toàn.
+
+- **Cơ chế:** Các instances được đảm bảo đặt trên các phần cứng (tủ rack, nguồn điện, mạng) hoàn toàn khác nhau.
+- **Ưu điểm:** Độ sẵn sàng (Availability) cực cao. Việc hỏng hóc phần cứng ở instance này chắc chắn không ảnh hưởng đến instance kia.
+- **Nhược điểm:**
+- Bị giới hạn số lượng. Bạn chỉ được tối đa **7 running instances** cho mỗi AZ trong một Spread PG. Lý do đơn giản là không gian vật lý để tách biệt hoàn toàn là có hạn.
+
+- **Use Case:** Thích hợp cho các ứng dụng quan trọng (Critical applications), các cụm Cơ sở dữ liệu (Database cluster) nơi mà sự sống còn của từng node là ưu tiên hàng đầu.
+
+### C. Partition Placement Group (Phân vùng)
+
+Đây là "đứa con lai", sự cân bằng hoàn hảo giữa Cluster và Spread dành cho các hệ thống phân tán hiện đại.
+
+- **Cơ chế:**
+- AWS chia nhóm của bạn thành các phân vùng logic gọi là **Partition**.
+- Các instances **trong cùng một Partition** có thể chia sẻ chung phần cứng (như Cluster).
+- Nhưng các **Partition khác nhau** thì nằm trên các tủ rack khác nhau (như Spread).
+- Hỗ trợ tối đa **7 partitions** trên mỗi AZ.
+
+- **Ưu điểm:**
+- Cho phép scale số lượng instance lớn hơn nhiều so với Spread (vì mỗi partition có thể chứa nhiều instance).
+- Vẫn đảm bảo cô lập lỗi: Nếu rack của Partition 1 bị hỏng, Partition 2 vẫn chạy bình thường.
+- **Tính năng đặc biệt:** Instance có thể truy cập **Metadata** để biết chính xác mình đang nằm ở Partition nào, giúp ứng dụng tự điều phối data (Topology-aware).
+
+- **Use Case:** Các hệ thống phân tán dữ liệu lớn (Big Data) như **Hadoop HDFS, Cassandra, Kafka**. (Ví dụ: Kafka sẽ biết để replicate data sang partition khác rack nhằm đảm bảo an toàn).
+
+---
+
+## 3. Bảng so sánh nhanh
+
+| Đặc điểm           | Cluster                      | Spread                    | Partition                           |
+| ------------------ | ---------------------------- | ------------------------- | ----------------------------------- |
+| **Mục tiêu chính** | Hiệu năng mạng (Performance) | Độ an toàn (Availability) | Cân bằng (Distributed Systems)      |
+| **Vị trí vật lý**  | Chung Rack / Chung AZ        | Khác Rack hoàn toàn       | Chung Rack (trong 1 partition), Khác Rack (giữa các partition) |
+| **Giới hạn** | Không giới hạn số lượng | Max 7 instances / AZ | Max 7 partitions / AZ |
+| **Hỗ trợ Multi-AZ** | Không (Chỉ 1 AZ) | Có | Có |
+| **Phù hợp nhất** | HPC, Super computing | Database, Critical Apps | HDFS, Kafka, Cassandra |
+
+---
+
+## 4. Những lưu ý quan trọng
+
+Để sử dụng Placement Group hiệu quả, bạn cần ghi nhớ các "luật chơi" sau:
+
+1. **Chi phí:** Tin vui là việc tạo Placement Group hoàn toàn **Miễn phí**. Bạn chỉ phải trả tiền cho tài nguyên (EC2, EBS,...) mà bạn sử dụng bên trong nó.
+2. **Phạm vi:** Placement Group (dù là loại nào) **không hỗ trợ Multi-Region**. Bạn không thể gom nhóm các instance nằm ở Singapore và Virginia vào chung một PG.
+3. **Chiến lược tối ưu:**
+
+- Cần tốc độ? Chọn **Cluster**.
+- Cần server không bao giờ chết chùm? Chọn **Spread**.
+- Chạy Big Data / Distributed App? Chọn **Partition**.
+
+---
+
+_Hy vọng bài viết này giúp bạn có cái nhìn rõ ràng hơn về một trong những "hidden gem" cấu hình hạ tầng của AWS. Hẹn gặp lại các bạn trong các bài viết tiếp theo về AWS!_
