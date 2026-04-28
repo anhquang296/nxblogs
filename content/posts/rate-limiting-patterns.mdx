@@ -1,0 +1,354 @@
+---
+title: 'Rate Limiting Patterns: Từ Fixed Window đến Token Bucket — Chọn vũ khí nào để chặn lũ request'
+date: '2026-04-28'
+tags: ['Backend', 'System Design', 'API']
+enableComment: true
+---
+
+# Rate Limiting Patterns: Từ Fixed Window đến Token Bucket — Chọn vũ khí nào để chặn lũ request
+
+Một sáng thứ 2, dashboard báo P99 latency endpoint `/search` tăng **10×**. Bạn mở logs: một client duy nhất đang bắn **50,000 req/phút** — không phải attack, chỉ là một bug retry loop trên app mobile vừa release đêm qua. CPU database 95%, alert chạy như pháo hoa.
+
+Cái bạn cần lúc này là một thứ ngăn request đó **trước khi** nó chạm tới DB. Đó là **rate limiting**.
+
+Nhưng "rate limit" không phải _một_ thuật toán — có ít nhất **5 cách làm**, mỗi cách hợp với một tình huống. Chọn sai sẽ hoặc tốn tiền vô lý, hoặc reject oan client tốt, hoặc tệ hơn: tưởng đã chặn nhưng thực ra không. Bài này đi qua từng pattern, kèm code minh hoạ và đánh giá độ phức tạp khi đem ra production.
+
+---
+
+## 1. Bối cảnh: rate limit để giải quyết vấn đề gì?
+
+### 1.1. Ba mục tiêu chính
+
+Mọi hệ thống dùng rate limit đều rơi vào ít nhất một trong ba mục tiêu sau:
+
+1. **Bảo vệ tài nguyên.** Chống abuse, chống DDoS lớp 7, chống bug retry loop từ client. Đây là mục tiêu phổ biến nhất.
+2. **Đảm bảo công bằng (fair-share).** Trong hệ multi-tenant, một tenant hoạt động bất thường không được làm chậm tenant khác. "Noisy neighbor" là từ khoá.
+3. **Định giá / quota thương mại.** Gói Free 1000 req/ngày, gói Pro 100k req/ngày. Rate limit ở đây vừa là kỹ thuật vừa là sản phẩm.
+
+Ba mục tiêu này dẫn tới các trade-off khác nhau. Quota thương mại cho phép giới hạn ngày/tháng (sai số vài giây không ai quan tâm). Bảo vệ tài nguyên thì cần phản ứng theo giây. Fair-share lại cần biết "tỉ lệ" mỗi tenant đang chiếm.
+
+### 1.2. Đặt rate limit ở tầng nào?
+
+Một request đi từ client tới database thường qua nhiều tầng — và mỗi tầng có thể (nên) có rate limit:
+
+```
+Client → CDN/WAF → API Gateway → Application → Database
+         (DDoS)    (per API key) (business)   (connection pool)
+```
+
+- **Edge (Cloudflare, AWS WAF):** chặn DDoS thô, theo IP, không hiểu business.
+- **API Gateway (Kong, Envoy, AWS API Gateway):** chặn theo API key, theo route. Đây là chỗ thường đặt limit "thương mại".
+- **Application layer:** chặn theo business rule (ví dụ: 1 user không được tạo quá 5 đơn/phút).
+- **Database / connection pool:** thực ra cũng là rate limit — `max_connections`, query timeout.
+
+Nhiều người tưởng chỉ cần một tầng. Sự thật là: **mỗi tầng giải quyết một loại tấn công khác nhau**, không thay thế nhau được.
+
+### 1.3. Limit theo cái gì?
+
+Trước khi chọn thuật toán, phải trả lời: bạn limit **ai**?
+
+| Định danh | Khi nào dùng |
+| --- | --- |
+| IP | Chống DDoS thô, login brute-force. Nhưng cẩn thận NAT, mobile carrier, corporate proxy. |
+| User-ID | Sau khi đã auth — chuẩn xác nhất cho fair-share. |
+| API Key | API public cho dev. Map 1-1 với gói dịch vụ. |
+| Session / Cookie | Anonymous user trên web. |
+| Org-ID / Tenant-ID | Multi-tenant SaaS, chia limit theo tổ chức không phải user. |
+| Tổ hợp | Ví dụ `(user_id, endpoint)` — limit search 100/phút nhưng read 1000/phút trên cùng user. |
+
+Quyết định "limit cái gì" thường khó hơn "dùng thuật toán gì". Sai ở đây là sai cả kiến trúc.
+
+---
+
+## 2. Năm thuật toán cốt lõi
+
+Mọi rate limiter trên đời đều là biến thể của một trong 5 thuật toán dưới đây. Phần này đi qua từng cái, kèm code TypeScript ngắn minh hoạ ý tưởng (không phải production-ready — phần production sẽ nói ở mục 4).
+
+### 2.1. Fixed Window Counter
+
+**Cách hoạt động.** Chia trục thời gian thành các cửa sổ cố định (vd: mỗi phút). Đếm số request rơi vào cửa sổ hiện tại. Nếu vượt limit → reject. Sang cửa sổ mới → reset về 0.
+
+```
+00:00 ────────── 00:01 ────────── 00:02
+   [count=87]       [count=0→...]
+```
+
+**Code:**
+
+```ts
+import Redis from 'ioredis'
+const redis = new Redis()
+
+async function fixedWindow(userId: string, limit: number, windowSec: number) {
+  const window = Math.floor(Date.now() / 1000 / windowSec)
+  const key = `rl:fw:${userId}:${window}`
+
+  const count = await redis.incr(key)
+  if (count === 1) {
+    await redis.expire(key, windowSec)
+  }
+  return { allowed: count <= limit, count }
+}
+```
+
+**Vấn đề "burst at edge".** Nếu limit là 100 req/phút, client có thể gửi 100 req lúc `00:00:59` và 100 req nữa lúc `00:01:00` — **200 req trong 1 giây**. Cửa sổ cố định không nhìn xa hơn chính nó.
+
+**Biến thể.** Hầu như không có — nó đã đơn giản hết mức. Cách "vá" burst là chuyển sang sliding window.
+
+**Khi nào dùng.** Quota dài hạn (1000 req/ngày, 100k req/tháng) — nơi sai số vài giây không quan trọng. Khi cần đơn giản tuyệt đối và team không muốn nuôi thêm Lua script.
+
+**Độ phức tạp triển khai.** ★★.
+
+Đây là pattern dễ nhất. Một cặp `INCR` + `EXPIRE` là xong. Atomic vì Redis single-threaded.
+
+### 2.2. Sliding Window Log
+
+**Cách hoạt động.** Lưu **timestamp** của từng request vào một sorted set. Mỗi lần có request mới: xoá các timestamp cũ hơn `now - window`, đếm số timestamp còn lại, so với limit.
+
+```ts
+async function slidingWindowLog(userId: string, limit: number, windowSec: number) {
+  const key = `rl:swl:${userId}`
+  const now = Date.now()
+  const cutoff = now - windowSec * 1000
+
+  const pipeline = redis.pipeline()
+  pipeline.zremrangebyscore(key, 0, cutoff)
+  pipeline.zadd(key, now, `${now}-${Math.random()}`)
+  pipeline.zcard(key)
+  pipeline.expire(key, windowSec)
+  const results = await pipeline.exec()
+
+  const count = results![2][1] as number
+  return { allowed: count <= limit, count }
+}
+```
+
+**Ưu điểm.** Chính xác **tuyệt đối**, không có burst at edge. Cửa sổ trượt liên tục theo thời gian thực.
+
+**Nhược điểm.** Memory tốn `O(N)` với N là số request trong window. Limit 1000 req/phút × 1 triệu user = 1 tỷ entry. Không scale được cho limit lớn.
+
+**Biến thể.** Có thể dùng list thay sorted set, nhưng `ZREMRANGEBYSCORE` là kỹ thuật chuẩn vì nó loại timestamp cũ trong O(log N).
+
+**Khi nào dùng.** Endpoint nhạy cảm với **limit nhỏ**: 5 lần đăng nhập sai/phút, 10 OTP/giờ, 20 forgot-password/ngày. Memory nhỏ, độ chính xác đáng tiền.
+
+**Độ phức tạp triển khai.** ★★★
+
+Code không khó, atomic nhờ pipeline + Redis single-threaded. Chỉ cần cẩn thận với memory: thiếu `ZREMRANGEBYSCORE` là sorted set phình vô hạn.
+
+### 2.3. Sliding Window Counter (approximate)
+
+**Cách hoạt động.** Kết hợp 2 fixed window kế nhau. Đếm số request ở window trước (`prev`) và window hiện tại (`curr`). Tính tỉ lệ % của window hiện tại đã trôi qua, weighted-sum:
+
+```
+estimated = prev × (1 - elapsed_ratio) + curr
+```
+
+Ví dụ window = 60s, đã trôi 36s. `elapsed_ratio = 0.6`. Estimate = `prev × 0.4 + curr`. Khi sang window mới, `prev` lại được dùng làm trọng số mới.
+
+```ts
+async function slidingWindowCounter(userId: string, limit: number, windowSec: number) {
+  const now = Math.floor(Date.now() / 1000)
+  const currWindow = Math.floor(now / windowSec)
+  const elapsed = (now % windowSec) / windowSec
+
+  const currKey = `rl:swc:${userId}:${currWindow}`
+  const prevKey = `rl:swc:${userId}:${currWindow - 1}`
+
+  const [curr, prev] = await Promise.all([
+    redis.incr(currKey).then((c) => (c === 1 && redis.expire(currKey, windowSec * 2), c)),
+    redis.get(prevKey).then((v) => Number(v ?? 0)),
+  ])
+
+  const estimated = prev * (1 - elapsed) + curr
+  return { allowed: estimated <= limit, estimated }
+}
+```
+
+**Ưu điểm.** Memory `O(1)` như fixed window, độ chính xác **xấp xỉ ~99%** so với sliding log. Cloudflare publish bài giải thích họ dùng cái này ở edge ([blog.cloudflare.com/counting-things-a-lot-of-different-things](https://blog.cloudflare.com/counting-things-a-lot-of-different-things)).
+
+**Nhược điểm.** Là _xấp xỉ_ — giả định traffic phân bố đều trong window trước, điều không phải lúc nào cũng đúng. Nhưng sai số chấp nhận được cho hầu hết API.
+
+**Biến thể.** Nhiều system chia thành nhiều window con (vd: 6 sub-window 10s mỗi cái cho window 60s) để tăng chính xác. Đây là trung gian giữa sliding log và sliding counter cổ điển.
+
+**Khi nào dùng.** **Default tốt cho API public.** Cân bằng giữa chi phí và chính xác. Khi không biết chọn gì, chọn cái này.
+
+**Độ phức tạp triển khai.** ★★★ 
+
+Code dài hơn fixed window vài dòng, math không khó nhưng dễ sai (đặc biệt khi `elapsed` rơi đúng vào ranh giới window).
+
+### 2.4. Token Bucket
+
+**Cách hoạt động.** Mỗi user có một "bucket" chứa N token (capacity = `C`). Bucket được refill liên tục với tốc độ `r` token/giây, không vượt quá `C`. Mỗi request tốn 1 token (hoặc nhiều). Hết token → reject.
+
+```
+       refill r token/s
+            ↓
+    ┌──────────────┐
+    │ ●●●●●●○○○○○○ │  capacity C, hiện có 6/12
+    └──────────────┘
+            ↓
+     mỗi request -1
+```
+
+```ts
+async function tokenBucket(userId: string, capacity: number, refillPerSec: number) {
+  const key = `rl:tb:${userId}`
+  const now = Date.now() / 1000
+  const raw = await redis.hmget(key, 'tokens', 'ts')
+  const tokens = Number(raw[0] ?? capacity)
+  const lastTs = Number(raw[1] ?? now)
+
+  const refilled = Math.min(capacity, tokens + (now - lastTs) * refillPerSec)
+  const allowed = refilled >= 1
+  const next = allowed ? refilled - 1 : refilled
+
+  await redis.hmset(key, { tokens: next, ts: now })
+  await redis.expire(key, Math.ceil(capacity / refillPerSec) + 60)
+  return { allowed, remaining: Math.floor(next) }
+}
+```
+
+> **Lưu ý:** code trên _có race condition_ — đọc và ghi không atomic. Production phải bọc bằng Lua script (xem mục 4).
+
+**Ưu điểm.** **Cho phép burst** lên tới capacity. Phù hợp với traffic không đều: web/mobile thường yên lặng rồi bùng phát theo phiên user. Token bucket "thưởng" cho client tiết kiệm bằng cách cho phép họ tiêu nhiều khi cần.
+
+**Biến thể quan trọng:**
+
+- **Weighted token bucket.** Request đắt tốn nhiều token hơn. AWS API: `DescribeInstances` tốn 1 token, `RunInstances` tốn 5 token. Stripe API có khái niệm tương tự cho các call expensive.
+- **Hierarchical bucket.** Bucket per-user lồng trong bucket per-org, lồng trong bucket per-region. Request tiêu token ở mọi tầng.
+- **Generic Cell Rate Algorithm (GCRA).** Một biến thể toán học gọn của token bucket, chỉ cần lưu **1 số** (`theoretical arrival time`) thay vì 2 (tokens + last_refill). Redis module `redis-cell` implement chính xác cái này.
+
+**Khi nào dùng.** API public có traffic burst (đa số API user-facing), API có request cost không đồng đều, system cần phép "tích luỹ quota khi không dùng". Đây là pattern phổ biến nhất ở production.
+
+**Độ phức tạp triển khai.** ★★★★ 
+
+Code không dài, nhưng phải atomic (Lua script), refill math phải chính xác (lỗi off-by-one rất khó debug), TTL phải set đúng để bucket idle bị dọn. Distributed bucket còn khó hơn (xem mục 5).
+
+### 2.5. Leaky Bucket (queue-based)
+
+**Cách hoạt động.** Request đến **xếp hàng FIFO** vào bucket. Một consumer rút request ra với tốc độ cố định `r`/giây và xử lý. Hàng đợi đầy → reject. Khác với token bucket: leaky bucket không cho burst đi qua — output luôn mượt ở đúng tốc độ `r`.
+
+```
+   request  ──→  ┌──────────┐
+                 │ ▓▓▓▓▓░░░ │  hàng đợi (buffer)
+                 └────┬─────┘
+                      ↓ rate r/s cố định
+                   process
+```
+
+```ts
+async function leakyBucketEnqueue(userId: string, maxQueue: number) {
+  const key = `rl:lb:${userId}`
+  const len = await redis.llen(key)
+  if (len >= maxQueue) return { allowed: false }
+
+  await redis.rpush(key, JSON.stringify({ ts: Date.now() }))
+  return { allowed: true, queued: len + 1 }
+}
+
+// Worker chạy riêng, rút request với rate cố định:
+async function leakyBucketWorker(userId: string, intervalMs: number) {
+  const key = `rl:lb:${userId}`
+  setInterval(async () => {
+    const item = await redis.lpop(key)
+    if (item) await processRequest(JSON.parse(item))
+  }, intervalMs)
+}
+```
+
+**Ưu điểm.** Output rate **mượt tuyệt đối** — backend không bao giờ thấy spike. Lý tưởng khi gọi sang một third-party API có hard limit cứng (ví dụ Stripe cho phép 100 req/s, bạn không muốn bị 429).
+
+**Nhược điểm.** Request bị **delay** — đứng hàng đợi chứ không bị reject ngay. Latency phụ thuộc độ sâu hàng đợi. Nếu queue đầy mới reject thì hàng giữa có thể chờ rất lâu.
+
+**Biến thể.** Có thể tăng `r` động khi queue ngắn, giảm khi queue dài (back-pressure). Một số system biến nó thành priority queue: VIP request được rút trước.
+
+**Khi nào dùng.** **Smooth outbound:** gọi third-party API có rate limit cứng, ghi vào downstream system fragile (legacy DB, mainframe). **Job worker pool:** Sidekiq, BullMQ về bản chất là leaky bucket. Không hợp cho user-facing API vì latency.
+
+**Độ phức tạp triển khai.** ★★★★ 
+
+Cần queue thật (Redis list, Kafka, SQS), worker process tách biệt, monitor queue depth. Nếu queue bị nghẽn, alert. Khá nhiều moving parts.
+
+---
+
+## 3. Bảng tổng hợp
+
+| Thuật toán | Burst-friendly | Chính xác | Memory | Implement | Use case điển hình |
+| --- | :-: | :-: | :-: | :-: | --- |
+| Fixed Window | ❌ | Thấp (biên cửa sổ) | O(1) | ★★ | Daily/monthly quota |
+| Sliding Window Log | ❌ | Tuyệt đối | O(N) | ★★★ | Endpoint nhạy cảm, limit nhỏ |
+| Sliding Window Counter | ❌ | ~99% | O(1) | ★★★ | Default cho API public |
+| Token Bucket | ✅ | Tốt | O(1) | ★★★★ | API có burst, weighted cost |
+| Leaky Bucket | ❌ | Tốt | O(N) queue | ★★★★ | Smooth outbound, job worker |
+
+Đọc bảng theo cách này: **đi từ trái sang phải**. Đầu tiên hỏi "client của tôi có burst không?" → nếu có và muốn cho phép, chọn token bucket. Nếu không, chọn theo độ chính xác cần thiết và memory budget.
+
+---
+
+## 4. Đưa vào HTTP layer: contract với client
+
+Thuật toán bên trong là chuyện server, nhưng client cần biết **mình bị limit như thế nào và phải làm gì**. Phần này không phụ thuộc thuật toán — nó là contract HTTP.
+
+**Status code.** Khi reject, dùng `429 Too Many Requests` (RFC 6585). Đừng dùng `503` — `503` là "tôi chết", `429` là "anh nhanh quá".
+
+**Header.** Bộ header chuẩn theo IETF draft `draft-ietf-httpapi-ratelimit-headers`:
+
+- `RateLimit-Limit: 100` — quota tổng.
+- `RateLimit-Remaining: 23` — còn lại trong window hiện tại.
+- `RateLimit-Reset: 47` — bao nhiêu giây nữa thì reset.
+
+Cộng thêm `Retry-After: <seconds>` (RFC 9110) — đặt trên response 429 để báo client đợi bao lâu trước khi retry. Client SDK tử tế sẽ đọc header này và back-off thay vì spam.
+
+**Express middleware mẫu:**
+
+```ts
+import type { Request, Response, NextFunction } from 'express'
+
+interface Limiter {
+  check(key: string): Promise<{ allowed: boolean; remaining: number; resetSec: number; limit: number }>
+}
+
+export function rateLimitMiddleware(limiter: Limiter, keyFn: (req: Request) => string) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const result = await limiter.check(keyFn(req))
+    res.setHeader('RateLimit-Limit', result.limit)
+    res.setHeader('RateLimit-Remaining', result.remaining)
+    res.setHeader('RateLimit-Reset', result.resetSec)
+
+    if (!result.allowed) {
+      res.setHeader('Retry-After', result.resetSec)
+      return res.status(429).json({ error: 'rate_limit_exceeded' })
+    }
+    next()
+  }
+}
+```
+
+Middleware này **không** care thuật toán bên trong là gì — nó chỉ gọi `limiter.check()`. Đổi từ token bucket sang sliding window chỉ cần thay implementation của `Limiter`. Đây là cách đúng để tách abstraction.
+
+> Một mẹo nhỏ: với production, đổi `Math.random()` trong sliding window log ra một counter atomic để tránh va chạm member trong sorted set khi 2 request cùng millisecond. Đừng học thuộc — học pattern.
+
+---
+
+## 5. Lời khuyên thực tế
+
+1. **Đặt rate limit ở nhiều tầng.** Edge chặn DDoS thô. Gateway chặn theo API key (gắn với gói dịch vụ). Application chặn business rule. Mỗi tầng giải quyết một loại tấn công khác nhau, không thay thế nhau.
+2. **Trả response chuẩn.** `429` + bộ `RateLimit-*` + `Retry-After`. Document rõ trong API spec. Không document = client không retry tử tế = bạn vẫn bị flood.
+3. **Fail open hay fail closed khi Redis chết?** Trade-off:
+   - **Fail open** (cho qua) — giữ availability, nhưng abuse có thể lọt. Mặc định cho user-facing API.
+   - **Fail closed** (reject hết) — an toàn, nhưng có thể tự DDoS chính mình. Mặc định cho admin / billing endpoint.
+
+   Cả hai đều phải kèm **alert** ngay. Không có lựa chọn "đúng tuyệt đối", chỉ có lựa chọn phù hợp với rủi ro của từng endpoint.
+4. **Đừng bỏ qua "request cost" không đồng đều.** Endpoint `/search` đắt gấp 50× `/health`. Token bucket có weight giải quyết được. Fixed window thì không — nó đếm request, không đếm chi phí.
+5. **Đo metric.** Tỉ lệ 429 theo endpoint, theo client; phân phối `Retry-After`; sự phân bố token còn lại trong bucket. **Spike 429 đột ngột** = bug client mới deploy hoặc abuse. **Ngược lại — 0% 429 trong 6 tháng** = limit đặt quá rộng, không bảo vệ được gì.
+6. **Multi-region khó hơn bạn tưởng.** Limit local theo region đơn giản nhưng client có thể nhận **2× quota** nếu hit cả 2 region. Limit global cần state đồng bộ → một Redis cluster trung tâm (latency cao, single point of failure) hoặc gossip protocol (phức tạp). Nhiều system chấp nhận limit local + soft global cap cho đơn giản.
+7. **Pattern nào nuôi được?** Fixed window và sliding window counter là hai cái dễ nuôi nhất. Token bucket cần Lua script — đảm bảo team có người đọc được Lua trước khi adopt. Leaky bucket có queue ngầm — đảm bảo có người monitor queue depth.
+
+---
+
+## Kết
+
+Rate limit không phải _một_ thuật toán mà là một **bộ công cụ**. Chọn sai sẽ hoặc tốn tiền vô lý (sliding log cho limit 100k/phút), hoặc reject oan client tốt (fixed window khi traffic burst), hoặc tệ hơn là tưởng đã chặn nhưng thực ra thuật toán không phù hợp với pattern traffic.
+
+Quy tắc ngón tay cái: bắt đầu bằng **Sliding Window Counter** cho API public mặc định. Chuyển sang **Token Bucket** khi traffic burst là chuyện thường và bạn muốn cho phép nó. Dùng **Leaky Bucket** khi cần làm mượt outbound sang downstream khắt khe. Còn **Fixed Window** thì để dành cho quota dài (ngày, tháng) và **Sliding Log** cho những endpoint nhỏ-mà-nhạy-cảm.
+
+Quan trọng nhất: định nghĩa contract HTTP rõ ràng (`429 + RateLimit-*`) ngay từ ngày đầu. Đổi thuật toán bên trong thì dễ, đổi contract với hàng nghìn client SDK đã deploy thì không.
