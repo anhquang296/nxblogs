@@ -1,0 +1,267 @@
+---
+title: 'Amazon Aurora: Toàn bộ tính năng bạn cần biết'
+date: '2026-05-04'
+tags: ['Devops', 'AWS', 'Database', 'SAA']
+enableComment: true
+---
+
+# Amazon Aurora: Toàn bộ tính năng bạn cần biết
+
+> Bạn đang dùng MySQL hoặc PostgreSQL trên RDS, mọi thứ chạy ổn — nhưng bạn muốn **nhanh hơn**, **available hơn**, **scale dễ hơn**? Aurora chính là câu trả lời của AWS.
+
+**Amazon Aurora** là database engine do AWS tự phát triển, **tương thích hoàn toàn** với MySQL và PostgreSQL. Điều này có nghĩa là bạn có thể đưa application code hiện tại sang Aurora mà gần như không cần sửa gì — nhưng được AWS đảm bảo hiệu năng **gấp 5 lần MySQL** và **gấp 3 lần PostgreSQL** so với cùng chạy trên RDS cùng cấu hình.
+
+Điểm khác biệt lớn nhất: Aurora là **cloud-native**. Storage và compute được tách riêng hoàn toàn — storage tự động grow từ **10GB lên tới 128TB** mà không cần bạn can thiệp. Bạn không phải lo provision disk, không phải resize volume lúc nửa đêm.
+
+Bài viết này sẽ đi qua **toàn bộ các tính năng chính** mà Aurora cung cấp — giúp bạn hiểu Aurora "làm được gì", không đi sâu vào cơ chế bên trong.
+
+---
+
+## 1. High Availability & Storage
+
+Aurora không lưu data ở một chỗ. Khi bạn khởi tạo Aurora, nó tự động tạo **6 bản sao** và bắt đầu phân tán trên **3 Availability Zones**:
+
+- Chỉ cần **4/6 copies** ghi thành công → write được coi là thành công
+- Chỉ cần **3/6 copies** đọc được → read hoạt động bình thường
+
+Đây là mô hình **quorum** — nghĩa là ngay cả khi mất 1 AZ hoàn toàn (2 copies), Aurora vẫn hoạt động bình thường cho cả read lẫn write.
+
+Lưu ý rằng quá trình đồng bộ dữ liệu giữa các node dữ liệu trong storage layer là synchronize, nghĩa là sẽ bao gồm latency của quá trình sync trong user request. Nhưng latency sẽ không đáng kể vì nhiều yếu tố như các data nodes cùng region, sử dụng backbone network, kỹ thuật sync được tối ưu hơn, ...
+
+Ngoài ra, storage của Aurora có khả năng **self-healing**: nếu một block data bị hỏng, Aurora tự phát hiện và sửa bằng cách copy lại từ các bản sao còn lại — hoàn toàn trong nền, không downtime.
+
+Có thể tưởng tượng rằng Aurora = Multi-AZ + RDS
+
+### So sánh nhanh với RDS Multi-AZ
+
+| Tiêu chí       | RDS Multi-AZ                           | Aurora                           |
+| -------------- | -------------------------------------- | -------------------------------- |
+| Cách replicate | Instance-level (sync toàn bộ instance) | Storage-level (6 copies tự động) |
+| Failover time  | 60–120 giây                            | ~30 giây                         |
+| Storage repair | Cần AWS can thiệp hoặc tự restore      | Self-healing tự động             |
+| Số AZ          | 2 (primary + standby)                  | 3 AZ, 6 copies                   |
+
+---
+
+## 2. Aurora Replicas & Failover
+
+Aurora hỗ trợ tới **15 Read Replicas** trong cùng một region (so với RDS chỉ tối đa 5). Điểm đặc biệt: tất cả replicas đều **dùng chung storage volume** với primary — nên **replication lag gần như bằng 0** (thường dưới 10ms).
+
+### Failover tự động
+
+Mỗi replica được gán một **priority tier** từ 0 đến 15 (0 = ưu tiên cao nhất). Khi primary bị lỗi:
+
+1. Aurora tự động chọn replica có **priority cao nhất** (tier thấp nhất)
+2. Nếu cùng tier → chọn replica có **size lớn nhất**
+3. Promote replica đó thành primary mới
+4. Toàn bộ quá trình mất khoảng **30 giây**
+
+> Nếu không có replica nào tồn tại, Aurora sẽ tạo một instance mới — nhưng sẽ chậm hơn nhiều. Vì vậy, **luôn giữ ít nhất 1 replica** cho production.
+
+### Endpoints
+
+Aurora cung cấp 2 loại endpoint mặc định:
+
+- **Writer Endpoint**: luôn trỏ đến primary instance hiện tại. Dù primary thay đổi sau failover, endpoint DNS không đổi.
+- **Reader Endpoint**: load-balance tự động giữa tất cả read replicas. Application chỉ cần connect đến 1 DNS duy nhất.
+
+```
+Client
+  ├── Write ──► Writer Endpoint ──► Primary Instance
+  │                                       │
+  └── Read  ──► Reader Endpoint ──► ┌─────┴──────┐
+                                    │  Replica 1 │
+                                    │  Replica 2 │
+                                    │  Replica 3 │
+                                    └─────┬──────┘
+                                          │
+                                  Shared Storage Volume
+```
+
+---
+
+## 3. Aurora Replicas Auto Scaling
+
+Khi traffic tăng đột biến, việc thêm replicas bằng tay sẽ chậm và dễ bỏ lỡ thời điểm. Aurora giải quyết bằng **Replicas Auto Scaling** — tự động thêm/bớt read replicas dựa trên metrics:
+
+- **Average CPU Utilization** của read replicas
+- **Average Connections** đến read replicas
+
+Bạn chỉ cần định nghĩa scaling policy (ví dụ: target CPU 60%, min 1 replica, max 10 replicas), Aurora sẽ:
+
+1. Tự thêm replicas khi load vượt ngưỡng
+2. Tự động đăng ký replicas mới vào **Reader Endpoint**
+3. Tự bớt replicas khi load giảm
+
+![Aurora Replicas Auto Scaling](/aurora-auto-scale.png)
+
+Nhìn vào diagram: Client gửi write traffic qua **Writer Endpoint** đến primary instance. Read traffic đi qua **Reader Endpoint**, được phân phối đến các replicas. Khi CPU tăng cao, Aurora tự động mở rộng thêm replicas (phần "Endpoint Extended") — tất cả vẫn dùng chung **Shared Storage Volume**.
+
+---
+
+## 4. Custom Endpoints
+
+Trong thực tế, không phải mọi read query đều giống nhau. Một câu `SELECT * FROM users WHERE id = 1` khác xa một câu analytics query chạy aggregate trên hàng triệu rows. Nếu dồn cả hai loại vào cùng Reader Endpoint, query nặng sẽ ảnh hưởng đến query nhẹ.
+
+**Custom Endpoints** cho phép bạn gom một **nhóm con** các replicas lại thành một endpoint riêng, phục vụ cho workload cụ thể.
+
+![Aurora Custom Endpoints](/aurora-custom-endpoint.png)
+
+Diagram cho thấy: Writer Endpoint trỏ đến primary, Reader Endpoint trỏ đến các instance `db.r3.large` cho general reads, và **Custom Endpoint** trỏ đến các instance `db.r5.2xlarge` — dành riêng cho heavy queries như dashboard, reports.
+
+### Ví dụ thực tế
+
+| Endpoint                    | Instance type | Workload                              |
+| --------------------------- | ------------- | ------------------------------------- |
+| Writer Endpoint             | db.r5.xlarge  | Write traffic                         |
+| Reader Endpoint             | db.r3.large   | Simple reads (CRUD, lookup)           |
+| Custom Endpoint (analytics) | db.r5.2xlarge | Dashboard, reports, heavy aggregation |
+
+> Khi đã dùng Custom Endpoints, bạn nên route traffic qua custom endpoints thay vì Reader Endpoint mặc định — vì Reader Endpoint sẽ load-balance đến **tất cả** replicas, kể cả những instance nhỏ không phù hợp cho heavy queries.
+
+---
+
+## 5. Aurora Serverless
+
+Với Aurora thông thường (Provisioned), bạn phải chọn trước instance size. Chọn quá lớn thì tốn tiền, chọn quá nhỏ thì lúc peak sẽ chậm. **Aurora Serverless** giải quyết bài toán này bằng cách **tự động scale compute** cho bạn.
+
+Cách hoạt động:
+
+- Compute được đo bằng **ACU** (Aurora Capacity Units), mỗi ACU ≈ 2GB RAM
+- Bạn chỉ cần set **min ACU** và **max ACU**, Aurora tự điều chỉnh
+- **Pay-per-second** — chỉ trả tiền cho compute thực sự sử dụng
+- Có thể **scale to zero** khi không có connection nào (v1)
+
+### Khi nào dùng Serverless?
+
+- **Dev/test environments** — không cần chạy 24/7
+- **Workload không dự đoán được** — ví dụ internal tool dùng lúc có lúc không
+- **Application mới** — chưa biết traffic pattern sẽ như thế nào
+- **Scheduled workloads** — chỉ chạy vài giờ mỗi ngày
+
+| Tiêu chí          | Aurora Provisioned             | Aurora Serverless            |
+| ----------------- | ------------------------------ | ---------------------------- |
+| Capacity planning | Bạn chọn instance size         | Tự động                      |
+| Billing           | Per-hour (instance chạy)       | Per-second (compute thực tế) |
+| Scale to zero     | Không                          | Có (v1)                      |
+| Phù hợp cho       | Workload ổn định, dự đoán được | Workload biến động, dev/test |
+
+---
+
+## 6. Backup & Restore
+
+Aurora cung cấp nhiều cách để bảo vệ dữ liệu, và một vài tính năng là **độc quyền** so với RDS thông thường.
+
+### Automated Backup
+
+- Aurora **tự động backup liên tục** lên S3 — không ảnh hưởng đến performance
+- Retention period: **1–35 ngày**
+- **Point-in-Time Recovery (PITR)**: restore database về **bất kỳ giây nào** trong khoảng retention. Aurora tạo một cluster mới từ backup.
+
+### Manual Snapshots
+
+- Snapshot thủ công **không hết hạn** — tồn tại cho đến khi bạn xóa
+- Có thể **share cross-account** hoặc **copy cross-region** cho DR
+
+### Backtrack (chỉ Aurora MySQL)
+
+Đây là tính năng **chỉ Aurora có**: "tua ngược" database về một thời điểm trong quá khứ **mà không cần tạo cluster mới**. Rất hữu ích khi:
+
+- Ai đó chạy `DELETE FROM users` thiếu `WHERE`
+- Deploy lỗi corrupt data
+- Cần rollback nhanh mà không muốn chờ restore
+
+> Backtrack hoạt động trên **chính cluster hiện tại** — nhanh hơn nhiều so với PITR (tạo cluster mới từ backup). Tuy nhiên, chỉ hỗ trợ Aurora MySQL.
+
+### Clone
+
+Aurora cho phép tạo **clone** từ cluster hiện tại sử dụng **copy-on-write**:
+
+- Clone được tạo **gần như tức thì** — không copy toàn bộ data
+- Chỉ tốn thêm storage khi data bị thay đổi trên clone
+- Use case: tạo staging environment từ production data để test
+
+---
+
+## 7. Security
+
+Aurora được xây dựng với nhiều layer bảo mật:
+
+- **Encryption at rest**: sử dụng **AWS KMS**, mã hóa toàn bộ data, replicas, snapshots và backups. Phải bật lúc tạo cluster, không thể bật sau.
+- **Encryption in transit**: hỗ trợ **SSL/TLS** giữa application và Aurora.
+- **IAM Authentication**: thay vì dùng username/password truyền thống, bạn có thể authenticate bằng **IAM token** — token tự động rotate, không cần quản lý password.
+- **VPC isolation**: Aurora chạy trong **VPC** của bạn, truy cập được kiểm soát qua **Security Groups**.
+- **No SSH**: không thể SSH vào underlying instance — đây là managed service hoàn toàn.
+
+---
+
+## 8. Global Aurora
+
+Tất cả các tính năng trên đều hoạt động trong **một region**. Nhưng nếu bạn cần phục vụ users ở nhiều region, hoặc cần disaster recovery cross-region thì sao? Aurora cung cấp 2 cách tiếp cận:
+
+### Cross-Region Read Replicas
+
+- **Đơn giản** để setup — tạo read replica ở region khác
+- Sử dụng **async replication** → có replication lag
+- Có thể promote thành standalone DB cho disaster recovery
+- Phù hợp cho nhu cầu DR cơ bản
+
+### Aurora Global Database (khuyến nghị)
+
+Đây là giải pháp **được AWS recommend** cho multi-region:
+
+- **1 Primary Region** (read/write) — đây là region chính xử lý toàn bộ write
+- **Lên tới 5 secondary regions** (read-only), replication lag **dưới 1 giây**
+- Mỗi secondary region có thể có tới **16 Read Replicas** (Đối với primary region chỉ tối đa 15 Read Replicas vì đã mất 1 slot cho master instance)
+- Khi cần promote secondary region (disaster recovery), **RTO dưới 1 phút**
+
+```
+                    ┌──────────────────────┐
+                    │   Primary Region     │
+                    │   (us-east-1)        │
+                    │                      │
+                    │   Writer Instance    │
+                    │   + Read Replicas    │
+                    └──────────┬───────────┘
+                               │
+                    Replication < 1 second
+                               │
+              ┌────────────────┼────────────────┐
+              ▼                ▼                 ▼
+   ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+   │ Secondary Region│ │ Secondary Region│ │ Secondary Region│
+   │ (eu-west-1)     │ │ (ap-southeast-1)│ │ (ap-northeast-1)│
+   │                 │ │                 │ │                 │
+   │ Up to 16        │ │ Up to 16        │ │ Up to 16        │
+   │ Read Replicas   │ │ Read Replicas   │ │ Read Replicas   │
+   └─────────────────┘ └─────────────────┘ └─────────────────┘
+```
+
+### So sánh 2 cách tiếp cận
+
+| Tiêu chí             | Cross-Region Read Replica | Aurora Global Database |
+| -------------------- | ------------------------- | ---------------------- |
+| Setup                | Đơn giản                  | Phức tạp hơn một chút  |
+| Replication lag      | Vài giây                  | Dưới 1 giây            |
+| Số secondary regions | 1 replica tại 1 thời điểm | Lên tới 5 regions      |
+| Replicas mỗi region  | —                         | Lên tới 16             |
+| DR promotion         | Thủ công, chậm hơn        | RTO dưới 1 phút        |
+| Use case             | DR cơ bản                 | Production global apps |
+
+> Nếu bạn đang build một ứng dụng phục vụ users toàn cầu và cần cả **low-latency reads** lẫn **disaster recovery nhanh**, Aurora Global Database là lựa chọn không cần suy nghĩ.
+
+---
+
+## Tổng kết
+
+Aurora không chỉ là "RDS nhanh hơn" — nó là một database engine được thiết kế lại từ đầu cho cloud với hàng loạt tính năng mà RDS thông thường không có: **self-healing storage**, **15 replicas với gần 0 lag**, **auto scaling**, **custom endpoints**, **serverless**, **backtrack**, và **global database với replication dưới 1 giây**.
+
+**Khi nào chọn Aurora thay vì RDS?**
+
+- Cần **hơn 5 read replicas** hoặc **failover nhanh hơn 30 giây**
+- Cần **auto scaling** read replicas theo traffic
+- Cần **global presence** với multi-region reads
+- Cần **serverless** cho workload không dự đoán được
+- Muốn **backtrack** thay vì phải restore từ backup
+
+Trade-off duy nhất: Aurora **đắt hơn khoảng 20%** so với RDS — nhưng với những gì nó mang lại, đây thường là khoản đầu tư xứng đáng cho production workloads.
