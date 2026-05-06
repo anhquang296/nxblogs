@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400" font-family="system-ui, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrSpanGray" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#d1d5db"/>
+    </marker>
+    <marker id="arrSpanRed" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 9 3.5, 0 7" fill="#dc2626"/>
+    </marker>
+    <marker id="arrSpanPurple" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 9 3.5, 0 7" fill="#7c3aed"/>
+    </marker>
+  </defs>
+
+  <rect width="900" height="400" fill="#f9fafb" rx="8"/>
+
+  <text x="450" y="28" text-anchor="middle" font-size="16" font-weight="bold" fill="#111827">Trường <tspan font-family="ui-monospace, monospace" fill="#7c3aed">span</tspan> — đếm số node bị nhảy qua, dùng để tính rank</text>
+
+  <!-- Level labels -->
+  <text x="50" y="101" font-size="11" fill="#6b7280" font-weight="600">L3</text>
+  <text x="50" y="125" font-size="11" fill="#6b7280" font-weight="600">L2</text>
+  <text x="50" y="149" font-size="11" fill="#6b7280" font-weight="600">L1</text>
+  <text x="50" y="173" font-size="11" fill="#6b7280" font-weight="600">L0</text>
+
+  <!-- Faint level guides -->
+  <line x1="80" y1="97" x2="840" y2="97" stroke="#f3f4f6" stroke-width="1"/>
+  <line x1="80" y1="121" x2="840" y2="121" stroke="#f3f4f6" stroke-width="1"/>
+  <line x1="80" y1="145" x2="840" y2="145" stroke="#f3f4f6" stroke-width="1"/>
+  <line x1="80" y1="169" x2="840" y2="169" stroke="#f3f4f6" stroke-width="1"/>
+
+  <!-- HEAD (h=4) -->
+  <rect x="85" y="85" width="45" height="96" fill="#e0e7ff" stroke="#4f46e5" stroke-width="2" rx="4"/>
+  <line x1="85" y1="109" x2="130" y2="109" stroke="#a5b4fc" stroke-width="0.5" stroke-dasharray="2,2"/>
+  <line x1="85" y1="133" x2="130" y2="133" stroke="#a5b4fc" stroke-width="0.5" stroke-dasharray="2,2"/>
+  <line x1="85" y1="157" x2="130" y2="157" stroke="#a5b4fc" stroke-width="0.5" stroke-dasharray="2,2"/>
+  <circle cx="118" cy="97" r="3.5" fill="#1e3a8a"/>
+  <circle cx="118" cy="121" r="3.5" fill="#1e3a8a"/>
+  <circle cx="118" cy="145" r="3.5" fill="#1e3a8a"/>
+  <circle cx="118" cy="169" r="3.5" fill="#1e3a8a"/>
+  <text x="107" y="200" text-anchor="middle" font-size="11" font-weight="700" fill="#3730a3">HEAD</text>
+
+  <!-- alice (h=2) — visited in red path -->
+  <rect x="215" y="133" width="60" height="82" fill="#fef3c7" stroke="#b45309" stroke-width="2" rx="4"/>
+  <line x1="215" y1="157" x2="275" y2="157" stroke="#fbbf24" stroke-width="0.5" stroke-dasharray="2,2"/>
+  <line x1="215" y1="181" x2="275" y2="181" stroke="#b45309" stroke-width="1"/>
+  <circle cx="263" cy="145" r="3.5" fill="#92400e"/>
+  <circle cx="263" cy="169" r="3.5" fill="#92400e"/>
+  <text x="245" y="199" text-anchor="middle" font-size="13" font-weight="700" fill="#92400e">alice</text>
+  <text x="245" y="212" text-anchor="middle" font-size="11" fill="#78350f">1500</text>
+
+  <!-- carol (h=1) -->
+  <rect x="365" y="157" width="60" height="58" fill="#ffffff" stroke="#374151" stroke-width="2" rx="4"/>
+  <line x1="365" y1="181" x2="425" y2="181" stroke="#9ca3af" stroke-width="1"/>
+  <circle cx="413" cy="169" r="3.5" fill="#1f2937"/>
+  <text x="395" y="199" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2937">carol</text>
+  <text x="395" y="212" text-anchor="middle" font-size="11" fill="#6b7280">1800</text>
+
+  <!-- dave (h=1) -->
+  <rect x="515" y="157" width="60" height="58" fill="#ffffff" stroke="#374151" stroke-width="2" rx="4"/>
+  <line x1="515" y1="181" x2="575" y2="181" stroke="#9ca3af" stroke-width="1"/>
+  <circle cx="563" cy="169" r="3.5" fill="#1f2937"/>
+  <text x="545" y="199" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2937">dave</text>
+  <text x="545" y="212" text-anchor="middle" font-size="11" fill="#6b7280">2100</text>
+
+  <!-- bob (h=2) — TARGET -->
+  <rect x="665" y="133" width="60" height="82" fill="#dcfce7" stroke="#15803d" stroke-width="2.5" rx="4"/>
+  <line x1="665" y1="157" x2="725" y2="157" stroke="#86efac" stroke-width="0.5" stroke-dasharray="2,2"/>
+  <line x1="665" y1="181" x2="725" y2="181" stroke="#15803d" stroke-width="1"/>
+  <circle cx="713" cy="145" r="3.5" fill="#166534"/>
+  <circle cx="713" cy="169" r="3.5" fill="#166534"/>
+  <text x="695" y="199" text-anchor="middle" font-size="13" font-weight="700" fill="#166534">bob ✓</text>
+  <text x="695" y="212" text-anchor="middle" font-size="11" font-weight="600" fill="#14532d">2300</text>
+
+  <!-- NIL -->
+  <rect x="800" y="85" width="40" height="96" fill="#f3f4f6" stroke="#6b7280" stroke-width="1.5" stroke-dasharray="3,2" rx="4"/>
+  <text x="820" y="138" text-anchor="middle" font-size="12" font-weight="700" fill="#6b7280">NIL</text>
+
+  <!-- L3 (greyed) -->
+  <line x1="121" y1="97" x2="800" y2="97" stroke="#e5e7eb" stroke-width="1.2" marker-end="url(#arrSpanGray)"/>
+
+  <!-- L2 (greyed) — HEAD → NIL (no node has L2 in this example) -->
+  <line x1="121" y1="121" x2="800" y2="121" stroke="#e5e7eb" stroke-width="1.2" marker-end="url(#arrSpanGray)"/>
+
+  <!-- L1: HEAD → alice (purple, span=1) -->
+  <line x1="121" y1="145" x2="215" y2="145" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#arrSpanPurple)"/>
+  <rect x="138" y="127" width="62" height="16" fill="#ede9fe" rx="3" stroke="#7c3aed" stroke-width="0.8"/>
+  <text x="169" y="139" text-anchor="middle" font-size="11" font-weight="700" fill="#7c3aed">span=1</text>
+
+  <!-- L1: alice → bob (red, span=3, jumps over carol AND dave) -->
+  <line x1="266" y1="145" x2="665" y2="145" stroke="#dc2626" stroke-width="2.5" marker-end="url(#arrSpanRed)"/>
+  <rect x="425" y="127" width="62" height="16" fill="#fee2e2" rx="3" stroke="#dc2626" stroke-width="0.8"/>
+  <text x="456" y="139" text-anchor="middle" font-size="11" font-weight="700" fill="#dc2626">span=3</text>
+
+  <!-- bob L1 → NIL (greyed) -->
+  <line x1="716" y1="145" x2="800" y2="145" stroke="#e5e7eb" stroke-width="1.2" marker-end="url(#arrSpanGray)"/>
+
+  <!-- L0 chain (greyed for context) -->
+  <line x1="121" y1="169" x2="215" y2="169" stroke="#e5e7eb" stroke-width="1.2" marker-end="url(#arrSpanGray)"/>
+  <line x1="266" y1="169" x2="365" y2="169" stroke="#e5e7eb" stroke-width="1.2" marker-end="url(#arrSpanGray)"/>
+  <line x1="416" y1="169" x2="515" y2="169" stroke="#e5e7eb" stroke-width="1.2" marker-end="url(#arrSpanGray)"/>
+  <line x1="566" y1="169" x2="665" y2="169" stroke="#e5e7eb" stroke-width="1.2" marker-end="url(#arrSpanGray)"/>
+  <line x1="716" y1="169" x2="800" y2="169" stroke="#e5e7eb" stroke-width="1.2" marker-end="url(#arrSpanGray)"/>
+
+  <!-- Calculation box -->
+  <rect x="60" y="280" width="780" height="100" fill="#ffffff" rx="6" stroke="#e5e7eb"/>
+  <text x="80" y="305" font-size="13" font-weight="700" fill="#111827">ZRANK "leaderboard" "bob" — đếm rank trong O(log N):</text>
+  <text x="80" y="330" font-size="12" fill="#374151">Đường đi qua L1: HEAD <tspan fill="#7c3aed" font-weight="700">─(span=1)→</tspan> alice <tspan fill="#dc2626" font-weight="700">─(span=3)→</tspan> bob</text>
+  <text x="80" y="350" font-size="11" fill="#6b7280" font-style="italic">span=3 nghĩa là pointer ở L1 nhảy qua 3 hops khi đo ở L0 (alice → carol → dave → bob).</text>
+  <text x="80" y="372" font-size="13" font-weight="700" fill="#dc2626">Cộng dồn: rank = 1 + 3 = 4. bob đứng thứ 4 — không cần duyệt từng node ở L0.</text>
+</svg>

@@ -1,0 +1,392 @@
+---
+title: 'Redis Sorted Set: Skip List + Hash Table — Bộ đôi cấu trúc dữ liệu đằng sau O(log N) của Redis'
+date: '2026-05-06'
+tags: ['Backend', 'Redis', 'Data Structures']
+enableComment: true
+---
+
+# Redis Sorted Set: Skip List + Hash Table — Bộ đôi cấu trúc dữ liệu đằng sau O(log N) của Redis
+
+Bạn đang xây leaderboard cho một game có 10 triệu người chơi. Mỗi giây, hàng ngàn lượt cập nhật điểm đổ về. Hệ thống cần trả lời hai câu hỏi trong **dưới 1ms**: *"Player X xếp hạng bao nhiêu?"* và *"Top 100 là ai?"*
+
+Nếu dùng SQL: `SELECT * FROM scores ORDER BY score DESC LIMIT 100` trên bảng 10 triệu dòng — kể cả có index — vẫn mất hàng chục đến hàng trăm milliseconds. Thêm `WHERE` cho rank cá nhân thì phải scan cả bảng.
+
+Rồi ai đó nói: *"Dùng Redis `ZADD` với `ZREVRANK` đi."* Bạn thử — **sub-millisecond**. Nhưng tại sao? Cấu trúc dữ liệu nào bên trong Redis khiến nó nhanh đến vậy?
+
+Nếu bạn đã đọc bài [Rate Limiting Patterns](/posts/rate-limiting-patterns), bạn đã thấy Sorted Set xuất hiện ở phần Sliding Window Log — `ZADD`, `ZREMRANGEBYSCORE`, `ZCARD`. Bài này sẽ mổ xẻ những gì đang xảy ra **bên dưới** những command đó.
+
+---
+
+## 1. Sorted Set là gì?
+
+**Sorted Set** (hay **ZSet**) là một kiểu dữ liệu trong Redis, lưu trữ các cặp `(member, score)`:
+
+- **Member**: chuỗi duy nhất (không trùng lặp) — giống key trong một hash map.
+- **Score**: số thực 64-bit (IEEE 754 double) — dùng để sắp xếp.
+
+Redis **tự động duy trì thứ tự** theo score (tăng dần). Nếu hai member có cùng score, chúng được sắp xếp theo thứ tự từ điển (lexicographic) của member name.
+
+![Sorted Set Overview](/sorted-set-overview.svg)
+
+### Các command chính và độ phức tạp
+
+| Command | Complexity | Nhiệm vụ |
+|---------|-----------|-----------|
+| `ZADD` | O(log N) | Thêm/cập nhật member |
+| `ZSCORE` | O(1) | Lấy score của member |
+| `ZRANK` | O(log N) | Lấy thứ hạng của member |
+| `ZRANGE` | O(log N + M) | Lấy dải member theo rank |
+| `ZRANGEBYSCORE` | O(log N + M) | Lấy dải member theo score |
+| `ZREM` | O(log N) | Xoá member |
+| `ZPOPMIN` | O(log N) | Xoá và trả về member có score thấp nhất |
+| `ZINCRBY` | O(log N) | Tăng score của member |
+
+> N = tổng số phần tử, M = số phần tử trả về.
+
+Để ý một điều: `ZSCORE` là **O(1)**, trong khi `ZRANK` và `ZRANGE` là **O(log N)**. Nếu chỉ dùng một cấu trúc dữ liệu duy nhất, bạn không thể đạt được cả hai complexity này cùng lúc. Đây chính là dấu hiệu cho thấy bên trong Sorted Set có **hai cấu trúc dữ liệu** phối hợp với nhau.
+
+---
+
+## 2. Hash Table — "Danh bạ" tra cứu O(1)
+
+### 2.1. Hash Table là gì?
+
+Hash table (bảng băm) là cấu trúc dữ liệu lưu trữ dữ liệu theo cặp **key-value**, sử dụng **hash function** để ánh xạ key vào một vị trí (bucket) trong mảng.
+
+Hãy hình dung hash table như một **danh bạ điện thoại**: bạn biết tên người cần gọi, mở đúng trang chữ cái đầu → tìm ra số điện thoại gần như ngay lập tức. Không cần lật từng trang từ đầu.
+
+- **Tra cứu**: O(1) trung bình
+- **Thêm/xoá**: O(1) trung bình
+- **Nhược điểm**: không có thứ tự — bạn không thể hỏi "10 số điện thoại nhỏ nhất là gì?"
+
+### 2.2. Vai trò trong Sorted Set
+
+Trong Sorted Set, hash table đảm nhận một nhiệm vụ rất cụ thể: **ánh xạ `member → score`**.
+
+![Hash Table trong Sorted Set](/sorted-set-hash-table.svg)
+
+Nhờ hash table, ba thao tác sau trở nên cực nhanh:
+
+1. **`ZSCORE key member`** — trả về score của member trong O(1). Chỉ cần hash member name → tìm bucket → lấy score.
+2. **Kiểm tra trùng lặp khi `ZADD`** — trước khi thêm member mới, Redis check hash table để biết member đã tồn tại chưa. Nếu có → đây là update score (xoá vị trí cũ trong skip list, chèn vị trí mới). Nếu chưa → insert mới.
+3. **`ZREM key member`** — cần tìm member để xoá. Hash table cho phép locate member trong O(1), sau đó mới xoá trong skip list.
+
+Tóm lại: hash table là "bộ tra cứu nhanh" — bất cứ khi nào Redis cần trả lời *"member này có tồn tại không? score của nó là bao nhiêu?"*, hash table trả lời trong O(1).
+
+Nhưng hash table **không biết thứ tự**. Bạn không thể hỏi hash table *"ai xếp hạng 1?"* hay *"liệt kê tất cả member có score từ 1000 đến 2000"*. Đó là việc của skip list.
+
+---
+
+## 3. Skip List — "Hệ thống tàu tốc hành" O(log N)
+
+### 3.1. Bài toán cần giải
+
+Chúng ta cần một cấu trúc dữ liệu hỗ trợ:
+- Dữ liệu **luôn được sắp xếp** theo score
+- **Insert/Delete** nhanh (không phải dịch chuyển cả mảng)
+- **Range query** hiệu quả ("lấy tất cả member có score từ 1000 đến 2000")
+- **Rank query** ("member X đứng thứ mấy?")
+
+Hãy xem các ứng viên:
+
+| Cấu trúc | Insert | Search | Range Query | Vấn đề |
+|-----------|--------|--------|-------------|--------|
+| Array (sorted) | O(N) — phải dịch phần tử | O(log N) — binary search | O(log N + M) | Insert chậm |
+| Linked List | O(1) — nếu biết vị trí | O(N) — duyệt tuần tự | O(N) | Search chậm |
+| Balanced BST (Red-Black Tree) | O(log N) | O(log N) | O(log N + M) | Phức tạp, rotation |
+| **Skip List** | **O(log N)** | **O(log N)** | **O(log N + M)** | Memory overhead |
+
+Skip list đạt được O(log N) như balanced BST nhưng đơn giản hơn nhiều về implementation. Đây là lý do Redis chọn nó.
+
+### 3.2. Skip List hoạt động như thế nào?
+
+Hình dung hệ thống **tàu điện** với nhiều tuyến:
+
+- **Level 1 (tàu chậm)**: dừng ở **mọi ga** — mỗi node trong danh sách.
+- **Level 2 (tàu nhanh)**: chỉ dừng ở **một số ga** — skip qua nhiều node.
+- **Level 3 (tàu tốc hành)**: dừng ở **rất ít ga** — nhảy cóc xa hơn nữa.
+
+Muốn đến ga X? Bắt đầu từ tuyến cao nhất, đi nhanh nhất có thể. Khi "quá ga" → xuống tuyến thấp hơn, đi chậm lại. Lặp lại cho đến khi tìm được đúng ga.
+
+![Skip List Multi-level Structure](/sorted-set-skiplist.svg)
+
+Mỗi node có một **"chiều cao" ngẫu nhiên**: khi insert node mới, Redis "tung đồng xu" — mỗi lần ra mặt sấp (xác suất 50%) thì thêm một level. Tối đa 32 levels. Kết quả trung bình: mỗi node có **~2 forward pointers**.
+
+### 3.3. Ví dụ: tìm score = 2100
+
+![Skip List Search Walkthrough](/sorted-set-skiplist-search.svg)
+
+Chỉ 5 bước thay vì duyệt tuần tự 4 node. Với 1 triệu phần tử, skip list trung bình cần ~20 bước (log₂ 1,000,000 ≈ 20) — so với 1 triệu bước nếu duyệt tuần tự.
+
+### 3.4. Vai trò trong Sorted Set
+
+Skip list đảm nhận tất cả các thao tác **liên quan đến thứ tự**:
+
+- **`ZRANGE key 0 9`** — nhảy đến node thứ 0, duyệt 10 node tiếp theo → O(log N + M)
+- **`ZRANGEBYSCORE key 1000 2000`** — dùng skip list tìm node đầu tiên có score ≥ 1000, duyệt forward đến khi score > 2000
+- **`ZRANK key member`** — đếm số node đứng trước member
+
+```ts
+function zrangebyscore(zset, min, max) {
+  let node = skiplist.firstNodeGreaterOrEqual(min)
+
+  const results = []
+  while (node && node.score <= max) {
+    results.push({ member: node.member, score: node.score })
+    node = node.level[0].forward
+  }
+  return results
+}
+```
+
+### 3.5. Một chi tiết đặc biệt của Redis: trường `span`
+
+Skip list "chuẩn" (trong sách giáo khoa) không hỗ trợ rank query hiệu quả. Muốn biết "alice đứng thứ mấy", bạn phải đếm từ đầu — O(N).
+
+Redis giải quyết bằng cách thêm trường **`span`** vào mỗi forward pointer. `span` ghi lại **số node bị nhảy qua** bởi pointer đó. Khi tìm kiếm, cộng dồn `span` trên đường đi → ra được rank trong O(log N).
+
+![Span field for ZRANK](/sorted-set-span.svg)
+
+### 3.6. Tại sao Redis chọn skip list thay vì Red-Black Tree?
+
+Salvatore Sanfilippo (tác giả Redis) đã giải thích lý do:
+
+1. **Đơn giản hơn**: code insert/delete skip list ~100 dòng, Red-Black tree cần 300+ dòng với rotation phức tạp.
+2. **Range query tự nhiên**: skip list duyệt forward trên level 1 là có range query. Red-Black tree cần in-order traversal phức tạp hơn.
+3. **Dễ debug và maintain**: cấu trúc xác suất (probabilistic) thay vì deterministic balancing → ít edge case hơn.
+
+---
+
+## 4. Hai chế độ encoding: Listpack vs Skiplist+Hashtable
+
+Redis **không luôn dùng** skiplist+hashtable cho Sorted Set. Khi dữ liệu nhỏ, Redis sử dụng một encoding hoàn toàn khác — **listpack** — tối ưu cho bộ nhớ.
+
+### 4.1. Listpack là gì?
+
+**Listpack** là một khối bộ nhớ liên tục (contiguous memory block), lưu các cặp member-score **tuần tự cạnh nhau**:
+
+![Listpack memory layout](/sorted-set-listpack.svg)
+
+Đặc điểm:
+- **Không có pointer**: toàn bộ dữ liệu nằm liền kề trong RAM → **CPU cache-friendly** — khi CPU load một phần tử, các phần tử kế tiếp đã sẵn trong cache line.
+- **Operations là O(N)**: insert/search phải duyệt tuần tự. Nhưng khi N nhỏ (≤128), O(N) trên bộ nhớ liên tục thực tế **nhanh hơn** O(log N) trên skip list — vì skip list phải chase pointer qua nhiều vùng RAM khác nhau (cache miss).
+- Header chỉ 6 bytes. Integers dùng 1-8 bytes, strings có length prefix 1-5 bytes.
+
+> Trước Redis 7.0, Redis dùng **ziplist** thay vì listpack. Ziplist có một bug: khi insert/delete ở giữa, nó có thể gây **cascading update** — thay đổi kích thước một entry làm entry kế tiếp phải re-encode, lan truyền đến cuối list. Listpack sửa lỗi này bằng cách chỉ lưu forward size + backlen suffix, loại bỏ dependency giữa các entry.
+
+### 4.2. Khi nào Redis chuyển sang Skiplist+Hashtable?
+
+Redis quyết định encoding dựa trên **hai ngưỡng**:
+
+```
+zset-max-listpack-entries  128
+zset-max-listpack-value     64
+```
+
+Nếu Sorted Set vượt **bất kỳ** một trong hai ngưỡng này → Redis tự động **promote** từ listpack lên skiplist+hashtable. Quá trình này:
+
+1. Allocate hash table và skip list mới
+2. Duyệt listpack, insert từng phần tử vào cả hai structure
+3. Free bộ nhớ listpack cũ
+
+Đây là thao tác **O(N)** và **blocking** — event loop bị block trong lúc convert. Với N=128 (ngưỡng mặc định), thời gian convert không đáng kể. Nhưng nếu bạn tăng ngưỡng lên 10,000, spike latency khi convert sẽ rất rõ.
+
+### 4.3. So sánh memory overhead
+
+| Encoding | Memory trung bình/element | Khi nào dùng |
+|----------|--------------------------|-------------|
+| Listpack | ~29 bytes | ≤128 elements VÀ mỗi member ≤64 bytes |
+| Skiplist+Hashtable | ~136 bytes | Vượt một trong hai ngưỡng trên |
+
+Listpack tiết kiệm **3-5x bộ nhớ** so với skiplist+hashtable. Đây là lý do Redis mặc định dùng listpack cho small sets — phần lớn Sorted Set trong production thực tế có ít hơn 128 phần tử.
+
+### 4.4. Tổng quan hai chế độ
+
+![Encoding decision flowchart](/sorted-set-encoding-decision.svg)
+
+---
+
+## 5. Vì sao performance của Sorted Set lại tốt?
+
+Sức mạnh của Sorted Set đến từ việc **kết hợp hai cấu trúc dữ liệu bù trừ điểm yếu của nhau**:
+
+![Dual structure routing table](/sorted-set-dual-structure.svg)
+
+- **Hash table một mình** cho O(1) lookup nhưng không biết thứ tự → không thể range query hay rank.
+- **Skip list một mình** cho O(log N) sorted operations nhưng lookup phải O(log N) thay vì O(1).
+- **Kết hợp cả hai**: O(1) khi cần tra cứu nhanh, O(log N) khi cần thao tác có thứ tự.
+
+Thêm vào đó:
+
+1. **Listpack cho small sets**: khi N nhỏ, bỏ qua cả hai structure "nặng", dùng bộ nhớ liên tục → cache-friendly, ít memory overhead.
+2. **Redis single-threaded**: không có lock contention, không có context switching → mọi operation đều chạy atomic mà không tốn chi phí synchronization.
+3. **In-memory**: toàn bộ dữ liệu nằm trong RAM → không có disk I/O latency.
+
+Kết quả với 1 triệu phần tử:
+- `ZADD`: ~3-5 microseconds
+- `ZSCORE`: ~1-2 microseconds
+- `ZRANGE 0 99` (top 100): ~10-15 microseconds
+
+So sánh: một `SELECT ... ORDER BY score DESC LIMIT 100` trên PostgreSQL với 1M rows (có index) tốn ~1-5 milliseconds — chậm hơn **100-500x**.
+
+---
+
+## 6. Trade-offs của Sorted Set
+
+Không có bữa trưa miễn phí. Sorted Set nhanh, nhưng bạn trả giá ở những mặt sau:
+
+### 6.1. Memory overhead (~2x cho large sets)
+
+Trong encoding skiplist+hashtable, mỗi member được lưu **hai lần** — một lần trong hash table, một lần trong skip list. Skip list node còn có mảng forward pointers (trung bình 2 pointers/node) và mảng span values.
+
+Ước tính: Sorted Set với 1M members dùng **gấp ~2x bộ nhớ** so với một simple hash. Dùng `MEMORY USAGE key` để monitor.
+
+### 6.2. Write amplification
+
+Mỗi lần ghi đều phải cập nhật **cả hai** cấu trúc dữ liệu:
+
+| Operation | Hash Table | Skip List | Tổng |
+|-----------|-----------|-----------|------|
+| `ZADD` (new member) | 1 insert | 1 insert | 2 operations |
+| `ZADD` (update score) | 1 update | 1 delete + 1 insert | 3 operations |
+| `ZREM` | 1 delete | 1 delete | 2 operations |
+
+Update score là tốn nhất: phải xoá node cũ khỏi skip list (vì vị trí sorted thay đổi) rồi insert lại.
+
+### 6.3. Listpack → Skiplist conversion spike
+
+Khi Sorted Set lớn dần và vượt ngưỡng 128 phần tử (hoặc member > 64 bytes), Redis phải convert toàn bộ listpack sang skiplist+hashtable. Đây là thao tác O(N) **blocking event loop**.
+
+Với N=128, spike không đáng kể. Nhưng nếu bạn tăng `zset-max-listpack-entries` lên cao → spike sẽ rõ rệt. Mitigation: nếu biết trước Sorted Set sẽ lớn, có thể seed trước một dummy member với string dài > 64 bytes để force promote ngay từ đầu.
+
+### 6.4. Không có TTL cho từng member
+
+Redis chỉ hỗ trợ TTL ở cấp **key**, không phải cấp member. Bạn không thể set "member alice expire sau 5 phút".
+
+Workaround phổ biến: dùng **score làm timestamp**, rồi định kỳ `ZREMRANGEBYSCORE` để xoá entries cũ. Đây chính xác là pattern mà [Sliding Window Log](/posts/rate-limiting-patterns) sử dụng cho rate limiting.
+
+```ts
+const cutoff = Date.now() - 60_000
+await redis.zremrangebyscore('my-sorted-set', 0, cutoff)
+```
+
+### 6.5. Tổng hợp trade-offs
+
+| Trade-off | Mức ảnh hưởng | Mitigation |
+|-----------|--------------|------------|
+| ~2x memory (large sets) | Cao | Monitor bằng `MEMORY USAGE` |
+| Write amplification | Trung bình | Batch writes bằng pipeline |
+| Conversion spike | Thấp (one-time) | Tune ngưỡng hoặc pre-seed |
+| Không có per-member TTL | Thiết kế | Pattern score-as-timestamp |
+
+---
+
+## 7. Use cases phổ biến
+
+### 7.1. Leaderboard / Ranking
+
+Đây là use case "sinh ra để dùng Sorted Set".
+
+```ts
+import Redis from 'ioredis'
+const redis = new Redis()
+
+await redis.zadd('leaderboard', 2500, 'player:42')
+
+const rank = await redis.zrevrank('leaderboard', 'player:42')
+
+const top10 = await redis.zrevrange('leaderboard', 0, 9, 'WITHSCORES')
+```
+
+Tại sao Sorted Set phù hợp: `ZADD` O(log N) cho real-time update, `ZREVRANK` O(log N) cho rank lookup, `ZREVRANGE` O(log N + M) cho top-N — tất cả sub-millisecond kể cả với hàng triệu players.
+
+### 7.2. Rate Limiting — Sliding Window Log
+
+Chi tiết đã được trình bày trong bài [Rate Limiting Patterns](/posts/rate-limiting-patterns). Tóm tắt: score = timestamp, member = request ID. Mỗi request mới: `ZREMRANGEBYSCORE` xoá entries quá hạn, `ZADD` thêm request mới, `ZCARD` đếm → so với limit.
+
+```ts
+async function slidingWindowLog(userId: string, limit: number, windowSec: number) {
+  const key = `ratelimit:${userId}`
+  const now = Date.now()
+  const cutoff = now - windowSec * 1000
+
+  const pipe = redis.pipeline()
+  pipe.zremrangebyscore(key, 0, cutoff)
+  pipe.zadd(key, now, `${now}-${Math.random()}`)
+  pipe.zcard(key)
+  pipe.expire(key, windowSec)
+
+  const results = await pipe.exec()
+  const count = results[2][1] as number
+
+  return { allowed: count <= limit, count }
+}
+```
+
+Sorted Set phù hợp vì: `ZREMRANGEBYSCORE` xoá theo range score (= timestamp) trong O(log N + M), `ZCARD` đếm trong O(1).
+
+### 7.3. Priority Queue
+
+Score = priority (số nhỏ = ưu tiên cao). `ZPOPMIN` (Redis 5.0+) atomic pop phần tử có priority cao nhất.
+
+```ts
+await redis.zadd('task-queue', 1, 'send-email:urgent')
+await redis.zadd('task-queue', 5, 'generate-report:low')
+await redis.zadd('task-queue', 3, 'process-payment:medium')
+
+const [task, priority] = await redis.zpopmin('task-queue')
+```
+
+So sánh: List-based queue (`LPUSH`/`RPOP`) chỉ hỗ trợ FIFO. Sorted Set cho phép **sắp xếp theo priority** với cost O(log N).
+
+### 7.4. Time-series / Sliding Window
+
+Score = Unix timestamp, member = event data. Range query theo thời gian trở thành `ZRANGEBYSCORE`.
+
+```ts
+await redis.zadd('events:user:42', Date.now(), JSON.stringify({
+  action: 'page_view',
+  page: '/products/123'
+}))
+
+const fiveMinAgo = Date.now() - 5 * 60 * 1000
+const recentEvents = await redis.zrangebyscore(
+  'events:user:42', fiveMinAgo, '+inf'
+)
+```
+
+### 7.5. Trending / Weighted Feeds
+
+Score = engagement metric (likes + comments\*2 + shares\*3). `ZINCRBY` cập nhật score real-time khi có tương tác mới.
+
+```ts
+await redis.zincrby('trending:today', 1, 'post:456')
+
+await redis.zincrby('trending:today', 3, 'post:456')
+
+const trending = await redis.zrevrange('trending:today', 0, 19, 'WITHSCORES')
+```
+
+### Tổng hợp use cases
+
+| Use case | Commands chính | Tại sao Sorted Set phù hợp |
+|----------|---------------|---------------------------|
+| Leaderboard | `ZADD`, `ZREVRANK`, `ZREVRANGE` | Sorted + fast rank lookup |
+| Rate limiting | `ZADD`, `ZREMRANGEBYSCORE`, `ZCARD` | Score-as-timestamp + range delete |
+| Priority queue | `ZADD`, `ZPOPMIN` | Auto-sorted theo priority |
+| Time-series | `ZADD`, `ZRANGEBYSCORE` | Range query theo timestamp |
+| Trending | `ZINCRBY`, `ZREVRANGE` | Incremental score update + sorted output |
+
+---
+
+## Kết
+
+Sorted Set không có gì "phép thuật" — sức mạnh của nó đến từ một insight đơn giản: **dùng hai cấu trúc dữ liệu bù trừ điểm yếu của nhau**.
+
+- Hash table cho O(1) tra cứu nhanh.
+- Skip list cho O(log N) thao tác có thứ tự.
+- Listpack cho small sets tối ưu bộ nhớ.
+
+Trade-off là ~2x memory và write amplification. Nhưng với phần lớn use cases — leaderboard, rate limiting, priority queue — performance gain vượt xa chi phí phải trả.
+
+Quay lại bài toán đầu bài: leaderboard 10 triệu players, query rank trong sub-millisecond. Giờ bạn biết chính xác những pointer nào đang được follow, và tại sao mỗi bước chỉ mất O(log N).
