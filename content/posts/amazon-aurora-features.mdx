@@ -65,18 +65,7 @@ Aurora cung cấp 2 loại endpoint mặc định:
 - **Writer Endpoint**: luôn trỏ đến primary instance hiện tại. Dù primary thay đổi sau failover, endpoint DNS không đổi.
 - **Reader Endpoint**: load-balance tự động giữa tất cả read replicas. Application chỉ cần connect đến 1 DNS duy nhất.
 
-```
-Client
-  ├── Write ──► Writer Endpoint ──► Primary Instance
-  │                                       │
-  └── Read  ──► Reader Endpoint ──► ┌─────┴──────┐
-                                    │  Replica 1 │
-                                    │  Replica 2 │
-                                    │  Replica 3 │
-                                    └─────┬──────┘
-                                          │
-                                  Shared Storage Volume
-```
+![Aurora Cluster Endpoints](/aurora-cluster-endpoints.svg)
 
 ---
 

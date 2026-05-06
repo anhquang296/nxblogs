@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 460" font-family="system-ui, -apple-system, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#374151"/>
+    </marker>
+    <marker id="arrRed" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#dc2626"/>
+    </marker>
+    <marker id="arrGreen" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+  </defs>
+
+  <rect width="820" height="460" fill="#f9fafb" rx="8"/>
+
+  <text x="410" y="32" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Aurora Cluster: Endpoints</text>
+
+  <!-- Client -->
+  <rect x="40" y="100" width="100" height="50" fill="#dbeafe" rx="6" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="90" y="130" text-anchor="middle" font-size="13" font-weight="600" fill="#1e40af">Client</text>
+
+  <!-- Diagonal Write line: Client right (140, 113) -> Writer Endpoint left (230, 75) -->
+  <line x1="140" y1="113" x2="225" y2="75" stroke="#dc2626" stroke-width="1.5" marker-end="url(#arrRed)"/>
+  <rect x="148" y="80" width="50" height="18" fill="#fee2e2" rx="3"/>
+  <text x="173" y="93" text-anchor="middle" font-size="10" font-weight="700" fill="#991b1b">Write</text>
+
+  <!-- Writer Endpoint -->
+  <rect x="230" y="55" width="170" height="40" fill="#fef3c7" rx="5" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="315" y="80" text-anchor="middle" font-size="12" font-weight="600" fill="#92400e">Writer Endpoint</text>
+
+  <!-- Writer -> Primary -->
+  <line x1="400" y1="75" x2="500" y2="75" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Primary -->
+  <rect x="510" y="50" width="240" height="50" fill="#e0e7ff" rx="6" stroke="#818cf8" stroke-width="2"/>
+  <text x="630" y="80" text-anchor="middle" font-size="14" font-weight="bold" fill="#3730a3">Primary Instance</text>
+
+  <!-- Diagonal Read line: Client right (140, 138) -> Reader Endpoint left (230, 175) -->
+  <line x1="140" y1="138" x2="225" y2="175" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrGreen)"/>
+  <rect x="148" y="153" width="50" height="18" fill="#dcfce7" rx="3"/>
+  <text x="173" y="166" text-anchor="middle" font-size="10" font-weight="700" fill="#166534">Read</text>
+
+  <!-- Reader Endpoint -->
+  <rect x="230" y="155" width="170" height="40" fill="#fef3c7" rx="5" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="315" y="180" text-anchor="middle" font-size="12" font-weight="600" fill="#92400e">Reader Endpoint</text>
+  <text x="315" y="210" text-anchor="middle" font-size="10" fill="#6b7280">load-balance tự động</text>
+
+  <!-- Fan-out from Reader Endpoint to 3 replicas -->
+  <line x1="400" y1="175" x2="500" y2="145" stroke="#374151" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="400" y1="175" x2="500" y2="200" stroke="#374151" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="400" y1="175" x2="500" y2="255" stroke="#374151" stroke-width="1.2" marker-end="url(#arr)"/>
+
+  <!-- Replicas -->
+  <rect x="510" y="125" width="240" height="40" fill="#e0e7ff" rx="6" stroke="#818cf8" stroke-width="1.2" opacity="0.85"/>
+  <text x="630" y="150" text-anchor="middle" font-size="12" font-weight="600" fill="#3730a3">Replica 1</text>
+
+  <rect x="510" y="180" width="240" height="40" fill="#e0e7ff" rx="6" stroke="#818cf8" stroke-width="1.2" opacity="0.85"/>
+  <text x="630" y="205" text-anchor="middle" font-size="12" font-weight="600" fill="#3730a3">Replica 2</text>
+
+  <rect x="510" y="235" width="240" height="40" fill="#e0e7ff" rx="6" stroke="#818cf8" stroke-width="1.2" opacity="0.85"/>
+  <text x="630" y="260" text-anchor="middle" font-size="12" font-weight="600" fill="#3730a3">Replica 3</text>
+
+  <!-- Hub box below cluster -->
+  <rect x="510" y="295" width="240" height="32" fill="#fefce8" rx="5" stroke="#fde68a" stroke-width="1.2" stroke-dasharray="4"/>
+  <text x="630" y="316" text-anchor="middle" font-size="11" font-style="italic" fill="#92400e">Tất cả instance share chung storage</text>
+
+  <!-- Single diagonal arrow from hub to Shared Storage -->
+  <line x1="600" y1="327" x2="450" y2="350" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrGreen)"/>
+
+  <!-- Shared Storage -->
+  <rect x="160" y="355" width="540" height="80" fill="#dcfce7" rx="8" stroke="#16a34a" stroke-width="2"/>
+  <text x="430" y="390" text-anchor="middle" font-size="16" font-weight="bold" fill="#14532d">Shared Storage Volume</text>
+  <text x="430" y="415" text-anchor="middle" font-size="12" fill="#166534">6 bản sao dữ liệu trải trên 3 AZ — tự động grow</text>
+</svg>

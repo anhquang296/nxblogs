@@ -46,16 +46,7 @@ Client ──► Primary
 
 ### Asynchronous (bất đồng bộ) — "Cứ đi trước, tôi tự đến sau"
 
-```
-Client ──► Primary
-           1. Ghi vào local
-           2. Trả "OK" về Client NGAY
-           3. (Sau đó) gửi log sang Replica trong nền
-                                            │
-                                            ▼
-                                    Replica nhận và apply
-                                    (sau vài ms → vài giây)
-```
+![Asynchronous Replication](/rds-async-replication.svg)
 
 Đặc điểm:
 
@@ -89,17 +80,7 @@ Khi bạn bật Multi-AZ, AWS sẽ tạo ra:
 - **1 Primary instance** ở AZ-A — phục vụ toàn bộ read/write traffic.
 - **1 Standby instance** ở AZ-B — là một bản sao **đồng bộ (synchronous replication)** của primary.
 
-```
-        ┌──────────────┐
-        │   App / EC2  │
-        └──────┬───────┘
-               │ (DNS endpoint duy nhất)
-               ▼
-       ┌──────────────────┐         sync replication        ┌──────────────────┐
-       │  Primary (AZ-A)  │ ──────────────────────────────► │  Standby (AZ-B)  │
-       │   read + write   │                                 │  KHÔNG phục vụ   │
-       └──────────────────┘                                 └──────────────────┘
-```
+![Multi-AZ Synchronous Replication](/rds-multi-az-sync.svg)
 
 Điểm "đặc biệt" và rất hay bị hiểu nhầm:
 
@@ -115,10 +96,7 @@ Khi bạn bật Multi-AZ, AWS sẽ tạo ra:
 
 Đây là điểm **rất hay bị bỏ qua** khi nói về Multi-AZ. Vì replication là **synchronous**, mỗi câu `INSERT/UPDATE/DELETE` đều phải đi thêm 1 round-trip qua AZ khác trước khi primary trả "OK" cho app.
 
-```
-Không Multi-AZ:  Client ──► Primary ──► OK    (1 hop)
-Có Multi-AZ:     Client ──► Primary ──► Standby ──► ack ──► OK    (3 hop)
-```
+![Write Latency: Single AZ vs Multi-AZ](/rds-write-latency.svg)
 
 Cụ thể:
 

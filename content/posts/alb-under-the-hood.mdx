@@ -216,24 +216,7 @@ Nói cách khác: phân phối tải giữa các node chỉ "đều" khi bạn c
 
 Khi một request đi qua ALB, có **2 quyết định độc lập**:
 
-```
-Client request
-    │
-    ▼
-┌──────────────────────────────────┐
-│ Quyết định 1: Chọn ALB Node      │  ← DNS shuffle (client-side)
-│ "Node nào handle request?"       │     Không config được
-└──────────────────────────────────┘
-    │
-    ▼ (TCP connection đến node X)
-┌──────────────────────────────────┐
-│ Quyết định 2: Chọn Target        │  ← Round Robin / LOR / Weighted
-│ "Backend nào xử lý?"             │     Config ở target group
-└──────────────────────────────────┘
-    │
-    ▼
-Backend
-```
+![ALB: Hai Lớp Quyết Định](/alb-two-decision-layers.svg)
 
 Lớp 1 (chọn node) **AWS đã quyết** — bạn không config gì ngoài chọn region và AZs. Lớp 2 (chọn target) **bạn control được** qua target group settings, đây là phần section tiếp theo nói chi tiết.
 
@@ -253,16 +236,7 @@ Sau khi request đã đến một ALB node (qua cơ chế DNS ở section 6), no
 
 Targets được xếp thành một vòng tròn. Request đầu tiên đi đến target #1, request tiếp theo đến #2, rồi #3... Hết vòng thì quay lại #1.
 
-```
-Target group: [A, B, C]
-
-Request 1 → A
-Request 2 → B
-Request 3 → C
-Request 4 → A   (quay vòng)
-Request 5 → B
-...
-```
+![Round Robin: Xoay Vòng](/alb-round-robin.svg)
 
 **Ưu điểm:**
 
@@ -283,14 +257,7 @@ Thuật toán này thông minh hơn: ALB **đếm số request đang in-flight**
 
 **Cách hoạt động:**
 
-```
-Trạng thái target group hiện tại:
-  Target A: đang xử lý 8 requests
-  Target B: đang xử lý 3 requests   ← chọn B
-  Target C: đang xử lý 5 requests
-
-Request mới đến → ALB chọn Target B
-```
+![Least Outstanding Requests (LOR)](/alb-lor.svg)
 
 ALB maintain một counter cho mỗi target: tăng khi gửi request, giảm khi nhận response.
 
@@ -326,17 +293,7 @@ Thay vì chọn theo thứ tự (Round Robin) hay theo counter (LOR), ALB chọn
 
 Khi phát hiện anomaly, ALB **tự động giảm weight** của target đó (gửi ít traffic hơn) **mà không cần wait health check fail**. Đây là một dạng **circuit breaker tự động** ở mức load balancer.
 
-```
-Trạng thái bình thường:
-  A, B, C cùng weight 1.0 → mỗi target ~33% traffic
-
-Target B đột nhiên có 5xx rate cao bất thường:
-  ALB tự giảm weight của B xuống 0.1
-  → A: 47%, B: 5%, C: 47%
-  
-Khi B "phục hồi" (5xx về bình thường):
-  ALB tự nâng weight B trở lại 1.0
-```
+![Weighted Random + Anomaly Mitigation](/alb-weighted-random.svg)
 
 **Ưu điểm:**
 
