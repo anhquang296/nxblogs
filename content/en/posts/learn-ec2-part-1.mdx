@@ -1,0 +1,102 @@
+---
+title: 'What is AWS EC2 and How to Choose the Right EC2 Instance Type'
+date: '2026-01-11'
+tags: ['Devops', 'AWS', 'SAA', 'SAP']
+enableComment: true
+---
+
+# What is AWS EC2 and How to Choose the Right EC2 Instance Type
+
+## 1. The Nature of EC2: More Than Just a "Virtual Machine"
+
+Many people know EC2 is a virtual machine, but not everyone understands how it actually operates:
+
+* **Shared Resources:** An EC2 instance actually runs on an extremely large **physical host server** owned by AWS. This host can run many different virtual machines simultaneously, as long as it has sufficient resources.
+* **Allocation Mechanism:** When you launch an EC2, AWS will "carve out" a portion of RAM, CPU, and **Instance Store** from that physical host to allocate to you.
+* **Ephemeral Nature:** * Since resources are tied to the physical host, when you **Stop** the virtual machine, the physical host will reclaim those resources for other users.
+* When you **Start/Reboot**, AWS may find an available slot on a completely different physical host to allocate to you. This is why data on Instance Store will be lost when the machine is terminated.
+
+## 2. Components That Make Up a Complete EC2 Instance
+
+For a "virtual machine" to function and connect, AWS combines the following components:
+
+- AMI (Amazon Machine Image): A "template" containing the operating system (Linux, Windows) and pre-installed software.
+- Instance Types: Resource configuration (CPU, RAM, Storage, Network).
+- Key Pairs: Security keys for logging in. AWS keeps the Public Key, you keep the Private Key. Don't lose it, because you won't be able to SSH into the machine!
+- Security Groups: A virtual firewall controlling inbound/outbound traffic based on protocols and ports.
+- Storage: Where data is stored (EBS or Instance Store).
+
+This is quite practical because it's similar to buying a computer at a store. You need to decide:
+- Windows or Mac
+- How much RAM is enough for work and entertainment
+- Whether to have Microsoft services pre-installed
+- Whether to choose HDD or SSD for faster operations, and whether to use external drives
+- Whether to have facial recognition security
+
+## 3. Storage: Instance Store vs EBS
+
+To understand storage on EC2, let's clearly distinguish between these two types:
+
+- **Instance Store**: This is the physical disk of the host server shared with your virtual machine.
+  - Advantage: Extremely fast speed (because it's directly attached).
+  - Disadvantage: Data will be lost if the physical host reclaims resources (when stopped/terminated).
+
+
+- **EBS (Elastic Block Store)**: Think of it as a **Google Drive** or a USB connected over the network (Network Drive).
+  - Advantage: Safe and durable storage. Even if you shut down the virtual machine, the data remains. You can detach this "drive" from one machine and attach it to another.
+  - Disadvantage: Since it connects over the network, the speed cannot match RAM or Instance Store.
+
+Depending on the instance type, the storage options will vary. Check out **[https://instances.vantage.sh/](https://instances.vantage.sh/)**, where you'll see many instance types marked as "EBS only," while others also support instance storage.
+The choice depends on your usage needs, balancing between "recoverability" and "speed is everything."
+
+> Although EBS is a safe and durable storage type, by default it will still be deleted when your EC2 instance is terminated. Turn off "Delete on Termination" to avoid trouble.
+
+
+
+## 4. EC2 Instance Type Classification: Choosing the Right "Weapon"
+
+Depending on your workload needs, you'll choose the appropriate machine "family." AWS divides them into the following main groups:
+
+### General Purpose
+
+- **Characteristics:** The perfect balance between Compute, Memory, and Networking.
+- **Usage:** Suitable for most web applications, test environments, or code repositories.
+
+### Compute Optimized
+
+- **Characteristics:** Uses the highest-end processors (CPUs). Family names typically start with **C** (like c5, c6g).
+- **Usage:** Batch data processing.
+  - Media transcoding.
+  - Dedicated game servers.
+  - Machine Learning and High-performance web servers.
+
+
+
+### Memory Optimized
+
+- **Characteristics:** Designed for workloads that need to process massive amounts of data in RAM. Family names typically start with **R** (short for RAM -- like r5, r6).
+- **Usage:**
+  - Large database management systems.
+  - In-memory caches like Memcached, Redis.
+  - Real-time big data processing for unstructured data.
+
+
+
+### Storage Optimized
+
+- **Characteristics:** Optimized for extremely high read/write (I/O) operations on local disks.
+- **Usage:**
+  - OLTP (Online Transaction Processing) systems.
+  - Distributed file systems.
+  - Data Warehouses.
+
+
+
+## 5. Quick Tip
+
+When working with EC2, memorizing all the specifications is very difficult. Check out: **[https://instances.vantage.sh/](https://instances.vantage.sh/)**. This is an extremely detailed tool that helps you compare pricing, configurations, and features of each instance type in the most visual way.
+
+**Conclusion:**
+EC2 is an extremely flexible service. Understanding the nature of "resource reclamation" by the physical host and choosing the right Instance Type not only helps your application run more smoothly but also helps you save significant costs (Cost Optimization) on AWS.
+
+Thank you for reading this article from someone who is self-learning! I hope it's useful for your Cloud journey.

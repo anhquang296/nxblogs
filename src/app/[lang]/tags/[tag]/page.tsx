@@ -4,12 +4,15 @@ import { Posts } from '@/components/posts'
 import { Tags } from '@/components/tags'
 
 type TagPageParams = {
+  lang: string
   tag: string
 }
 
 type TagPageProps = {
   params: Promise<TagPageParams>
 }
+
+const LOCALES = ['en', 'vi']
 
 export async function generateMetadata(props: TagPageProps): Promise<Metadata> {
   const params = await props.params
@@ -19,8 +22,18 @@ export async function generateMetadata(props: TagPageProps): Promise<Metadata> {
 }
 
 export async function generateStaticParams(): Promise<TagPageParams[]> {
-  const allTags = await getTags()
-  return [...new Set(allTags)].map((item) => ({ tag: item.name }))
+  const results: TagPageParams[] = []
+  for (const lang of LOCALES) {
+    try {
+      const allTags = await getTags(lang)
+      for (const item of allTags) {
+        results.push({ lang, tag: item.name })
+      }
+    } catch {
+      // No posts for this locale yet
+    }
+  }
+  return results
 }
 
 export default async function TagPage(props: TagPageProps) {
@@ -29,11 +42,13 @@ export default async function TagPage(props: TagPageProps) {
 
   return (
     <>
-      <h1>Posts Tagged with &quot;{decodedTag}&quot;</h1>
-      <Posts tags={[decodedTag]} />
+      <h1>
+        {params.lang === 'en' ? 'Posts Tagged with' : 'Thẻ'} &quot;{decodedTag}&quot;
+      </h1>
+      <Posts tags={[decodedTag]} lang={params.lang} />
 
-      <h2>More tags</h2>
-      <Tags />
+      <h2>{params.lang === 'en' ? 'More tags' : 'Các thẻ khác'}</h2>
+      <Tags lang={params.lang} />
     </>
   )
 }

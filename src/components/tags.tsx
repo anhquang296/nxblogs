@@ -1,12 +1,13 @@
-import * as React from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Link } from 'next-view-transitions'
 import { getTags } from '@/lib/get-tags'
 
-type Props = {}
+type Props = {
+  lang?: string
+}
 
-export async function Tags(props: Props) {
-  const tags = await getTags()
+export async function Tags({ lang = 'en' }: Props) {
+  const tags = await getTags(lang)
 
   return (
     <div className="not-prose flex flex-wrap gap-1">

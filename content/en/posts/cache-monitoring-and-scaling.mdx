@@ -1,0 +1,207 @@
+---
+title: 'Cache Handbook: From Monitoring to Scaling - Operating a "Million-Request" Cache System'
+date: '2026-03-30'
+tags: ['Backend', 'System Design', 'Cache']
+enableComment: true
+---
+
+# Cache Handbook: From Monitoring to Scaling - Operating a "Million-Request" Cache System
+
+> This article is compiled and adapted from the book **"A Cache Handbook for Software Engineers"** by **Quang Hoang** (Software Engineer at Google). This is part **4/4** of the series.
+
+In the previous parts, we explored [caching fundamentals](/posts/cache-fundamentals), the [consistency problem](/posts/cache-consistency), and [common pitfalls](/posts/cache-pitfalls). This final article focuses on the two most critical operational aspects: **Monitoring** and **Scaling** a Cache system.
+
+---
+
+## Part 1: Monitoring Cache
+
+To operate Cache effectively, you need to track the following key metrics.
+
+### 1.1. Hit Rate
+
+Recall the formula:
+
+```
+Hit Rate = Cache Hit / (Cache Hit + Cache Miss) x 100
+```
+
+This metric is typically measured **per functional group or API**, for example the Hit Rate of the `GetProduct` API.
+
+There is no absolute number, but for typical systems:
+
+- **80% - 95%** is considered ideal.
+- **< 50%:** Cache is working inefficiently. This could be due to insufficient memory or TTL being too short, an unsuitable eviction policy, or data changing too frequently.
+- **= 100%:** Be careful — the data update mechanism is very likely broken.
+
+### 1.2. Latency
+
+The most important reason Cache exists is **speed**, so you need to monitor:
+
+- **Average Latency:** For remote cache (Redis, Memcached), typically under **1-2ms**.
+- **Tail Latency (p90, p99):** Detect abnormal cases.
+
+### 1.3. Throughput
+
+Throughput is measured in **Ops/sec** (Operations per second — the number of commands executed per second). Monitoring this metric helps you identify system limits and make **Scale-out** decisions.
+
+### 1.4. Memory
+
+- **Memory Utilization:** Memory usage ratio. Set alerts when it exceeds the **60-70%** threshold.
+- **Eviction Rate:** Number of keys forcibly deleted per second. If Eviction Rate spikes + Hit Rate drops sharply -> you may be experiencing **Cache Thrashing**.
+- **Fragmentation Ratio:**
+
+```
+Fragmentation Ratio = Memory Allocated by OS / Memory Used by Data
+```
+
+Two important thresholds:
+- **> 1.5:** Cache is experiencing **severe fragmentation**.
+- **< 1.0:** Cache is **running low on RAM** and resorting to swap (much slower).
+
+### 1.5. Connection Churn Rate
+
+To detect Connection Churn, **don't look at the number of open connections** (Connected Clients), but rather the **rate of new connection creation**. This metric is calculated as the first derivative of the connection count. For example in Prometheus:
+
+```
+rate(connection_totals)
+```
+
+---
+
+## Part 2: Scaling Cache
+
+When traffic volume and data size grow too large, a single Cache server is often insufficient. Vertical Scaling (increasing RAM, CPU) typically hits cost barriers and network I/O bottlenecks. The optimal solution is **Horizontal Scaling**.
+
+The key question: **How do you distribute keys across N servers evenly and stably?**
+
+### 2.1. Modulo Hashing
+
+The most basic approach: each key is hashed to an integer, then divided by the total number of nodes (N) to get the remainder:
+
+```
+Node Index = hash(key) mod N
+```
+
+**Rebalancing problem:** When N changes (adding/removing nodes), the division changes the denominator -> nearly **all keys are mapped to wrong positions**. The proportion of keys that must migrate is approximately `N/(N+1)`.
+
+> Example: A cluster of 10 nodes, adding 1 new node -> approximately **90% of data** experiences widespread Cache Miss (Cache Avalanche), pushing the entire load onto the Database.
+
+### 2.2. Consistent Hashing
+
+Introduced in 1997 by David Karger, Daniel Lewin, and Thomson Leighton (cofounders of Akamai Technologies).
+
+**How it works:**
+
+- **Hash Ring:** Uses a hash function (MD5, MurmurHash) with a value range from 0 to 2^32 - 1, represented as a **closed circular ring**.
+- **Server Mapping:** The IP/ID of each Cache Server is hashed and placed on the ring.
+- **Key Routing:** A key is hashed to find its position on the ring. Scanning **clockwise**, the first node encountered is the server storing that key.
+
+**Advantage:** When adding/removing nodes, the number of keys that need rebalancing is only **K/N** (K = total keys), instead of 90% with Modulo.
+
+**Uneven distribution problem:** If N is small, the gaps between nodes on the ring are very large -> one node ends up holding disproportionately more data. Solution: **Virtual Nodes** — a single physical node is mapped to multiple virtual nodes by hashing the IP with suffixes (`NodeA#1`, `NodeA#2`).
+
+### Implementing Consistent Hashing
+
+Depending on architecture, Consistent Hashing is stored in one of three locations:
+
+1. **Thick Client (Client-side Routing):** Stored directly in App Server memory. Libraries like `spymemcached` (Java), `gomemcache` (Golang) maintain this structure internally.
+2. **Proxy (Middleware Routing):** Stored on an intermediary Proxy server (Twemproxy, Envoy). App Server sends requests to the Proxy, which routes them to the correct node.
+3. **Cluster (Server-side Routing):** Each node in the cluster stores its own copy of the Consistent Hashing structure (like Cassandra, DynamoDB).
+
+### Handling Node Failures
+
+**Passive Eviction:** The client calculates Node A, sends the request, and gets a timeout. When errors reach a threshold (`max_failures = 3`), the client removes Node A from the Consistent Hashing ring. The next request falls to the next node on the ring.
+
+> **Drawback:** Prone to "Split-brain" — Client 1 sees Node A as dead but Client 2 still sees it as alive. Two clients have different Consistent Hashing states, breaking consistency.
+
+**Active Eviction:** Uses **Service Discovery** (Consul):
+
+1. Cache Node starts up -> registers its IP/Port with Service Discovery.
+2. Node continuously sends **Heartbeats** -> "I am alive!"
+3. If Node A crashes, Service Discovery records the event.
+4. Service Discovery pushes the event to Proxy/App Server via API or HTTP Long-polling.
+5. All clients simultaneously update their Consistent Hashing ring.
+
+---
+
+### 2.3. Hash Slot (Redis Cluster)
+
+Although Consistent Hashing solves the distribution problem well, it places the computational burden on the Client/Proxy. **Redis Cluster** (from version 3.0) takes a different approach: **Hash Slot**.
+
+**How it works:**
+
+Redis Cluster divides the key space into **16384 slots** (2^14). This number is fixed, regardless of the number of nodes. When a key is written:
+
+```
+Hash Slot = CRC16(key) mod 16384
+```
+
+Each node manages a range of Hash Slots. For example with 3 nodes:
+
+- **Node A:** Slot 0 -> 5460
+- **Node B:** Slot 5461 -> 10922
+- **Node C:** Slot 10923 -> 16383
+
+> If Node A has double the RAM of Node B, you can **manually assign twice as many Slots** to Node A — instead of relying on the random probability of Virtual Nodes in Consistent Hashing.
+
+**Why 16384?** Each heartbeat packet must include a bitmap of the managed slots. With 16384 slots: the bitmap only takes `16384 / 8 = 2048 bytes (2KB)` — optimal for network overhead.
+
+### Hash Tag
+
+Redis supports multi-key operations (`MGET`, `MSET`). If a key contains curly braces `{}`, the `CRC16` function only computes on the value inside:
+
+- `user:{100}:profile`
+- `user:{100}:orders`
+
+The string inside `{}` is `100` for both -> both keys fall into the **same Hash Slot** -> same Node -> the client only needs to send a request to **one Node**.
+
+### Routing Mechanism
+
+When a Client wants to read/write a key:
+
+1. Client computes the Hash Slot, looks up its internal mapping table -> sends request to the corresponding Node.
+2. If the mapping table is **outdated**, the request is routed to the wrong Node. The Node returns a `MOVED <slot_id> <target_ip>:<port>` error.
+3. Client receives `MOVED` -> resends the request to the target IP + **updates its mapping table** so subsequent requests go to the right place immediately.
+
+### Gossip Protocol
+
+For nodes in a Redis Cluster to know exactly which Hash Slot belongs to which Node **without a central server** (ZooKeeper, Consul), they use the **Gossip Protocol**:
+
+- Every second, a Node randomly selects a few other Nodes to send `PING`.
+- Recipients respond with `PONG`.
+- The payload contains: **Node ID**, **Slot Bitmap**, **Flags**, **Gossip Session** (status information about other nodes).
+
+Through continuous cross-exchange, configuration information **"spreads" across the entire cluster** in just a few seconds.
+
+> **Drawback:** Scale limitation: maximum **1000 nodes**. As the number of nodes increases, PING/PONG volume grows exponentially. Estimate: a 1000-node cluster sends **133,200 gossip API calls per second**, consuming significant CPU and bandwidth. At hyperscale, centralized servers are preferred for managing Cluster state.
+
+### Zero Downtime Resharding
+
+When adding/removing Nodes, Hash Slots + data must be migrated **without service interruption**.
+
+Example: Slot 8 is being moved from Node A to Node B:
+
+1. Node A marks Slot 8 as `MIGRATING`. Node B marks it as `IMPORTING`.
+2. A background thread gradually moves keys belonging to Slot 8 to Node B.
+3. If a Client requests a key belonging to Slot 8 and sends it to Node A:
+   - **Key hasn't been moved yet:** Returns the result normally.
+   - **Key has already been moved:** Node A returns a `ASK 8 <Node_B_ip>:<port>` error. The Client opens a **temporary** connection to Node B to fetch the data (without updating the mapping config).
+
+---
+
+## Closing Thoughts
+
+Across the 4 articles in this series, we hope you have shed the common misconception: *"System too slow? Just slap Redis on it and call it a day."*
+
+The truth is, **adding a Cache layer never makes a system simpler**. It only shifts complexity from one place to another. We hope this short series helps you see through that complexity and confidently master your own systems.
+
+> **Credit:** This entire series is compiled from the book **"A Cache Handbook for Software Engineers"** by **Quang Hoang** — Software Engineer at Google, previously at Shopee and Rakuten. You can connect with the author via [LinkedIn](https://www.linkedin.com/in/hoangdquang/) or [Blog](https://quanghoang.substack.com/).
+
+---
+
+## Series: Cache Handbook
+
+1. [Core Foundations of Caching](/posts/cache-fundamentals)
+2. [Decoding the Cache Consistency Problem](/posts/cache-consistency)
+3. [6 Classic "Traps" When Using Cache](/posts/cache-pitfalls)
+4. **From Monitoring to Scaling** ← You are here

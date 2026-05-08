@@ -1,0 +1,69 @@
+---
+title: 'Configuring a Custom Domain from Cloudflare for a Vercel Project'
+date: '2025-02-13'
+tags: ['Devops']
+enableComment: true
+---
+
+# Configuring a Custom Domain from Cloudflare for a Vercel Project
+
+After finishing an awesome project and deploying it to Vercel, the next step is definitely to attach a branded domain instead of Vercel's default domain. If you purchased your domain through Cloudflare, follow the steps below to get everything configured in just a few minutes.
+
+---
+
+## 1. Prepare Your Domain on Cloudflare
+
+* **Step 1:** Sign up and log in to [Cloudflare](https://dash.cloudflare.com/sign-up).
+* **Step 2:** On the Dashboard, select the **Domain Registration** > **Register Domains** tab.
+* **Step 3:** Search for the domain you want and complete the purchase. (In this article, we'll use `aidenthenotorious.com` as an example).
+
+---
+
+## 2. Add the Domain to Your Vercel Project
+
+* **Step 4:** Log in to Vercel, go to the Dashboard, and select the project you want to attach the domain to.
+* **Step 5:** In the top menu bar, select the **Settings** tab, then choose **Domains** from the left sidebar.
+* **Step 6:** Enter your domain in the text field (e.g., `aidenthenotorious.com`) and click **Add**.
+* **Step 7:** Vercel will suggest (Recommended): Add `www.aidenthenotorious.com` as well and automatically redirect the root domain to it. You should choose this option to optimize SEO and user experience.
+
+---
+
+## 3. Configure DNS on Cloudflare (Critical Step)
+
+After adding the domain, Vercel will show an **Invalid Configuration** error because you haven't pointed the DNS yet. Here's what to do:
+
+* **Step 8:** Go back to the Cloudflare Dashboard and select your domain.
+* **Step 9:** Navigate to the **DNS** > **Records** section.
+* **Step 10:** Add the following 2 important records:
+
+### A Record (For the root domain)
+
+This information is provided by Vercel in step 7.
+
+| Type | Name | IPv4 address | Proxy status |
+| --- | --- | --- | --- |
+| **A** | `@` | *IP from Vercel (e.g., 76.76.21.21)* | **DNS only (Turn off the orange cloud)** |
+
+### CNAME Record (For the www subdomain)
+
+| Type | Name | Target | Proxy status |
+| --- | --- | --- | --- |
+| **CNAME** | `www` | `cname.vercel-dns.com` | **DNS only (Turn off the orange cloud)** |
+
+> **Extremely important note:** You must turn off the **Proxy status** (switch from the orange cloud to the gray icon - DNS Only). If Proxy is enabled, Vercel may not be able to validate the SSL certificate and will keep showing a configuration error indefinitely.
+
+---
+
+## 4. Verify the Results
+
+* Wait about 1-5 minutes for the global DNS system to update (DNS Propagation).
+* Go back to the Domains tab on Vercel. When you see the green **Active** label next to your domain, you've succeeded!
+* Now visit `aidenthenotorious.com` -- your project is ready to serve visitors.
+
+---
+
+## Summary & Notes
+
+This combination lets you take advantage of Vercel's powerful infrastructure and Cloudflare's reliable DNS management.
+
+**A quick tip:** After Vercel has successfully validated and issued the SSL certificate (usually a few minutes after showing Active), you can try re-enabling the Proxy (orange cloud) on Cloudflare if you want to use additional security features like DDoS Protection or Cloudflare's CDN. However, if SSL errors occur, prioritize keeping it in "DNS Only" mode.

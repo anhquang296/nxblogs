@@ -5,6 +5,7 @@ type GetPostsOptions = {
   first?: number
   tags?: string[]
   excludeByTitle?: string
+  lang?: string
 }
 export type PostItem = {
   title: string
@@ -23,15 +24,25 @@ export type PostItem = {
 }
 
 export async function getPosts(options: GetPostsOptions = {}): Promise<PostItem[]> {
-  const { first, tags, excludeByTitle } = options
+  const { first, tags, excludeByTitle, lang = 'en' } = options
 
-  // get
+  let pageMap
+
+  try {
+    pageMap = await getPageMap(`/${lang}/posts`)
+  } catch {
+    return []
+  }
+
+  if (!pageMap || pageMap.length === 0) {
+    return []
+  }
+
   const { directories } = normalizePages({
-    list: await getPageMap('/posts'),
-    route: '/posts',
+    list: pageMap,
+    route: `/${lang}/posts`,
   })
 
-  // Sort posts by date
   let posts = directories
     .filter((post) => post.name !== 'index')
     .sort((a, b) => {
@@ -40,17 +51,14 @@ export async function getPosts(options: GetPostsOptions = {}): Promise<PostItem[
       return dateB.getTime() - dateA.getTime()
     })
 
-  // Filter by tags if provided
   if (tags && tags.length > 0) {
     posts = posts.filter((post) => tags.some((tag) => post.frontMatter.tags?.includes(tag)))
   }
 
-  // Exclude by title if provided
   if (excludeByTitle) {
     posts = posts.filter((post) => post.title !== excludeByTitle)
   }
 
-  // Apply first limit if provided
   if (first) {
     posts = posts.slice(0, first)
   }

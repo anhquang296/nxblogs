@@ -1,0 +1,357 @@
+---
+title: 'Rate Limiting Patterns: From Fixed Window to Token Bucket — Choosing the Right Weapon to Tame Request Floods'
+date: '2026-04-28'
+tags: ['Backend', 'System Design', 'API']
+enableComment: true
+---
+
+# Rate Limiting Patterns: From Fixed Window to Token Bucket — Choosing the Right Weapon to Tame Request Floods
+
+One Monday morning, the dashboard shows P99 latency on the `/search` endpoint spiking **10x**. You open the logs: a single client is firing **50,000 req/min** — not an attack, just a bug retry loop in a mobile app released the night before. Database CPU at 95%, alerts going off like fireworks.
+
+What you need right now is something to stop those requests **before** they hit the DB. That's **rate limiting**.
+
+But "rate limit" isn't _one_ algorithm — there are at least **5 approaches**, each suited to a different situation. Choose wrong and you'll either waste money, wrongly reject good clients, or worse: think you're protected when you're not. This article walks through each pattern, with illustrative code and an assessment of production complexity.
+
+---
+
+## 1. Context: What problem does rate limiting solve?
+
+### 1.1. Three main goals
+
+Every system using rate limiting falls into at least one of three goals:
+
+1. **Protect resources.** Prevent abuse, Layer 7 DDoS, client bug retry loops. This is the most common goal.
+2. **Ensure fairness (fair-share).** In multi-tenant systems, one misbehaving tenant shouldn't slow down others. "Noisy neighbor" is the keyword.
+3. **Pricing / commercial quota.** Free tier: 1000 req/day, Pro tier: 100k req/day. Rate limiting here is both a technical and product concern.
+
+These three goals lead to different trade-offs. Commercial quota allows daily/monthly limits (a few seconds of error doesn't matter). Resource protection needs per-second reaction. Fair-share needs to know the "ratio" each tenant is consuming.
+
+### 1.2. At which layer should you place rate limiting?
+
+A request traveling from client to database typically passes through multiple layers — and each layer can (and should) have rate limiting:
+
+```
+Client → CDN/WAF → API Gateway → Application → Database
+         (DDoS)    (per API key) (business)   (connection pool)
+```
+
+- **Edge (Cloudflare, AWS WAF):** blocks crude DDoS, by IP, doesn't understand business logic.
+- **API Gateway (Kong, Envoy, AWS API Gateway):** blocks by API key, by route. This is where "commercial" limits are typically placed.
+- **Application layer:** blocks by business rule (e.g., a user can't create more than 5 orders/minute).
+- **Database / connection pool:** this is also a form of rate limiting — `max_connections`, query timeout.
+
+Many people think one layer is enough. The truth is: **each layer addresses a different type of attack**, and they can't replace each other.
+
+### 1.3. Rate limit by what?
+
+Before choosing an algorithm, you must answer: **who** are you limiting?
+
+| Identifier         | When to use                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| IP                 | Crude DDoS, login brute-force. But beware of NAT, mobile carriers, corporate proxies.    |
+| User-ID            | After authentication — most accurate for fair-share.                                     |
+| API Key            | Public APIs for developers. Maps 1-to-1 with service tiers.                              |
+| Session / Cookie   | Anonymous users on the web.                                                              |
+| Org-ID / Tenant-ID | Multi-tenant SaaS, limiting by organization not individual user.                         |
+| Composite          | e.g. `(user_id, endpoint)` — limit search to 100/min but read to 1000/min for the same user. |
+
+Deciding "what to limit" is usually harder than "which algorithm to use". Get this wrong and the entire architecture is wrong.
+
+---
+
+## 2. Five core algorithms
+
+Every rate limiter in existence is a variant of one of these 5 algorithms. This section walks through each one, with short TypeScript code illustrating the concept (not production-ready — production considerations are in section 4).
+
+### 2.1. Fixed Window Counter
+
+**How it works.** Divide the time axis into fixed windows (e.g., each minute). Count the number of requests falling into the current window. If it exceeds the limit → reject. New window → reset to 0.
+
+![Fixed Window Counter](/rate-limiting-fixed-window.svg)
+
+**Code:**
+
+```ts
+import Redis from 'ioredis'
+const redis = new Redis()
+
+async function fixedWindow(userId: string, limit: number, windowSec: number) {
+  const window = Math.floor(Date.now() / 1000 / windowSec)
+
+  const key = `ratelimit:fixedwindow:${userId}:${window}`
+
+  const count = await redis.incr(key)
+
+  if (count === 1) {
+    await redis.expire(key, windowSec)
+  }
+
+  return { allowed: count <= limit, count }
+}
+```
+
+**The "burst at edge" problem.** If the limit is 100 req/min, a client can send 100 requests at `00:00:59` and another 100 at `00:01:00` — **200 requests in 1 second**. Fixed windows can't see beyond themselves.
+
+**Variants.** Virtually none — it's already as simple as it gets. The "fix" for burst is to switch to sliding window.
+
+**When to use.** Long-term quotas (1000 req/day, 100k req/month) — where a few seconds of error doesn't matter. When you need absolute simplicity and the team doesn't want to maintain Lua scripts.
+
+**Implementation complexity.** 2/5.
+
+This is the easiest pattern. A single `INCR` + `EXPIRE` pair and you're done. Atomic because Redis is single-threaded.
+
+### 2.2. Sliding Window Log
+
+**How it works.** Store the **timestamp** of each request in a sorted set. For each new request: remove timestamps older than `now - window`, count the remaining timestamps, compare against the limit.
+
+```ts
+async function slidingWindowLog(userId: string, limit: number, windowSec: number) {
+  const key = `ratelimit:slidingwindowlog:${userId}`
+
+  const now = Date.now()
+
+  const cutoff = now - windowSec * 1000
+
+  const pipeline = redis.pipeline()
+
+  pipeline.zremrangebyscore(key, 0, cutoff)
+  pipeline.zadd(key, now, `${now}-${Math.random()}`)
+  pipeline.zcard(key)
+  pipeline.expire(key, windowSec)
+
+  return await pipeline.exec()
+}
+```
+
+**Advantages.** **Absolutely** precise, no burst at edge. The window slides continuously in real-time.
+
+**Disadvantages.** Memory costs `O(N)` where N is the number of requests in the window. A limit of 1000 req/min x 1 million users = 1 billion entries. Doesn't scale for large limits.
+
+**Variants.** You could use a list instead of a sorted set, but `ZREMRANGEBYSCORE` is the standard technique because it removes old timestamps in O(log N).
+
+**When to use.** Sensitive endpoints with **small limits**: 5 failed logins/minute, 10 OTPs/hour, 20 forgot-password/day. Small memory footprint, and the precision is worth it.
+
+**Implementation complexity.** 3/5.
+
+The code isn't hard, atomic thanks to pipeline + Redis single-threaded. Just be careful with memory: missing `ZREMRANGEBYSCORE` and the sorted set grows unbounded.
+
+### 2.3. Sliding Window Counter (approximate)
+
+**How it works.** Combine 2 adjacent fixed windows. Count the requests in the previous window (`prev`) and the current window (`curr`). Calculate the percentage of the current window that has elapsed, weighted-sum:
+
+```
+estimated = prev x (1 - elapsed_ratio) + curr
+```
+
+Example: window = 60s, 36s have passed. `elapsed_ratio = 0.6`. Estimate = `prev x 0.4 + curr`. When a new window starts, `prev` becomes the new weight.
+
+```ts
+async function slidingWindowCounter(userId: string, limit: number, windowSec: number) {
+  const now = Math.floor(Date.now() / 1000)
+
+  const currWindow = Math.floor(now / windowSec)
+
+  const elapsed = (now % windowSec) / windowSec
+
+  const currKey = `ratelimit:slidingwindowcounter:${userId}:${currWindow}`
+
+  const prevKey = `ratelimit:slidingwindowcounter:${userId}:${currWindow - 1}`
+
+  const [curr, prev] = await Promise.all([
+    redis.incr(currKey).then((c) => (c === 1 && redis.expire(currKey, windowSec * 2), c)),
+    redis.get(prevKey).then((v) => Number(v ?? 0)),
+  ])
+
+  const estimated = prev * (1 - elapsed) + curr
+  return { allowed: estimated <= limit, estimated }
+}
+```
+
+**Advantages.** Memory is `O(1)` like fixed window, accuracy is **approximately ~99%** compared to sliding log. Cloudflare published a post explaining they use this at the edge ([blog.cloudflare.com/counting-things-a-lot-of-different-things](https://blog.cloudflare.com/counting-things-a-lot-of-different-things)).
+
+**Disadvantages.** It's _approximate_ — it assumes traffic is evenly distributed in the previous window, which isn't always true. But the error is acceptable for most APIs.
+
+**Variants.** Many systems divide into multiple sub-windows (e.g., 6 sub-windows of 10s each for a 60s window) to improve accuracy. This is a middle ground between sliding log and the classic sliding counter.
+
+**When to use.** **Good default for public APIs.** Balances cost and accuracy. When you don't know what to choose, choose this one.
+
+**Implementation complexity.** 3/5.
+
+A few more lines than fixed window, the math isn't hard but easy to get wrong (especially when `elapsed` falls right on a window boundary).
+
+### 2.4. Token Bucket
+
+**How it works.** Each user has a "bucket" containing N tokens (capacity = `C`). The bucket is continuously refilled at a rate of `r` tokens/second, never exceeding `C`. Each request costs 1 token (or more). No tokens left → reject.
+
+![Token Bucket](/rate-limiting-token-bucket.svg)
+
+```ts
+async function tokenBucket(userId: string, capacity: number, refillPerSec: number) {
+  const key = `ratelimit:tokenbucket:${userId}`
+
+  const now = Date.now() / 1000
+
+  const raw = await redis.hmget(key, 'tokens', 'ts')
+
+  const tokens = Number(raw[0] ?? capacity)
+
+  const lastTs = Number(raw[1] ?? now)
+
+  const refilled = Math.min(capacity, tokens + (now - lastTs) * refillPerSec)
+
+  const allowed = refilled >= 1
+
+  const next = allowed ? refilled - 1 : refilled
+
+  await redis.hmset(key, { tokens: next, ts: now })
+  await redis.expire(key, Math.ceil(capacity / refillPerSec) + 60)
+
+  return { allowed, remaining: Math.floor(next) }
+}
+```
+
+> **Note:** the code above _has a race condition_ — read and write are not atomic. Production must wrap it in a Lua script (see section 4).
+
+**Advantages.** **Allows bursts** up to capacity. Fits well with uneven traffic: web/mobile is usually quiet then bursts during user sessions. Token bucket "rewards" frugal clients by letting them spend more when needed.
+
+**Important variants:**
+
+- **Weighted token bucket.** Expensive requests cost more tokens. AWS API: `DescribeInstances` costs 1 token, `RunInstances` costs 5 tokens. Stripe API has a similar concept for expensive calls.
+- **Hierarchical bucket.** Bucket per-user nested inside bucket per-org, nested inside bucket per-region. A request consumes tokens at every level.
+- **Generic Cell Rate Algorithm (GCRA).** A mathematically compact variant of token bucket that only needs to store **1 number** (`theoretical arrival time`) instead of 2 (tokens + last_refill). The Redis module `redis-cell` implements exactly this.
+
+**When to use.** Public APIs with burst traffic (most user-facing APIs), APIs with unequal request costs, systems that need to "accumulate quota when not in use". This is the most common pattern in production.
+
+**Implementation complexity.** 4/5.
+
+The code isn't long, but must be atomic (Lua script), refill math must be precise (off-by-one errors are very hard to debug), TTL must be set correctly so idle buckets get cleaned up. Distributed buckets are even harder (see section 5).
+
+### 2.5. Leaky Bucket (queue-based)
+
+**How it works.** Incoming requests **queue up FIFO** in a bucket. A consumer drains requests at a fixed rate of `r`/second and processes them. Queue full → reject. Unlike token bucket: leaky bucket doesn't let bursts through — output is always smooth at exactly rate `r`.
+
+![Leaky Bucket](/rate-limiting-leaky-bucket.svg)
+
+```ts
+async function leakyBucketEnqueue(userId: string, maxQueue: number) {
+  const key = `ratelimit:leakybucket:${userId}`
+
+  const len = await redis.llen(key)
+
+  if (len >= maxQueue) {
+    return { allowed: false }
+  }
+
+  await redis.rpush(key, JSON.stringify({ ts: Date.now() }))
+
+  return { allowed: true, queued: len + 1 }
+}
+
+async function leakyBucketWorker(userId: string, intervalMs: number) {
+  const key = `ratelimit:leakybucket:${userId}`
+
+  setInterval(async () => {
+    const item = await redis.lpop(key)
+    if (item) await processRequest(JSON.parse(item))
+  }, intervalMs)
+}
+```
+
+**Advantages.** Output rate is **perfectly smooth** — the backend never sees spikes. Ideal when calling a third-party API with a hard rate limit (e.g., Stripe allows 100 req/s, and you don't want to get 429'd).
+
+**Disadvantages.** Requests are **delayed** — they wait in a queue instead of being rejected immediately. Latency depends on queue depth. If the queue only rejects when full, requests in the middle may wait a very long time.
+
+**Variants.** You can dynamically increase `r` when the queue is short and decrease when it's long (back-pressure). Some systems turn it into a priority queue: VIP requests are dequeued first.
+
+**When to use.** **Smooth outbound:** calling third-party APIs with hard rate limits, writing to fragile downstream systems (legacy DB, mainframe). **Job worker pool:** Sidekiq, BullMQ are essentially leaky buckets. Not suitable for user-facing APIs due to latency.
+
+**Implementation complexity.** 4/5.
+
+Requires a real queue (Redis list, Kafka, SQS), a separate worker process, queue depth monitoring. If the queue gets backed up, alert. Quite a few moving parts.
+
+---
+
+## 3. Summary table
+
+| Algorithm              | Burst-friendly |     Accuracy       |   Memory   | Implement | Typical use case              |
+| ---------------------- | :------------: | :----------------: | :--------: | :-------: | ----------------------------- |
+| Fixed Window           |       No       | Low (window edge)  |    O(1)    |    2/5    | Daily/monthly quota           |
+| Sliding Window Log     |       No       |     Absolute       |    O(N)    |    3/5    | Sensitive endpoint, small limit |
+| Sliding Window Counter |       No       |        ~99%        |    O(1)    |    3/5    | Default for public APIs       |
+| Token Bucket           |      Yes       |        Good        |    O(1)    |    4/5    | API with burst, weighted cost |
+| Leaky Bucket           |       No       |        Good        | O(N) queue |    4/5    | Smooth outbound, job worker   |
+
+Read the table this way: **go from left to right**. First ask "does my client burst?" → if yes and you want to allow it, choose token bucket. If not, choose based on the accuracy needed and memory budget.
+
+---
+
+## 4. Bringing it to the HTTP layer: the contract with clients
+
+The algorithm inside is the server's business, but the client needs to know **how they're being limited and what to do**. This part is algorithm-independent — it's the HTTP contract.
+
+**Status code.** When rejecting, use `429 Too Many Requests` (RFC 6585). Don't use `503` — `503` means "I'm down", `429` means "you're too fast".
+
+**Headers.** The standard header set per IETF draft `draft-ietf-httpapi-ratelimit-headers`:
+
+- `RateLimit-Limit: 100` — total quota.
+- `RateLimit-Remaining: 23` — remaining in the current window.
+- `RateLimit-Reset: 47` — seconds until reset.
+
+Plus `Retry-After: <seconds>` (RFC 9110) — set on the 429 response to tell the client how long to wait before retrying. Well-behaved client SDKs will read this header and back off instead of spamming.
+
+**Sample Express middleware:**
+
+```ts
+import type { Request, Response, NextFunction } from 'express'
+
+interface Limiter {
+  check(key: string): Promise<{ allowed: boolean; remaining: number; resetSec: number; limit: number }>
+}
+
+export function rateLimitMiddleware(limiter: Limiter, keyFn: (req: Request) => string) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const result = await limiter.check(keyFn(req))
+    res.setHeader('RateLimit-Limit', result.limit)
+    res.setHeader('RateLimit-Remaining', result.remaining)
+    res.setHeader('RateLimit-Reset', result.resetSec)
+
+    if (!result.allowed) {
+      res.setHeader('Retry-After', result.resetSec)
+      return res.status(429).json({ error: 'rate_limit_exceeded' })
+    }
+    next()
+  }
+}
+```
+
+This middleware **doesn't** care what algorithm is inside — it just calls `limiter.check()`. Switching from token bucket to sliding window only requires swapping the `Limiter` implementation. This is the right way to separate abstractions.
+
+> A small tip: for production, replace `Math.random()` in the sliding window log with an atomic counter to avoid member collisions in the sorted set when 2 requests arrive in the same millisecond. Don't memorize — learn the pattern.
+
+---
+
+## 5. Practical advice
+
+1. **Place rate limits at multiple layers.** Edge blocks crude DDoS. Gateway blocks by API key (tied to service tier). Application blocks business rules. Each layer addresses a different type of attack and can't replace each other.
+2. **Return proper responses.** `429` + `RateLimit-*` headers + `Retry-After`. Document clearly in your API spec. No documentation = clients won't retry properly = you'll still get flooded.
+3. **Fail open or fail closed when Redis goes down?** Trade-off:
+   - **Fail open** (let through) — preserves availability, but abuse can slip through. Default for user-facing APIs.
+   - **Fail closed** (reject all) — safe, but you might DDoS yourself. Default for admin / billing endpoints.
+
+   Both must be accompanied by an **alert** immediately. There's no "absolutely right" choice, only the choice that matches the risk profile of each endpoint.
+
+4. **Don't ignore unequal "request cost".** The `/search` endpoint is 50x more expensive than `/health`. Token bucket with weights solves this. Fixed window doesn't — it counts requests, not cost.
+5. **Measure metrics.** 429 rate by endpoint, by client; distribution of `Retry-After`; distribution of remaining tokens in buckets. **Sudden 429 spike** = a newly deployed client bug or abuse. **Conversely — 0% 429 for 6 months** = limits are too loose, not protecting anything.
+6. **Multi-region is harder than you think.** Local limits per region are simple but clients can receive **2x quota** if hitting both regions. Global limits require synchronized state → a central Redis cluster (high latency, single point of failure) or gossip protocol (complex). Many systems accept local limits + soft global cap for simplicity.
+7. **Which pattern can you maintain?** Fixed window and sliding window counter are the two easiest to maintain. Token bucket needs a Lua script — make sure someone on the team can read Lua before adopting. Leaky bucket has an implicit queue — make sure someone monitors queue depth.
+
+---
+
+## Conclusion
+
+Rate limiting isn't _one_ algorithm but a **toolbox**. Choose wrong and you'll either waste money (sliding log for a 100k/min limit), wrongly reject good clients (fixed window when traffic bursts), or worse, think you're protected when the algorithm doesn't match the traffic pattern.
+
+Rule of thumb: start with **Sliding Window Counter** as the default for public APIs. Switch to **Token Bucket** when burst traffic is normal and you want to allow it. Use **Leaky Bucket** when you need to smooth outbound traffic to a strict downstream. Save **Fixed Window** for long quotas (daily, monthly) and **Sliding Log** for small-but-sensitive endpoints.
+
+Most importantly: define a clear HTTP contract (`429 + RateLimit-*`) from day one. Changing the algorithm inside is easy; changing the contract with thousands of deployed client SDKs is not.

@@ -1,0 +1,226 @@
+---
+title: 'Deep Dive: Table Bloat in PostgreSQL and Storage Optimization Strategies'
+date: '2026-01-25'
+tags: ['Database']
+enableComment: true
+---
+
+# Deep Dive: Table Bloat in PostgreSQL and Storage Optimization Strategies
+
+Recently I did a deep dive into how PostgreSQL manages storage and came across an extremely interesting topic: **Table Bloat**. For those working with large datasets, "scaling up" disk space is only a surface-level solution. To truly optimize infrastructure costs (especially on the Cloud with provisioned IOPS/storage models) and improve I/O performance, we must thoroughly understand how Postgres writes and deletes data at the physical level.
+
+Below is a compilation of my notes based on the original article from Tiger Data about storage mechanisms and how to handle Bloat.
+
+## 1. Why Should You Care About Storage Optimization?
+
+Beyond the obvious cost issue, the core problem of data bloating lies in **Performance**.
+When a database contains too much "garbage" data (bloat), table scans (sequential scans) and index scans consume more I/O than necessary. Queries slow down not because there's more data, but because the database has to read through too many dead space regions.
+
+## 2. Anatomy of Storage in PostgreSQL (Essential Concepts)
+
+To understand why a database slows down when bloated, we need to move past the logical row-based mindset (Excel style) and look at how PostgreSQL organizes data physically.
+
+![Database-page-tuple](/database-page.webp)
+
+Think of your Database as a giant notebook.
+
+- Tuple (Data Row) - The "Content": A tuple is a specific row of data. For example: `{ID: 1, Name: "An"}`. It's like a line of text you write in the notebook.
+- Page (Data Page) - The "Container": Hard drives don't read individual lines of text — they read blocks. PostgreSQL defines each block as a Page (default 8KB). It's like a page in the notebook. You must write your lines of text (Tuples) onto these pages (Pages).
+
+### I/O Mechanism: "Lift the Entire Container"
+This is the crucial point. When you run `SELECT * FROM Users WHERE ID = 5`, the database doesn't jump in and pluck out that exact row.
+
+It determines that `ID=5` is on Page 100.
+
+It loads the entire Page 100 (8KB) from disk into RAM.
+
+Then the CPU filters within that Page to extract the Tuple you need.
+
+The rule: Databases operate on Pages. To get 1 item (Tuple), you have to lift the entire container (Page).
+
+### MVCC Mechanism and the Formation of "Dead Tuples"
+
+![Database-dead-tuple](/database-dead-tuple.webp)
+
+This is the most interesting part. When we execute SQL commands, Postgres behaves differently from what you might intuitively expect:
+
+* **INSERT:** The new Tuple is written to a Page that has free space.
+* **DELETE:** Postgres **does not immediately delete** the data from disk. It only marks the tuple as "dead" (**Dead Tuple** - unavailable).
+* **UPDATE:** Is actually a combination of `DELETE` (old row) + `INSERT` (new row). The old row becomes a Dead Tuple, and the new row is written to a different location.
+
+**Why is it designed this way?**
+This is the mechanism of the **MVCC (Multi-Version Concurrency Control)** system. Keeping the "corpses" of old data allows Postgres to manage transactions, support rollbacks, and ensure consistency when multiple connections read/write simultaneously (read consistency) without requiring overly strict locks.
+
+**Consequence:** Dead Tuples accumulate over time.
+
+### What Is Table Bloat?
+
+**Table Bloat** is the phenomenon that occurs when a table contains too many Dead Tuples (garbage data) or empty Pages that haven't been reclaimed. Although the data has been logically deleted, the physical space remains occupied.
+
+**Cleanup mechanisms:**
+
+* **VACUUM:** Scans and marks the space of Dead Tuples as "reusable" for new data. However, it does **not** return the space to the operating system (OS). The physical file size of the table does not shrink.
+* **Autovacuum:** A background daemon that automatically triggers VACUUM.
+
+![Database-fragmentation](/database-fragmentation.webp)
+
+Even after VACUUM has been performed, data pages that had dead tuples cleaned up now have free space ready for INSERT/UPDATE operations. This improvement is immediately visible as the database stops growing in size.
+
+But query performance still hasn't improved much because data fragmentation persists — entire pages are nearly empty with only a few live tuples, and the database still needs 20 I/O operations to retrieve a few rows when they could be much more compact by reorganizing memory.
+
+* **VACUUM FULL:** Rewrites the entire table to a new file, completely eliminating bloat and returning space to the OS. **Downside:** It requires an Exclusive Lock on the table, causing application downtime.
+
+---
+
+## 3. Impact of Table Bloat on Database Performance
+
+Beyond wasting disk space, Table Bloat causes serious impacts on database performance, especially **Cache Efficiency** — a critical factor that determines query speed.
+
+### 3.1. Cache Efficiency and Its Importance
+
+**Cache Efficiency** is the database's ability to keep frequently accessed data in RAM to minimize disk I/O. When data is in cache, read/write operations are significantly faster because memory access is much faster than disk access.
+
+### 3.2. Impact of Bloat on Cache
+
+#### Increased Memory Usage (Wasted Memory)
+
+When tables and indexes are bloated, they occupy more space than necessary. This leads to:
+
+- **Memory cache filled with useless data:** Dead Tuples and empty Pages are still loaded into RAM, taking space away from useful data.
+- **Reduced effective cache capacity:** Same amount of RAM, but less actually useful data stored. For example: instead of caching 1000 live tuples, you can only cache 500 live tuples + 500 dead tuples.
+
+#### Increased Cache Miss Rate
+
+Cache misses occur when needed data isn't in cache, forcing the database to read from disk:
+
+- **Cache "polluted" by bloat:** When the cache contains too many dead tuples and fragmented pages, the chance of needed data being evicted increases.
+- **Increased Disk I/O:** Each cache miss = one disk read, significantly slowing queries. With read-heavy workloads, this can reduce throughput by 10-50x.
+
+#### Reduced Effective Cache Size
+
+Effective cache size is the amount of actually useful data in cache:
+
+- **Same RAM, less useful data:** Bloat causes each page (8KB) to contain fewer live tuples, requiring more pages to be loaded to retrieve the same amount of data.
+- **Increased eviction frequency:** Useful data gets evicted from cache more often to make room for bloated data, creating a negative cycle.
+
+### 3.3. Impact on Query Performance
+
+#### Slower Query Execution
+
+- **Queries must read from disk instead of cache:** Queries that previously could be served entirely from cache now need to read from disk due to cache misses.
+- **Complex queries hit harder:** Complex queries with many JOINs or aggregations heavily depend on efficient data access. When many bloated pages must be read, execution time can increase 5-10x.
+
+#### Increased I/O Operations
+
+- **Disk I/O is the main bottleneck:** Each cache miss = one disk read. With high bloat, the number of I/O operations increases significantly, slowing down the entire system.
+- **Sequential scans become more expensive:** When scanning a table, the database must read through many empty pages or pages containing dead tuples, wasting I/O bandwidth.
+
+### 3.4. Impact on CPU Usage
+
+Processing bloated tables and indexes requires more CPU resources:
+
+- **Processing more pages:** The database engine must scan and process more pages to find live tuples, consuming additional CPU cycles.
+- **CPU saturation:** In high-load environments, the CPU can become saturated from processing too much bloated data, reducing resources for other operations.
+- **Slower index traversal:** Bloated indexes require more CPU to traverse and filter, especially with large B-tree indexes.
+
+### 3.5. Impact on Maintenance Operations
+
+Maintenance operations are seriously affected:
+
+- **Slower VACUUM:** VACUUM must scan and process more dead tuples, consuming more time and resources. In some cases, VACUUM can run for hours instead of minutes.
+- **Expensive REINDEX:** Rebuilding indexes on bloated tables takes longer and can cause lock contention.
+- **Extended maintenance windows:** Required maintenance time increases, affecting availability and performance during these periods.
+- **Autovacuum can't keep up:** When bloat accumulates too quickly, autovacuum may not be fast enough to clean up, leading to increasingly severe bloat.
+
+### 3.6. Cascade Effect
+
+Bloat doesn't just affect a single table — it can cause a cascade effect:
+
+- **Shared buffers get occupied:** When many tables are bloated, shared_buffers (the shared memory pool) gets filled with useless data, affecting the entire database.
+- **WAL (Write-Ahead Log) size increases:** VACUUM and maintenance operations generate more WAL records, affecting replication and backup.
+- **Slower Backup/Restore:** During backup, the database must copy dead tuples as well, increasing backup time and size.
+
+---
+
+## 4. Strategies for Reducing Database Size (Technical Solutions)
+
+Based on the mechanisms above, here are the technical methods to address bloat:
+
+### Method 1: Monitoring Dead Tuples and Cache Efficiency (Observation)
+
+You can't optimize what you don't measure. The `pgstattuple` extension lets you "see through" the physical structure of a table.
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pgstattuple;
+
+SELECT (dead_tuple_len * 100.0 / table_len) as dead_tuple_ratio,
+       (free_space * 100.0 / table_len) as free_space_ratio
+FROM pgstattuple('table_name_to_check');
+
+SELECT 
+    schemaname,
+    relname,
+    heap_blks_read as disk_reads,
+    heap_blks_hit as cache_hits,
+    CASE 
+        WHEN (heap_blks_hit + heap_blks_read) > 0 
+        THEN round(100.0 * heap_blks_hit / (heap_blks_hit + heap_blks_read), 2)
+        ELSE 0 
+    END as cache_hit_ratio
+FROM pg_statio_user_tables
+ORDER BY cache_hit_ratio ASC;
+
+```
+
+This query helps pinpoint exactly which tables are wasting the most resources and which tables have low cache hit ratios (a sign that bloat is affecting cache).
+
+### Method 2: Tuning Autovacuum and Fillfactor (Fine-tuning)
+
+The default Autovacuum configuration is often too conservative for tables with high write throughput. The strategy is to adjust settings **on a per-table basis** so cleanup happens more frequently, preventing bloat from accumulating.
+
+```sql
+ALTER TABLE my_table SET (autovacuum_vacuum_scale_factor = 0, autovacuum_vacuum_threshold = 200);
+
+ALTER TABLE my_table SET (fillfactor = 90);
+CREATE INDEX idx_name ON my_table(column_name) WITH (fillfactor = 90);
+```
+
+Adjusting `fillfactor` helps reduce page splits in indexes and tables, thereby reducing bloat from the start. For tables with frequent UPDATEs, a fillfactor of 80-90 is reasonable.
+
+### Method 3: Reclaim Unused Pages (Zero-downtime Restructuring)
+
+When regular `VACUUM` isn't enough and `VACUUM FULL` causes downtime, engineers typically use **pg_repack**.
+This extension works by:
+
+1. Creating a new table.
+2. Copying data from the old table to the new one (eliminating bloat).
+3. Swapping the new table in place of the old one.
+All with minimal locking, safe for production environments.
+
+### Method 4: Index Hygiene
+
+Indexes also suffer from bloat and can occupy significant space. Use `pg_stat_user_indexes` to find "useless" indexes (rarely or never scanned) and remove them.
+
+```sql
+SELECT relname AS table_name, indexrelname AS index_name,
+       pg_size_pretty(pg_relation_size(indexrelid)) AS index_size, idx_scan
+FROM pg_stat_user_indexes
+WHERE idx_scan < 50
+ORDER BY pg_relation_size(indexrelid) DESC;
+
+```
+
+### Method 5: Column Alignment (Memory Layout)
+
+A very "low-level" but interesting detail: column order affects storage size due to the **Data Alignment Padding** mechanism of the CPU/OS.
+**Principle:** Arrange columns by data type size from largest to smallest (e.g., `int8` -> `int4` -> `bool`). This minimizes padding bytes inserted between fields for memory alignment, making each row significantly more compact.
+
+### Method 6: Data Retention Policy
+
+Finally, the simplest solution is to delete old data. For time-series data, using Partitioning (or Hypertables in TimescaleDB) allows `DROP PARTITION` — an instant data deletion at the filesystem level, much faster and cleaner than `DELETE` (because it doesn't generate Dead Tuples).
+
+## Summary
+
+Table Bloat is a technical characteristic that comes with the power of MVCC in PostgreSQL. Understanding the lifecycle of a Tuple (Insert -> Update/Delete -> Dead Tuple -> Vacuum -> Reuse) and **its impact on cache efficiency** helps us develop proactive maintenance strategies, rather than reactively upgrading hardware.
+
+The key takeaway: Bloat isn't just a storage cost problem — it's a **performance degradation** problem through reduced cache efficiency. A database with a low cache hit ratio will depend heavily on disk I/O, slowing down the entire system. Therefore, monitoring and addressing bloat in a timely manner is critical to maintaining optimal database performance.

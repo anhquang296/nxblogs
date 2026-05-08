@@ -1,0 +1,235 @@
+---
+title: 'Deploy Shopify App: "Shopify Doesn''t Host Your App" — The Journey to Getting Your App Live'
+date: '2026-04-08'
+tags: ['Shopify', 'Backend', 'Devops']
+enableComment: true
+---
+
+# Deploy Shopify App: "Shopify Doesn't Host Your App" — The Journey to Getting Your App Live
+
+You've just finished coding a Shopify App, `shopify app dev` runs smoothly on local, everything works. And then you ask yourself: *"How do I deploy this to Shopify?"*
+
+This is where many developers start getting confused. Because the truth is: **Shopify does not host your application**. Shopify is not a PaaS platform like Heroku or Vercel where you push code and it just runs. Shopify only manages your app at a **logical level** — scopes, permissions, app info, OAuth flow, billing, ... — while the "actually running" part is your responsibility.
+
+Think of Shopify as the **management office of a shopping mall**. They manage store signs, lease agreements, access cards, and security policies. But they **don't build the store for you**. You have to build the physical store yourself (deploy your app to the cloud), then go to the management office to register (create a logical app on Shopify) and point it to your store's address.
+
+So, "deploying a Shopify App" is actually **two separate tasks**:
+
+1. **Deploy the physical app** to your cloud provider.
+2. **Create the logical app** on Shopify and point it to that physical app.
+
+This article will guide you through each step, along with mistakes I encountered along the way.
+
+---
+
+## 0. Prerequisites
+
+Before you begin, make sure you have:
+
+- **Working app code on local** — tested with `shopify app dev`
+- **Shopify Partners account** — register at [partners.shopify.com](https://partners.shopify.com)
+- **Cloud provider ready** — AWS (App Runner, ECS, EC2), Railway, Fly.io, Render, or any platform you're familiar with
+- **Development Store** — to test the app after deployment
+- **Shopify CLI** — `@shopify/cli` installed
+- **`shopify.app.toml` file** — your app's config file (you can have multiple files for different environments, e.g., `shopify.app.staging.toml`, `shopify.app.production.toml`)
+
+---
+
+## 1. Deploy the Application to the Cloud
+
+This is the first and most important step: **get your application running on the cloud**.
+
+Shopify communicates with your app via HTTP/HTTPS. So your application needs to:
+
+- Have a **public URL** accessible from the internet
+- **Serve HTTPS** (mandatory)
+- **Pass a health check** — at minimum, the root endpoint should return `200 OK`
+
+You can deploy to any cloud provider. Some popular options:
+
+- **AWS App Runner / ECS** — suitable if you're already familiar with the AWS ecosystem
+- **Railway / Render** — simple, great for prototypes and side projects
+- **Fly.io** — good for apps that need low latency across multiple regions
+
+After deploying, verify by making a test call:
+
+```bash
+curl -I https://your-app.your-cloud.com/
+```
+
+> **Note:** If your root endpoint returns a redirect (301/302), Shopify may not recognize the app. Make sure at least one endpoint returns `200 OK` directly.
+
+Think of this step as **"finishing construction and turning the lights on"** — you don't need to know who the customers are yet, but the store needs to be open for business.
+
+---
+
+## 2. Create the Logical App on Shopify
+
+Now that the physical store is ready, you need to go to the "management office" to register.
+
+Navigate to:
+
+```
+https://dev.shopify.com/dashboard/<org-id>/apps
+```
+
+Here, click **"Create app"** and fill in the basic information for your app (app name, description, ...).
+
+At this point, Shopify knows your app exists — like having a **business license**. However, Shopify doesn't yet know where your store is located. The URL pointing will be done through the config file in step 5.
+
+### dev.shopify.com vs partners.shopify.com
+
+This is a confusing point for many people:
+
+- **dev.shopify.com** — the new dashboard where you create and manage apps, view API credentials
+- **partners.shopify.com** — the older dashboard, but still necessary for certain features like **App Distribution** and **managing restricted scopes**
+
+You'll need to use **both** during the deployment process.
+
+---
+
+## 3. Configure Restricted Scopes and App Distribution
+
+This step **isn't always necessary**, but if your app falls into one of the following cases, it's **mandatory**:
+
+- App uses **restricted scopes** like `write_orders`, `read_all_orders`, `write_customers`, ...
+- App has **extensions that use network access** (e.g., a Checkout UI Extension that calls external APIs)
+
+### What Are Restricted Scopes?
+
+Shopify categorizes API scopes into two groups:
+
+- **Standard scopes** — basic permissions like `read_products`, `write_products`, `read_orders`. You can use these immediately without approval.
+- **Restricted scopes** — permissions related to sensitive data or high-impact actions (creating orders, accessing all customer data, ...). Shopify requires you to **explain your reasons** and get **approved** before using them.
+
+### How to Enable
+
+1. Go to [partners.shopify.com](https://partners.shopify.com)
+2. Select your app → **Distribution**
+3. Enable distribution and submit a request for the restricted scopes
+
+> **Note:** The review process from Shopify can take some time. If you skip this step and your app needs restricted scopes, the `shopify app deploy` command in step 5 will **fail with a permission error** — and the error message may not be very clear.
+
+---
+
+## 4. Get API Credentials and Update the Cloud App
+
+Go back to **dev.shopify.com**, navigate to the **Settings** section of the app you just created, and you'll find:
+
+- **Client ID** (also known as API Key)
+- **Client Secret** (also known as API Secret Key)
+
+These are the "keys" that allow your app to authenticate and communicate with Shopify. Update these values in your cloud application's environment variables:
+
+```bash
+SHOPIFY_API_KEY=your_client_id_here
+SHOPIFY_API_SECRET=your_client_secret_here
+SCOPES=write_products,read_orders
+HOST=https://your-app.your-cloud.com
+```
+
+Then **redeploy** the application for the new variables to take effect.
+
+> **Security tip:** Don't store the API Secret as plain text in your cloud console's environment variables. Use a secrets manager instead. If you're on AWS, you can refer to the article [Guide to Managing Environment Variables with AWS Secrets Manager for App Runner](/posts/using-secrets-manager-from-app-runner).
+
+After redeploying, check the health check again to make sure the app is still working:
+
+```bash
+curl -I https://your-app.your-cloud.com/
+```
+
+---
+
+## 5. Sync Configuration with Shopify CLI
+
+This is the step that **ties everything together**. The `shopify app deploy` command reads your local config file and syncs it to Shopify — including the app URL, redirect URLs, scopes, and extension configurations.
+
+```bash
+shopify app deploy --config production
+```
+
+### What Does the shopify.app.toml File Contain?
+
+This is the central configuration file of a Shopify App, defining everything Shopify needs to know:
+
+```toml
+name = "My Awesome App"
+client_id = "your_client_id"
+application_url = "https://your-app.your-cloud.com"
+
+[auth]
+redirect_urls = [
+  "https://your-app.your-cloud.com/auth/callback"
+]
+
+[access_scopes]
+scopes = "write_products,read_orders"
+```
+
+After running `shopify app deploy`, Shopify will know exactly where your app is running, what permissions it needs, and where to redirect after OAuth.
+
+> **Important:** Step 3 (restricted scopes approval) must be completed **before** running this command. If not yet approved, the deploy will fail.
+
+---
+
+## 6. Install the App on a Dev Store for Testing
+
+Everything is ready. Now install the app on a Development Store to verify the entire flow:
+
+1. Go to the app in the Shopify dashboard → get the **install link**
+2. Open the link on the Dev Store → complete the **OAuth flow**
+3. The app will appear in the Dev Store's admin
+
+### Testing Checklist
+
+After installation, verify the following:
+
+- **OAuth flow** completes without errors — app is installed successfully
+- **App loads** correctly in Shopify Admin — no blank page or CORS errors
+- **API calls** work — try basic operations (read products, create draft order, ...)
+- **Webhooks** are received (if the app registered any) — check logs on the cloud
+- **App Extensions** render correctly (if applicable) — check on the storefront or checkout
+
+> If the OAuth flow has a redirect error, check whether the `redirect_urls` in the toml file exactly match the URL on the cloud (including the `https://` protocol and trailing path).
+
+---
+
+## Process Summary
+
+| Step | Action | Where |
+|------|--------|-------|
+| 0 | Prepare prerequisites | Local |
+| 1 | Deploy app to cloud, verify health check | Cloud Provider |
+| 2 | Create logical app | dev.shopify.com |
+| 3 | Enable restricted scopes (if needed) | partners.shopify.com |
+| 4 | Get API credentials, update env, redeploy | dev.shopify.com + Cloud |
+| 5 | `shopify app deploy --config <env>` | Terminal (Shopify CLI) |
+| 6 | Install app on Dev Store, test | Shopify Admin |
+
+Always remember the mental model: **Shopify manages identity, you manage infrastructure**. "Deploying a Shopify App" doesn't mean pushing code to Shopify — it means registering your app with Shopify and pointing to where it's actually running.
+
+---
+
+## Common Mistakes
+
+Here are some errors you may encounter during deployment:
+
+**Health check failure**
+- App returns a redirect (301/302) instead of 200 at the root URL
+- SSL certificate not configured correctly (Shopify requires HTTPS)
+- App hasn't finished starting when Shopify performs the health check (cold start takes too long)
+
+**Permission errors when running `shopify app deploy`**
+- Restricted scopes haven't been approved on partners.shopify.com
+- App distribution hasn't been enabled
+- Network access for extensions hasn't been turned on
+
+**OAuth redirect errors**
+- `redirect_urls` in the toml file don't match the actual URL on the cloud
+- Missing or wrong protocol (`http` vs `https`)
+- Wrong `client_id` in the config file — especially common when you have multiple environments
+
+**App shows a blank page after installation**
+- `SHOPIFY_API_KEY` or `SHOPIFY_API_SECRET` haven't been updated on the cloud
+- Frontend app's `HOST` isn't configured correctly — causing the iframe to fail to load
+- CORS policy blocking requests from the Shopify Admin domain

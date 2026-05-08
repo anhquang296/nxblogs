@@ -1,4 +1,3 @@
-import * as React from 'react'
 import { getPosts, PostItem } from '@/lib/get-posts'
 import { Link } from 'next-view-transitions'
 import { IconArrowNarrowRight, IconTags } from '@tabler/icons-react'
@@ -10,10 +9,12 @@ type Props = {
   excludeByTitle?: string
   first?: number
   showViewAllButton?: boolean
+  lang?: string
 }
 
-export async function Posts({ posts, tags, excludeByTitle, first, showViewAllButton }: Props) {
-  const displayPosts = posts ?? (await getPosts({ tags, excludeByTitle, first }))
+export async function Posts({ posts, tags, excludeByTitle, first, showViewAllButton, lang = 'en' }: Props) {
+  const displayPosts = posts ?? (await getPosts({ tags, excludeByTitle, first, lang }))
+
   return (
     <div className="space-y-6 not-prose">
       {displayPosts.map((post) => {
@@ -46,9 +47,9 @@ export async function Posts({ posts, tags, excludeByTitle, first, showViewAllBut
               </div>
             </div>
 
-            <div className="w-[100px] text-right">
+            <div className="w-25 text-right">
               <div className="text-sm text-muted-foreground pt-1">
-                <div>{formatDate(post.frontMatter.date)}</div>
+                <div>{formatDate(post.frontMatter.date, lang)}</div>
               </div>
             </div>
           </div>
@@ -57,7 +58,7 @@ export async function Posts({ posts, tags, excludeByTitle, first, showViewAllBut
 
       {showViewAllButton === true && (
         <Link href="/posts" className="flex gap-1 items-center hover:underline">
-          View all <IconArrowNarrowRight className="w-4" />
+          {lang === 'vi' ? 'Xem tất cả' : 'View all'} <IconArrowNarrowRight className="w-4" />
         </Link>
       )}
     </div>

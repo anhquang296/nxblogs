@@ -1,0 +1,259 @@
+---
+title: 'AWS EC2 Instance Purchasing Options: The Art of Negotiating Price'
+date: '2026-01-12'
+tags: ['Devops', 'AWS', 'SAA', 'SAP']
+enableComment: true
+---
+
+# AWS EC2 Instance Purchasing Options: The Art of Negotiating Price
+
+When getting started with EC2, many people only know about On-Demand Instances — the simplest approach of "spin up a machine and pay." But in reality, AWS offers up to **6 different purchasing options**, each with its own pros and cons suited to specific scenarios.
+
+Understanding these options not only helps you save significant costs (up to 90%) but is also essential knowledge for passing the **AWS Certified Solutions Architect Associate (SAA)** exam.
+
+Let's explore the "art of negotiating price" in the EC2 world!
+
+---
+
+## 1. On-Demand Instances
+
+This is the most basic usage model, like walking into a hotel and paying the listed room rate.
+
+### How It Works
+
+* **Billing:** Pay per second (Linux/Windows) or per hour (other OSes) for what you actually use.
+* **Billing details:**
+  * For Linux or Windows: Billing per second, after the first minute.
+  * For other OSes: Billing per hour.
+
+### Advantages
+
+* No long-term commitment, no upfront payment.
+* Maximum flexibility — start/stop anytime.
+* No risk of sudden interruption.
+
+### Disadvantages
+
+* Highest cost among all instance purchasing options.
+
+### Best Suited For
+
+* Short-term workloads that cannot be interrupted.
+* Newly deployed applications with unpredictable load patterns.
+* Development and testing environments.
+* Applications with unpredictable, variable traffic.
+
+---
+
+## 2. Reserved Instances (RI)
+
+Like signing a 1 or 3-year hotel room lease to get a big discount.
+
+### How It Works
+
+* **Commitment:** You commit to using a specific instance type for **1 year** or **3 years**.
+* **Discount:** Up to **72%** off On-Demand pricing.
+
+### Payment Options
+
+AWS offers 3 payment methods, and the more you pay upfront, the deeper the discount:
+
+1. **All Upfront:** Highest discount.
+2. **Partial Upfront:** Balance between discount and cash flow.
+3. **No Upfront:** Most flexible but lowest discount.
+
+### Types of Reserved Instances
+
+#### Standard RI
+
+* **Characteristics:** Highest discount (up to 72%).
+* **Limitation:** Less flexible — cannot change instance type, OS, or tenancy after purchase.
+* **Best for:** Applications with fixed requirements that won't change over time.
+
+#### Convertible RI
+
+* **Characteristics:** Allows changing instance type, OS, and tenancy throughout the commitment period.
+* **Discount:** Lower than Standard RI (around **66%**).
+* **Best for:** Applications that may need configuration changes in the future but still want cost savings.
+
+### Best Suited For
+
+* Applications running steadily and continuously (steady-state workloads).
+* Database servers.
+* Web servers with stable traffic.
+* Any application you're certain will run for at least 1-3 years.
+
+---
+
+## 3. Savings Plans
+
+A more modern model than RI, focusing on spending amount rather than specific server types.
+
+### How It Works
+
+* **Commitment:** You commit to spending a certain amount (e.g., $10/hour) for **1 year** or **3 years**.
+* **Scope:** Applies to any instance in the same Region, as long as it falls within the committed spend.
+
+### Key Advantages
+
+* **Extremely flexible:** You can:
+  * Change instance size (e.g., from m5.xlarge to m5.2xlarge).
+  * Change OS (e.g., from Linux to Windows).
+  * Change instance family (e.g., from General Purpose to Compute Optimized).
+  * Change Region (with some conditions).
+* **Discount:** Comparable to RI (around **72%**).
+* **Auto-applied:** AWS automatically applies the Savings Plan to eligible instances — no manual management needed.
+
+### Types of Savings Plans
+
+#### EC2 Instance Savings Plans
+
+* Applies to EC2 Instances.
+* Flexible across instance family, size, OS, tenancy, and Region.
+
+#### Compute Savings Plans
+
+* Applies more broadly: EC2, Lambda, Fargate.
+* Most flexible — can switch between services.
+
+### Best Suited For
+
+* Systems that need infrastructure flexibility but have stable long-term spend.
+* Organizations with multiple teams using EC2 with different requirements.
+* When you want to save costs but aren't sure about the specific instance configuration in the future.
+
+---
+
+## 4. Spot Instances
+
+This is about leveraging AWS's unused capacity at "clearance" prices — one of the most effective cost-saving methods.
+
+### How It Works
+
+* **Bidding:** Price is determined based on supply and demand of available resources in AWS.
+* **Dynamic pricing:** Price can change in real time, but you only pay the price at the time the instance is running.
+* **Discount:** Up to **90%** off On-Demand (the cheapest of all options).
+* **Max Price:** You set a maximum price you're willing to pay. If the Spot price exceeds your max price, the instance will be terminated.
+
+### Important Risks
+
+* **Spot Instance Interruption:** AWS can reclaim the instance at any time if:
+  * An On-Demand or Reserved Instance customer needs those resources.
+  * The Spot price exceeds your max price.
+* **Advance notice:** AWS will warn you **2 minutes** before reclaiming the instance (Spot Instance Interruption Notice).
+
+### Spot Fleet
+
+* **Definition:** A Spot Fleet is a set of Spot Instances, optionally combined with On-Demand Instances.
+* **Advantage:** Automatically distributes workload across multiple instance types and Availability Zones to optimize cost and reduce interruption risk.
+* **Allocation Strategies:** LowestPrice (cost optimization), Diversified (risk reduction), CapacityOptimized (capacity optimization).
+
+### Important Notes
+
+> **Spot Block is no longer supported by AWS:** The Spot Block strategy (which allowed users to lock a Spot Instance for 1-6 hours without interruption) is no longer supported. Keep this in mind when designing your architecture.
+
+> **Not suitable for Stateful Applications:** Spot Instances are not suitable for stateful applications like database primary nodes, as interruptions can cause data loss.
+
+### Best Suited For
+
+* Fault-tolerant workloads.
+* Batch processing jobs.
+* Big data analytics.
+* Testing and development environments.
+* Containerized workloads.
+* CI/CD pipelines.
+* Machine Learning training and inference.
+* Web crawling and data scraping.
+* Any workload that can recover from a checkpoint.
+
+---
+
+## 5. Dedicated Hosts & Dedicated Instances
+
+For special hardware and security requirements.
+
+### Dedicated Host
+
+* **Definition:** You rent an entire physical server from AWS.
+* **Control:**
+  * Control over instance placement.
+  * Deep control over the physical server.
+* **Most important feature:** Supports software licenses based on core or socket counts — **Bring Your Own License (BYOL)**.
+* **Cost:** Most expensive among all instance purchasing options.
+
+### Dedicated Instance
+
+* **Definition:** An instance running on hardware dedicated to you.
+* **Difference from Dedicated Host:**
+  * You don't have deep control over the physical server like with Dedicated Host.
+  * AWS manages placement for you.
+* **Guarantee:** Isolation from other customers on the same hardware.
+
+### Best Suited For
+
+* **Dedicated Host:**
+  * Applications requiring per-socket/per-core software licensing (e.g., SQL Server, Windows Server with Software Assurance).
+  * Strict compliance requirements.
+  * Need for full placement control.
+
+* **Dedicated Instance:**
+  * Isolation requirements from other customers.
+  * Compliance requirements without needing placement control.
+  * Applications that don't need BYOL but require dedicated hardware.
+
+---
+
+## 6. Capacity Reservations
+
+Not a discount model, but a reservation model.
+
+### How It Works
+
+* **Purpose:** You reserve a quantity of instances in a **specific Availability Zone (AZ)** to ensure capacity is available when you need it.
+* **Cost:** Charged at **On-Demand** rates whether you use the instances or not.
+* **No discount:** This is not a cost-saving tool — it's a capacity assurance tool.
+
+### Important Notes
+
+* **Combined usage:** Typically used in combination with **RI** or **Savings Plans** to get both reservation and discount benefits.
+* **Regional vs Zonal:**
+  * **Zonal Capacity Reservation:** Reserved for a specific AZ.
+  * **Regional Capacity Reservation:** More flexible, can be used in any AZ within the Region.
+
+### Best Suited For
+
+* Mission-critical applications that need guaranteed capacity at a specific time.
+* Compliance requirements demanding capacity guarantees.
+* Combined with RI/Savings Plans to optimize both cost and capacity.
+
+---
+
+## Quick Comparison Summary
+
+| Option | Discount | Term | Key Characteristic | Best Suited For |
+| --- | --- | --- | --- | --- |
+| **On-Demand** | 0% | None | Most flexible, pay as you go | New apps, unpredictable load |
+| **Reserved Instances** | Up to 72% | 1 or 3 years | Best for steady-state workloads | Databases, stable web servers |
+| **Savings Plans** | Up to 72% | 1 or 3 years | Flexible config, commit by dollar amount ($) | Systems needing flexibility with stable spend |
+| **Spot Instances** | Up to 90% | None | Cheapest, but can be interrupted anytime | Fault-tolerant, batch jobs, testing |
+| **Dedicated Host** | Low (can be more expensive) | Optional | Rent entire physical server, for special licensing | BYOL requirements, strict compliance |
+| **Dedicated Instance** | Low | Optional | Instance on dedicated hardware | Need isolation, no BYOL needed |
+| **Capacity Reservations** | 0% | Optional | Reservation only, ensures capacity when needed | Mission-critical, combined with RI/SP |
+
+---
+
+## Hybrid Strategy (Combined Approach)
+
+In practice, you don't need to pick just one type. AWS encourages using a **combined strategy** to optimize both cost and performance:
+
+### Typical Strategy Example
+
+1. **Base workload (60-70%):** Reserved Instances or Savings Plans for stable, predictable applications.
+2. **Variable workload (20-30%):** On-Demand Instances for traffic spikes and newly deployed applications.
+3. **Fault-tolerant workload (10-20%):** Spot Instances for batch jobs, data processing, and testing.
+
+### Benefits
+
+* Optimized overall costs.
+* Guaranteed availability for critical workloads.
+* Flexibility for unpredictable workloads.

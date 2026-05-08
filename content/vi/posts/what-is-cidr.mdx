@@ -1,0 +1,94 @@
+---
+title: 'Tìm hiểu CIDR: Hướng dẫn toàn diện'
+date: '2024-12-03'
+tags: ['Devops']
+enableComment: true
+---
+
+# Tìm hiểu CIDR: Hướng dẫn toàn diện
+
+![CIDR text banner](/cidr-text.png)
+
+## CIDR là gì?
+
+CIDR (Classless Inter-Domain Routing) là một phương pháp cải tiến để phân bổ địa chỉ IP và định tuyến dữ liệu trên internet. Nó thay thế hệ thống cũ để giúp việc truyền thông trên internet hiệu quả hơn.
+
+## Tại sao CIDR quan trọng?
+
+Mỗi thiết bị kết nối internet đều cần một địa chỉ duy nhất, gọi là địa chỉ IP. Các địa chỉ này cho phép các thiết bị giao tiếp với nhau. CIDR giúp quản lý các địa chỉ này tốt hơn so với các phương pháp cũ.
+
+## Tìm hiểu về địa chỉ IP
+
+### Địa chỉ IPv4
+
+Một địa chỉ IPv4 bao gồm 32 bit, thường được biểu diễn dưới dạng bốn số phân cách bởi dấu chấm. Mỗi số có giá trị từ 0 đến 255.
+
+Ví dụ: `192.23.12.3` là một địa chỉ IPv4
+
+## Cách cũ so với CIDR
+
+### Cách cũ (Classful IP Addressing)
+
+Các tổ chức mua địa chỉ IP theo ba lớp cố định:
+
+- Class A: 8 bit cho mạng, 24 bit cho host (ví dụ: `44.0.0.1`)
+- Class B: 16 bit cho mạng, 16 bit cho host (ví dụ: `128.16.0.2`)
+- Class C: 24 bit cho mạng, 8 bit cho host (ví dụ: `192.168.1.100`)
+
+#### Hạn chế của cách cũ
+
+- Class A hỗ trợ 16.777.214 host
+- Class B hỗ trợ 65.534 host
+- Class C hỗ trợ 254 host
+
+Hệ thống này thường dẫn đến lãng phí địa chỉ IP. Ví dụ, nếu bạn cần 300 địa chỉ IP, bạn phải mua một khối Class B, lãng phí hơn 65.000 địa chỉ.
+
+Nó cũng khiến việc thiết kế mạng thiếu linh hoạt. Bạn không thể dễ dàng kết hợp các địa chỉ từ các lớp khác nhau vào một mạng duy nhất.
+
+### Cách mới (CIDR)
+
+![What is CIDR](/what-is-cidr.webp)
+
+CIDR cho phép phân chia kích thước địa chỉ mạng linh hoạt hơn. Nó sử dụng ký hiệu như `192.168.1.0/24`, trong đó số sau dấu gạch chéo cho biết có bao nhiêu bit được dùng cho phần mạng của địa chỉ.
+
+## Cách CIDR hoạt động
+
+Ký hiệu CIDR cho biết có bao nhiêu bit của địa chỉ IP thuộc về mạng. Ví dụ:
+
+- Trong `192.168.1.0/24`, 24 bit đầu tiên dành cho mạng, còn lại 8 bit cho các thiết bị riêng lẻ.
+
+### Tính toán số địa chỉ khả dụng
+
+Để tính số lượng địa chỉ trong một khối CIDR, sử dụng công thức sau:
+
+Số địa chỉ = 2^(32 - độ dài prefix CIDR)
+
+Ví dụ: Với `192.168.1.0/24`
+- Số địa chỉ = 2^(32 - 24) = 2^8 = 256
+
+Điều này có nghĩa là bạn có 256 địa chỉ IP, từ `192.168.1.0` đến `192.168.1.255`.
+
+## Lợi ích của CIDR
+
+1. **Sử dụng địa chỉ IP hiệu quả**: Chỉ phân bổ đúng số lượng địa chỉ bạn cần.
+2. **Cải thiện định tuyến**: Giúp các router hoạt động hiệu quả hơn, tăng tốc độ internet.
+3. **Linh hoạt**: Tạo các mạng với kích thước tùy chỉnh phù hợp nhu cầu.
+4. **Khả năng mở rộng**: Dễ dàng mở rộng mạng khi tổ chức phát triển.
+
+## Ví dụ thực tế
+
+1. **Nhà riêng hoặc văn phòng nhỏ**: 
+   - Có thể dùng: `192.168.1.0/24`
+   - Cung cấp 256 địa chỉ (254 địa chỉ sử dụng được)
+
+2. **Công ty lớn**: 
+   - Có thể dùng: `10.0.0.0/16`
+   - Cung cấp 65.536 địa chỉ
+
+3. **Một phần của Data Center**: 
+   - Có thể dùng: `172.16.0.0/20`
+   - Cung cấp 4.096 địa chỉ
+
+## Nói đơn giản
+
+Hãy nghĩ về CIDR như một hệ thống đánh số căn hộ linh hoạt. Thay vì có các tòa nhà cố định với 100 căn hộ mỗi tòa, CIDR cho phép xây các tòa nhà với đúng số lượng căn hộ cần thiết — không lãng phí và dễ dàng mở rộng!

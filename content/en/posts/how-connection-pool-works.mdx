@@ -1,0 +1,413 @@
+---
+title: 'Connection Pool: Why Opening a Database Connection Per Request Is Wasteful'
+date: '2026-05-04'
+tags: ['Backend', 'Database', 'System Design']
+enableComment: true
+---
+
+# Connection Pool: Why Opening a Database Connection Per Request Is Wasteful
+
+> You're running production smoothly — then suddenly a flash sale hits, the dashboard turns red: `FATAL: too many connections for role "app_user"`. Database CPU spikes to 100%, response time jumps from 50ms to 5 seconds, then mass timeouts.
+
+First instinct: double `max_connections`. But in reality, the more you increase it, the worse it gets — the database now has to manage hundreds of connections, each consuming memory, fighting for CPU, and everything slows down together.
+
+The real problem isn't a weak database. The problem is that **each HTTP request opens a new connection to the database, uses it for just 1 query, then closes it** — and the cost of that "open + close" is far more expensive than you think.
+
+This article will dissect exactly what happens when you open and close a database connection, why it's expensive, and how a **connection pool** solves each problem — from a local pool with `pg` in Node.js to a global pool with AWS RDS Proxy.
+
+---
+
+## 1. What Happens Without a Connection Pool?
+
+Imagine every time a user sends an HTTP request to the server, the application will:
+
+1. Open a **TCP connection** to the database
+2. Perform a **TLS handshake** to encrypt the channel
+3. Send **authentication** credentials (username/password)
+4. Database creates a dedicated **backend process**, allocates memory (RAM), sets up session state
+5. Run the query (usually takes just a few milliseconds)
+6. Clean up the session, free memory
+7. Close the TCP connection
+
+All of steps 1-4 and 6-7 are **overhead** — they have nothing to do with the query itself, but must be performed **every time** there's a new request.
+
+```
+Request 1 -> [TCP] -> [TLS] -> [Auth] -> [Alloc] -> [Query 2ms] -> [Cleanup] -> [Close]
+Request 2 -> [TCP] -> [TLS] -> [Auth] -> [Alloc] -> [Query 2ms] -> [Cleanup] -> [Close]
+Request 3 -> [TCP] -> [TLS] -> [Auth] -> [Alloc] -> [Query 2ms] -> [Cleanup] -> [Close]
+...
+Request N -> [TCP] -> [TLS] -> [Auth] -> [Alloc] -> [Query 2ms] -> [Cleanup] -> [Close]
+```
+
+It's like calling your bank: each time you have to dial the number, wait for the connection, verify your identity through 3 security questions... just to ask **one** question. Hang up. Then call again, verify again, ask the next question. Repeat 1000 times.
+
+And here's the real problem: PostgreSQL by default only allows **100 concurrent connections** (`max_connections = 100`). The 101st request immediately gets a `FATAL: too many connections` error. When each request creates its own connection and holds it through the entire lengthy setup process, those 100 slots run out very quickly.
+
+> **Note**: The number 100 is just PostgreSQL's **default**. In practice, `max_connections` varies depending on the database's **hardware configuration**. AWS RDS, for example, sets `max_connections` automatically using the formula `LEAST({DBInstanceClassMemory/9531392}, 5000)` — meaning it scales proportionally with the instance's RAM:
+>
+> | Instance class | RAM | `max_connections` (RDS PostgreSQL default) |
+> |---------------|-----|------------------------------------------|
+> | `db.t3.micro` | 1 GB | ~85 |
+> | `db.t3.medium` | 4 GB | ~410 |
+> | `db.r5.large` | 16 GB | ~1700 |
+> | `db.r5.4xlarge` | 128 GB | ~5000 (capped) |
+>
+> But don't celebrate because a larger instance has more slots — as Section 3 will show, **more connections don't equal higher throughput**. The costs of context switching, memory, and lock contention all scale with connection count. The goal of a connection pool isn't to "use up all max_connections" but to **use the optimal number of connections for the workload**.
+
+Because `max_connections` scales with RAM, a **quick hotfix** when production hits `FATAL: too many connections` is to **vertical scale**: upgrade the instance from `db.t3.medium` (4GB, ~410 connections) to `db.r5.large` (16GB, ~1700 connections). A few clicks in the AWS Console, and after a reboot you have more slots.
+
+But right after scaling, you'll quickly see the **consequences**:
+
+- **AWS bill multiplies** — `db.r5.large` costs ~4x more than `db.t3.medium`, and you just "burned" money on RAM that the application only needs to hold idle connections, not to process data.
+- **CPU remains high** — because the real bottleneck is TLS/SCRAM handshake and context switching, not RAM. A bigger instance just delays the problem, it doesn't solve it.
+- **p99 latency is still poor** — queries have to wait for context switches, and more connections mean more kernel switching.
+- **The next spike fills up slots again** — because the application still creates a connection per request, just with a slightly higher ceiling.
+
+Vertical scaling is **buying time**, not a solution. The real solution is to stop creating/closing connections for every request — and that's exactly what a connection pool does.
+
+---
+
+## 2. The Hidden Cost of Each Connection: Before and After the Query
+
+Let's zoom into each overhead step to understand why they're so expensive.
+
+### 2.1. Connection Setup Cost
+
+**TCP 3-way handshake**
+
+Before sending any data, the client and database must establish a TCP connection through 3 steps:
+
+![TCP 3-Way Handshake](/connection-pool-tcp-handshake.svg)
+
+Cost: **1.5 RTT**. If the application runs in `ap-southeast-1` (Singapore) and the database is in `us-east-1` (Virginia) with ~200ms/RTT latency, you've already lost **300ms** just to establish the TCP connection. Even within the same region, cross-AZ latency of ~1-2ms/RTT adds up quickly when multiplied by thousands of requests.
+
+**TLS negotiation**
+
+Most production databases enable TLS (SSL) to encrypt data in transit. After the TCP connection is ready, the client and database must exchange certificates, agree on a cipher suite, and create session keys:
+
+- **TLS 1.3**: adds **1 RTT** (ClientHello + ServerHello in 1 round trip)
+- **TLS 1.2**: adds **2 RTT** (an extra round trip for key exchange)
+
+This isn't just time-consuming — it's also **CPU-intensive** — both sides must perform asymmetric cryptography to exchange keys.
+
+**Authentication**
+
+PostgreSQL defaults to **SCRAM-SHA-256** — a modern and secure authentication protocol. The process includes:
+
+1. Client sends username
+2. Server responds with **salt** and **iteration count** (default 4096)
+3. Client computes proof using PBKDF2 with 4096 iterations
+4. Server verifies the proof
+
+Cost: at least **1 additional RTT**, plus significant **CPU time** for PBKDF2 hashing. On a small database instance (e.g., `db.t3.medium`), when 500 connections authenticate simultaneously, CPU will spend most of its time on crypto instead of processing queries.
+
+**Memory allocation**
+
+PostgreSQL uses a **process-per-connection** model: each new connection causes PostgreSQL to fork an entirely new backend process. This process needs its own memory allocation:
+
+| Component | Size | Purpose |
+|-----------|------|---------|
+| `work_mem` | 4MB (default) | Memory for sort, hash operations |
+| `temp_buffers` | 8MB (default) | Memory for temporary tables |
+| Catalog cache | ~1-2MB | Cache for table metadata, indexes |
+| Plan cache | ~1-2MB | Cache for execution plans |
+| Stack + overhead | ~0.5-1MB | Process stack and kernel overhead |
+| **Total** | **~5-10MB** | **Per connection** |
+
+Sounds small, but multiply it: **200 connections = 1-2GB** just for connection overhead, not counting shared buffers or actual data.
+
+**Session state initialization**
+
+After successful authentication, PostgreSQL must also:
+
+- Load user configurations (`search_path`, `timezone`, `client_encoding`)
+- Initialize the transaction state machine
+- Create internal data structures for the session
+
+### 2.2. Teardown Cost
+
+When the request finishes and the application closes the connection, the database must:
+
+- **Rollback** any uncommitted transactions and release locks
+- **Free memory** — `work_mem`, temp buffers, plan cache, catalog cache — all must be returned to the OS
+- **Close the TCP connection** — the 4-way FIN/ACK procedure:
+
+![TCP 4-Way Connection Close](/connection-pool-tcp-close.svg)
+
+- The **ephemeral port** used by the connection isn't freed immediately — it enters a **TIME_WAIT state for 60 seconds** (on Linux) before the port becomes available again.
+
+### 2.3. Total Cost
+
+| Step | Time Cost | Resource Cost |
+|------|-----------|---------------|
+| TCP handshake | 1.5 RTT | Socket, file descriptor |
+| TLS 1.3 | 1 RTT | CPU for crypto |
+| Authentication | 1+ RTT | CPU for PBKDF2 |
+| Memory allocation | — | ~5-10MB RAM |
+| Session init | — | CPU time |
+| **Teardown** | 2 RTT | Port held for 60s (TIME_WAIT) |
+| **Total setup + teardown** | **5.5+ RTT** | **RAM + CPU + port** |
+
+> Your query runs in 2ms. But the setup + teardown surrounding it costs **150-200ms** (cross-AZ) or even seconds (cross-region). You're paying 99% overhead for 1% of actual work.
+
+---
+
+## 3. When Thousands of Connections Hit Simultaneously
+
+The costs in Section 2 are for **a single** connection. When traffic spikes and thousands of requests arrive simultaneously, these costs compound to create a domino effect:
+
+### 3.1. Port exhaustion
+
+Each TCP connection uses an **ephemeral port** (range 32768-60999 on Linux, approximately **28,000 ports** total). When a connection closes, the port isn't freed immediately — it sits in `TIME_WAIT` for **60 seconds**.
+
+Do the math: if the application creates **500 connections/second**, each port is held for 60s -> needs **30,000 ports** — exceeding the total number of ephemeral ports. Result: `EADDRNOTAVAIL` (Cannot assign requested address) error. The application is completely unable to open any more connections.
+
+### 3.2. Memory pressure
+
+- 100 connections x 10MB = **1GB** just for connection overhead
+- 500 connections x 10MB = **5GB** — very likely exceeding the available RAM of the database instance
+- When RAM runs out, the OS starts **swapping** to disk -> performance of the entire database collapses
+- Or worse, OOM Killer will kill the PostgreSQL process
+
+### 3.3. CPU burned on handshakes
+
+Under a traffic spike, database CPU isn't spent processing queries — it's busy with:
+
+- **TLS negotiation**: each connection needs asymmetric crypto (RSA/ECDSA)
+- **SCRAM-SHA-256**: each connection runs PBKDF2 with **4096 iterations**
+
+When 1000 connections are established simultaneously, CPU is almost 100% crypto, and actual queries have to wait in line.
+
+### 3.4. Context switching
+
+PostgreSQL uses a **process-per-connection** model: each connection is an independent OS process. A database instance typically has only a few CPU cores (4, 8, 16...), but with hundreds of connections, the kernel must constantly **switch the CPU back and forth between processes** so each process gets its turn.
+
+Each context switch requires the kernel to:
+
+- **Save** the state of the currently running process (registers, program counter, stack pointer)
+- **Flush TLB** (Translation Lookaside Buffer) — the cache mapping virtual addresses to physical addresses
+- **Load** the state of the new process
+- CPU cache gets **partially invalidated** -> the new process must re-read data from RAM (100x slower than cache)
+
+A context switch on Linux takes about **1-10 microseconds** by wall clock, but the true cost (cache misses after switching) can reach **tens of microseconds**. With 500 active connections, the kernel can switch tens of thousands of times per second — CPU spends most of its time context switching instead of executing queries.
+
+This is why **increasing `max_connections` doesn't scale linearly with throughput**: beyond a certain threshold (typically 2-4x the number of CPU cores), throughput **decreases** as context switching overhead exceeds the benefits of parallel processing.
+
+### 3.5. Connection limit
+
+PostgreSQL has a hard limit `max_connections` (default **100**). Increase it to 300, 500? Each connection consumes resources, so:
+
+- More connections -> more **context switching** (Section 3.4)
+- More connections -> more **lock contention** on shared structures (lock manager, buffer manager)
+- Beyond ~300 connections, PostgreSQL actually gets **slower** even with sufficient RAM
+
+### 3.6. File descriptor exhaustion
+
+Each connection occupies **1 file descriptor**. The default `ulimit -n` on many Linux distributions is **1024**. Add in file descriptors for data files, WAL, logs — 1024 runs out very quickly.
+
+### Summary
+
+| Issue | Threshold | Symptom |
+|-------|-----------|---------|
+| Port exhaustion | ~28K ports / TIME_WAIT 60s | `EADDRNOTAVAIL` |
+| Memory pressure | ~5-10MB per connection | OOM, swapping, crash |
+| CPU saturation | TLS + SCRAM per connection | High `%sys` CPU, slow queries |
+| Context switching | > 2-4x CPU cores | Throughput drops, latency rises |
+| Connection limit | `max_connections` (default 100) | `FATAL: too many connections` |
+| File descriptor limit | `ulimit -n` (default 1024) | `Too many open files` |
+
+All 5 issues above stem from the same root cause: **continuously creating and destroying connections for every request**.
+
+---
+
+## 4. How Connection Pool Solves the Problem
+
+The idea behind a connection pool is very simple: **create connections once, reuse them many times**.
+
+Instead of each request opening its own connection, authenticating, then closing — the application maintains a group (**pool**) of fully established connections (TCP + TLS + Auth all completed). When a request needs to query the database, it **borrows** a connection from the pool, and when done, **returns it** — no closing, no creating new ones.
+
+![Connection Pool: Initialization & Usage](/connection-pool-init-flow.svg)
+
+### Mapping Problems to Solutions
+
+| Problem (Section 3) | How Connection Pool Solves It |
+|---------------------|-------------------------------|
+| TCP+TLS+Auth per request | Setup cost paid **only once** when pool initializes |
+| Port exhaustion | Fixed number of connections, no continuous create/close -> no TIME_WAIT |
+| Memory pressure | Pool has `max` — hard limit on connections -> bounded memory |
+| CPU burn for handshake | No repeated handshakes -> CPU dedicated to queries |
+| `max_connections` hit | Pool `max` is much smaller than `max_connections` -> always enough slots |
+| Connection churn | Connections are **reused**, not destroyed/recreated |
+
+### Connection Lifecycle in a Pool
+
+1. **Creation** — Pool creates `min` connections at startup. TCP + TLS + Auth completes for all of them.
+2. **Checkout** — Request borrows a connection. If there's an idle connection -> take it immediately. If all idle connections are taken but `max` isn't reached -> create a new one. If `max` is reached -> queue and wait.
+3. **Release** — Request finishes, returns connection to pool. Pool resets session state (rollback if there's an incomplete transaction, clear temp settings).
+4. **Validation** — Pool checks if a connection is still alive before lending it out (runs `SELECT 1` or ping).
+5. **Cleanup** — Connection idle too long (`idleTimeout`) -> pool closes excess connections, keeping at least `min` connections.
+
+### Key Configuration Parameters
+
+| Parameter | Meaning | Example Value |
+|-----------|---------|---------------|
+| `min` | Connections kept ready when idle | 5 |
+| `max` | Maximum connections under high load | 20 |
+| `idleTimeout` | Connection idle too long -> close | 30 seconds |
+| `connectionTimeout` | Maximum wait to get a connection from pool | 2 seconds |
+| `validation` | How to check if connection is alive | `SELECT 1` before checkout |
+
+---
+
+## 5. Local Pool: `pg` Pool in Node.js
+
+When an application runs as a **single instance**, a local pool is the simplest and most effective solution. The `pg` (node-postgres) library provides a built-in `Pool` object with full functionality.
+
+### 5.1. Configuration
+
+```ts
+import { Pool } from 'pg'
+
+const pool = new Pool({
+  host: 'your-db-host.rds.amazonaws.com',
+  port: 5432,
+  database: 'myapp',
+  user: 'app_user',
+  password: process.env.DB_PASSWORD,
+  ssl: { rejectUnauthorized: true },
+
+  // Pool sizing
+  min: 5,                        // Keep 5 connections ready when idle
+  max: 20,                       // Maximum 20 connections under high load
+
+  // Timeouts
+  idleTimeoutMillis: 30000,      // Connection idle > 30s -> close, return to OS
+  connectionTimeoutMillis: 2000, // Wait max 2s to get connection from pool
+
+  // Allow process exit when pool is empty
+  allowExitOnIdle: true,
+})
+```
+
+Explanation of the values:
+
+- **`min: 5`** — when there's no traffic, the pool still keeps 5 connections ready. The first request doesn't have to wait for TCP+TLS+Auth.
+- **`max: 20`** — even with 1000 concurrent requests, only a maximum of 20 connections go to the database. The 21st request queues and waits for up to `connectionTimeoutMillis`.
+- **`idleTimeoutMillis: 30000`** — connections unused for over 30 seconds are closed, freeing resources for the database. The pool won't close below `min`.
+- **`connectionTimeoutMillis: 2000`** — if waiting more than 2 seconds without getting a connection, throw an error. Better than making the user wait forever.
+
+### 5.2. Usage in Code
+
+**Pattern 1: `pool.query()`** — Pool automatically checks out, runs the query, then releases. Suitable for single queries.
+
+```ts
+async function getUser(id: number) {
+  const { rows } = await pool.query(
+    'SELECT * FROM users WHERE id = $1',
+    [id]
+  )
+  return rows[0]
+}
+```
+
+**Pattern 2: Manual checkout** — When you need to run multiple queries in a transaction, you must hold the same connection.
+
+```ts
+async function transferMoney(from: number, to: number, amount: number) {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query(
+      'UPDATE accounts SET balance = balance - $1 WHERE id = $2',
+      [amount, from]
+    )
+    await client.query(
+      'UPDATE accounts SET balance = balance + $1 WHERE id = $2',
+      [amount, to]
+    )
+    await client.query('COMMIT')
+  } catch (e) {
+    await client.query('ROLLBACK')
+    throw e
+  } finally {
+    client.release()
+  }
+}
+```
+
+> **Important note**: Always call `client.release()` in a `finally` block. If you forget to release, the connection "leaks" — the pool thinks it's busy but nobody is actually using it. Leak enough connections, the pool runs dry, and the entire application blocks.
+
+A local pool works well when the application runs on **a single instance**. But what happens when you scale out to multiple instances?
+
+> 10 instances x `max=20` = **200 connections** to the database. Auto-scale to 50 instances? **1000 connections**. If PostgreSQL has `max_connections = 100`, you'll run out of slots before even reaching the 6th instance.
+
+---
+
+## 6. Global Pool: AWS RDS Proxy — When Local Pool Isn't Enough
+
+### 6.1. The Problem: N Instances x Local Pool
+
+Each application instance maintains its own local pool. These pools **don't know about each other** — each pool manages connections independently.
+
+![The N Instances x Local Pool Problem](/connection-pool-local-problem.svg)
+
+The problem becomes more severe with:
+
+- **Auto-scaling**: ECS/EKS scales from 5 to 50 instances when traffic increases -> connections jump from 100 to 1000
+- **Lambda**: each invocation runs in its own container, each container creates its own connection. 1000 concurrent Lambdas = 1000 connections
+- **Blue/Green deployment**: during deployment, both old and new fleets run simultaneously -> connections temporarily double
+
+Reduce the `max` pool size per instance? Sure, but that creates a bottleneck — each instance doesn't have enough connections for its own requests.
+
+### 6.2. RDS Proxy: Centralized Connection Pool
+
+**AWS RDS Proxy** sits between application instances and the database, acting as **a shared connection pool** for the entire fleet.
+
+![RDS Proxy: Centralized Connection Pool](/connection-pool-rds-proxy.svg)
+
+RDS Proxy works through **multiplexing**: it accepts hundreds of connections from applications, but only opens a small number of actual connections to the database. When an app connection needs to run a query, the Proxy assigns it to an available DB connection, runs the query, then returns the DB connection to the pool — similar to a local pool, but at the infrastructure level.
+
+Beyond multiplexing, RDS Proxy also provides:
+
+- **Faster failover**: when an Aurora primary fails, RDS Proxy detects and switches to the new replica **up to 66% faster** than when applications reconnect on their own. Applications don't need to handle reconnection logic.
+- **IAM Authentication**: instead of hardcoding passwords, applications use IAM roles to authenticate with the Proxy -> credentials are managed through AWS Secrets Manager with automatic rotation.
+- **Connection draining**: when scaling down, the Proxy waits for running queries to complete before closing connections — no mid-query interruptions.
+
+### 6.3. Key RDS Proxy Configuration
+
+| Setting | Meaning | Common Value |
+|---------|---------|--------------|
+| `MaxConnectionsPercent` | % of `max_connections` that Proxy can use | 50-80% |
+| `MaxIdleConnectionsPercent` | % of idle connections Proxy keeps | 10-50% |
+| `ConnectionBorrowTimeout` | Max time client waits to borrow a connection | 120s |
+| `InitQuery` | SQL to run when borrowing a connection (reset state) | `SET timezone='UTC'` |
+
+Example: PostgreSQL has `max_connections = 100`, you set `MaxConnectionsPercent = 70%` -> Proxy uses a maximum of **70 connections** to the database, leaving **30 connections** reserved for admin, monitoring, and migration tools.
+
+### 6.4. When Do You Need RDS Proxy?
+
+You don't always need RDS Proxy. If the application runs only 1-2 instances with well-managed local pools, adding RDS Proxy only increases cost and adds latency (one extra network hop).
+
+RDS Proxy is truly needed when:
+
+- **Multiple instances** with total connections exceeding `max_connections`
+- **Lambda/serverless** — no persistent process to hold a local pool
+- **Frequent auto-scaling** — each new instance adds more connections
+- **Aurora failover** — want transparent failover without reconnection logic in the application
+- **Unpredictable connection spikes** — uneven traffic patterns make local pool tuning difficult
+
+---
+
+## 7. Summary
+
+From the beginning of this article, we've traced the journey:
+
+**Cost of 1 connection** (TCP + TLS + Auth + Memory = 5.5+ RTT + ~10MB) -> **Compounding under spikes** (port exhaustion, OOM, CPU burn) -> **Local pool** (reuse connections, bounded resources, queue instead of reject) -> **Global pool** (multiplex N instances through RDS Proxy).
+
+A few practical principles:
+
+1. **Always use a connection pool** — even for small applications. The cost of setting up a pool is near zero, but the benefits are clear from the very first request.
+2. **Set pool `max` based on the database, not the application** — if `max_connections = 100` and you have 5 instances, each instance should set `max = 15-18`, not `max = 50`.
+3. **Always release connections in `finally`** — connection leaks are the most dangerous pool bug because they're silent and only manifest when the pool runs dry.
+4. **Monitor pool metrics** — track pool size, wait time, checkout count. If wait time increases steadily -> need to increase `max` or optimize queries.
+5. **Add RDS Proxy when local pool isn't enough** — especially when using Lambda or auto-scaling, don't try to solve it by reducing each instance's pool `max`.

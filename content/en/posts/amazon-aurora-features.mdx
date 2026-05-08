@@ -1,0 +1,304 @@
+---
+title: 'Amazon Aurora: All the Features You Need to Know'
+date: '2026-05-04'
+tags: ['Devops', 'AWS', 'Database', 'SAA']
+enableComment: true
+---
+
+# Amazon Aurora: All the Features You Need to Know
+
+> You're using MySQL or PostgreSQL on RDS, everything runs fine — but you want it **faster**, **more available**, **easier to scale**? Aurora is AWS's answer.
+
+**Amazon Aurora** is a database engine developed by AWS, **fully compatible** with MySQL and PostgreSQL. This means you can migrate your existing application code to Aurora with virtually no changes — while AWS guarantees performance **5x faster than MySQL** and **3x faster than PostgreSQL** compared to running them on RDS with the same configuration.
+
+The biggest difference: Aurora is **cloud-native**. Storage and compute are completely separated — storage automatically grows from **10GB up to 128TB** without any intervention needed. You don't have to worry about provisioning disks or resizing volumes at midnight.
+
+This article covers **all the key features** that Aurora provides — helping you understand what Aurora "can do", without diving deep into internal mechanisms.
+
+---
+
+## 1. High Availability & Storage
+
+Aurora doesn't store data in one place. When you create an Aurora instance, it automatically creates **6 copies** and distributes them across **3 Availability Zones**:
+
+- Only **4/6 copies** need to successfully write → write is considered successful
+- Only **3/6 copies** need to be readable → read operates normally
+
+This is a **quorum** model — meaning even if an entire AZ is lost (2 copies), Aurora continues to function normally for both reads and writes.
+
+Note that data synchronization between data nodes in the storage layer is synchronous, meaning sync latency is included in user request time. However, the latency is negligible due to factors like data nodes being in the same region, using backbone networks, and optimized sync techniques.
+
+Additionally, Aurora's storage has **self-healing** capabilities: if a data block is corrupted, Aurora automatically detects and repairs it by copying from remaining replicas — entirely in the background, with zero downtime.
+
+You can think of Aurora as Multi-AZ + RDS combined.
+
+### Quick comparison with RDS Multi-AZ
+
+| Criteria       | RDS Multi-AZ                           | Aurora                           |
+| -------------- | -------------------------------------- | -------------------------------- |
+| Replication method | Instance-level (syncs entire instance) | Storage-level (6 copies automatic) |
+| Failover time  | 60-120 seconds                         | ~30 seconds                      |
+| Storage repair | Requires AWS intervention or self-restore | Self-healing automatic          |
+| Number of AZs  | 2 (primary + standby)                  | 3 AZs, 6 copies                 |
+
+---
+
+## 2. Aurora Replicas & Failover
+
+Aurora supports up to **15 Read Replicas** in the same region (compared to RDS's maximum of 5). The special point: all replicas **share the same storage volume** with the primary — so **replication lag is near zero** (typically under 10ms).
+
+### Automatic failover
+
+Each replica is assigned a **priority tier** from 0 to 15 (0 = highest priority). When the primary fails:
+
+1. Aurora automatically selects the replica with the **highest priority** (lowest tier number)
+2. If same tier → selects the replica with the **largest size**
+3. Promotes that replica to the new primary
+4. The entire process takes approximately **30 seconds**
+
+> If no replicas exist, Aurora will create a new instance — but this will be much slower. Therefore, **always keep at least 1 replica** for production.
+
+### Endpoints
+
+Aurora provides 2 default endpoint types:
+
+- **Writer Endpoint**: always points to the current primary instance. Even if the primary changes after failover, the endpoint DNS remains the same.
+- **Reader Endpoint**: automatically load-balances across all read replicas. Applications only need to connect to a single DNS.
+
+![Aurora Cluster Endpoints](/aurora-cluster-endpoints.svg)
+
+---
+
+## 3. Aurora Replicas Auto Scaling
+
+When traffic spikes, manually adding replicas is slow and easy to miss the timing. Aurora solves this with **Replicas Auto Scaling** — automatically adding/removing read replicas based on metrics:
+
+- **Average CPU Utilization** of read replicas
+- **Average Connections** to read replicas
+
+You only need to define a scaling policy (e.g., target CPU 60%, min 1 replica, max 10 replicas), and Aurora will:
+
+1. Automatically add replicas when load exceeds the threshold
+2. Automatically register new replicas with the **Reader Endpoint**
+3. Automatically remove replicas when load decreases
+
+![Aurora Replicas Auto Scaling](/aurora-auto-scale.png)
+
+Looking at the diagram: the client sends write traffic through the **Writer Endpoint** to the primary instance. Read traffic goes through the **Reader Endpoint**, distributed to replicas. When CPU goes high, Aurora automatically expands with more replicas (the "Endpoint Extended" section) — all still using the shared **Shared Storage Volume**.
+
+---
+
+## 4. Custom Endpoints
+
+In practice, not all read queries are the same. A `SELECT * FROM users WHERE id = 1` is vastly different from an analytics query running aggregates on millions of rows. If you funnel both types through the same Reader Endpoint, heavy queries will impact light queries.
+
+**Custom Endpoints** let you group a **subset** of replicas into a separate endpoint, dedicated to a specific workload.
+
+![Aurora Custom Endpoints](/aurora-custom-endpoint.png)
+
+The diagram shows: the Writer Endpoint points to the primary, the Reader Endpoint points to `db.r3.large` instances for general reads, and the **Custom Endpoint** points to `db.r5.2xlarge` instances — dedicated to heavy queries like dashboards and reports.
+
+### Practical example
+
+| Endpoint                    | Instance type | Workload                              |
+| --------------------------- | ------------- | ------------------------------------- |
+| Writer Endpoint             | db.r5.xlarge  | Write traffic                         |
+| Reader Endpoint             | db.r3.large   | Simple reads (CRUD, lookup)           |
+| Custom Endpoint (analytics) | db.r5.2xlarge | Dashboard, reports, heavy aggregation |
+
+> When using Custom Endpoints, you should route traffic through custom endpoints instead of the default Reader Endpoint — because the Reader Endpoint will load-balance to **all** replicas, including small instances that aren't suitable for heavy queries.
+
+---
+
+## 5. Aurora Serverless
+
+With standard Aurora (Provisioned), you have to choose an instance size upfront. Choose too large and you waste money, choose too small and performance suffers during peaks. **Aurora Serverless** solves this by **automatically scaling compute** for you.
+
+How it works:
+
+- Compute is measured in **ACU** (Aurora Capacity Units), each ACU ≈ 2GB RAM
+- You only need to set **min ACU** and **max ACU**, Aurora adjusts automatically
+- **Pay-per-second** — you only pay for compute actually used
+- Can **scale to zero** when there are no connections (v1)
+
+### When to use Serverless?
+
+- **Dev/test environments** — don't need to run 24/7
+- **Unpredictable workloads** — e.g., internal tools used intermittently
+- **New applications** — don't yet know what the traffic pattern will look like
+- **Scheduled workloads** — only run a few hours per day
+
+| Criteria          | Aurora Provisioned             | Aurora Serverless            |
+| ----------------- | ------------------------------ | ---------------------------- |
+| Capacity planning | You choose instance size       | Automatic                    |
+| Billing           | Per-hour (instance running)    | Per-second (actual compute)  |
+| Scale to zero     | No                             | Yes (v1)                     |
+| Best for          | Stable, predictable workloads  | Variable workloads, dev/test |
+
+---
+
+## 6. Backup & Restore
+
+Aurora provides multiple ways to protect your data, and some features are **exclusive** compared to standard RDS.
+
+### Automated Backup
+
+- Aurora **continuously backs up automatically** to S3 — with no impact on performance
+- Retention period: **1-35 days**
+- **Point-in-Time Recovery (PITR)**: restore the database to **any second** within the retention period. Aurora creates a new cluster from the backup.
+- Notably, this feature cannot be disabled on Aurora.
+
+### Manual Snapshots
+
+- Manual snapshots **don't expire** — they exist until you delete them
+- Can be **shared cross-account** or **copied cross-region** for DR
+
+### Backtrack (Aurora MySQL only)
+
+This is an **Aurora-exclusive** feature: "rewind" the database to a point in the past **without creating a new cluster**. Very useful when:
+
+- Someone runs `DELETE FROM users` without a `WHERE` clause
+- A deployment corrupts data
+- You need a fast rollback without waiting for a restore
+
+> Backtrack operates on **the current cluster itself** — much faster than PITR (which creates a new cluster from backup). However, it only supports Aurora MySQL.
+
+### Clone
+
+Aurora lets you create a **clone** from an existing cluster using **copy-on-write (CoW)**:
+
+- Clones are created **almost instantly** — no full data copy
+- Only uses additional storage when data is modified on the clone
+- Use case: create a staging environment from production data for testing
+
+**Copy-on-write** is a technique for sharing data between two clusters — only actually copying data **when changes are made**. This is the key point that makes cloning both fast and cheap. A clear use case is when you want to create a staging cluster inherited from production.
+
+**Step 1: Create clone**
+
+```
+Production cluster ──┐
+                     ├──► Both point to original Storage
+Staging cluster    ──┘
+
+   ⏱ A few minutes (only creates metadata)
+   💰 No additional storage cost
+```
+
+Staging **doesn't copy anything** — it just "points to" production's data.
+
+**Step 2: Reading on staging** → reads directly from the original storage, no copy occurs.
+
+**Step 3: When staging writes changes**
+
+```
+Staging: UPDATE users SET name='Bob' WHERE id=5
+   ↓
+Aurora detects that the page containing id=5 is about to change
+   ↓
+Copies just that page for the clone (only this page)
+   ↓
+Staging writes to the copy → production keeps the original page
+```
+
+→ **Only the changed pages are copied**, the rest remains shared.
+
+**Storage cost by degree of change:**
+
+| Scenario | Additional storage cost |
+| --- | --- |
+| Just cloned, nothing done | ~0 GB |
+| Tested and modified 100MB of data | ~100 MB |
+| Modified 50% of data | ~50% of original cluster size |
+
+> CoW is not an Aurora-specific concept — Linux `fork()`, Docker image layers, and ZFS/Btrfs filesystems all use the same principle: **share until you need to diverge**.
+
+Compared to restoring from a snapshot (takes hours + costs full storage), cloning is useful for situations where you need "fresh" production data for quick testing/debugging:
+
+- Test risky migrations on real data before running on production
+- Debug by querying freely on the clone without worrying about impacting production
+- Create staging from production in minutes instead of overnight restores
+
+---
+
+## 7. Security
+
+Both Aurora and RDS are built with multiple security layers:
+
+- **Encryption at rest**: uses **AWS KMS**, encrypting all data, replicas, snapshots, and backups. If the master is not encrypted, replicas cannot be encrypted either. Must be enabled at cluster creation, cannot be enabled afterward. Migrating non-encrypted to encrypted requires creating a snapshot and restoring as encrypted.
+- **Encryption in transit**: supports **SSL/TLS** between the application and Aurora.
+- **IAM Authentication**: instead of traditional username/password, you can authenticate using **IAM tokens** — tokens that auto-rotate, eliminating password management.
+- **VPC isolation**: Aurora runs inside **your VPC**, with access controlled via **Security Groups**.
+- **No SSH**: you cannot SSH into the underlying instance — this is a fully managed service.
+
+---
+
+## 8. Global Aurora
+
+All the features above operate within **a single region**. But what if you need to serve users in multiple regions, or need cross-region disaster recovery? Aurora provides 2 approaches:
+
+### Cross-Region Read Replicas
+
+- **Simple** to set up — create a read replica in another region
+- Uses **async replication** → has replication lag
+- Can be promoted to a standalone DB for disaster recovery
+- Suitable for basic DR needs
+
+### Aurora Global Database (recommended)
+
+This is the solution **recommended by AWS** for multi-region:
+
+- **1 Primary Region** (read/write) — the main region handling all writes
+- **Up to 5 secondary regions** (read-only), replication lag **under 1 second**
+- Each secondary region can have up to **16 Read Replicas** (the primary region maxes out at 15 Read Replicas since 1 slot is taken by the master instance)
+- When promoting a secondary region (disaster recovery), **RTO under 1 minute**
+
+```
+                    ┌──────────────────────┐
+                    │   Primary Region     │
+                    │   (us-east-1)        │
+                    │                      │
+                    │   Writer Instance    │
+                    │   + Read Replicas    │
+                    └──────────┬───────────┘
+                               │
+                    Replication < 1 second
+                               │
+              ┌────────────────┼────────────────┐
+              ▼                ▼                 ▼
+   ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+   │ Secondary Region│ │ Secondary Region│ │ Secondary Region│
+   │ (eu-west-1)     │ │ (ap-southeast-1)│ │ (ap-northeast-1)│
+   │                 │ │                 │ │                 │
+   │ Up to 16        │ │ Up to 16        │ │ Up to 16        │
+   │ Read Replicas   │ │ Read Replicas   │ │ Read Replicas   │
+   └─────────────────┘ └─────────────────┘ └─────────────────┘
+```
+
+### Comparing the 2 approaches
+
+| Criteria             | Cross-Region Read Replica | Aurora Global Database |
+| -------------------- | ------------------------- | ---------------------- |
+| Setup                | Simple                    | Slightly more complex  |
+| Replication lag      | Several seconds           | Under 1 second         |
+| Secondary regions    | 1 replica at a time       | Up to 5 regions        |
+| Replicas per region  | —                         | Up to 16               |
+| DR promotion         | Manual, slower            | RTO under 1 minute     |
+| Use case             | Basic DR                  | Production global apps |
+
+> If you're building an application serving users globally and need both **low-latency reads** and **fast disaster recovery**, Aurora Global Database is a no-brainer.
+
+---
+
+## Summary
+
+Aurora isn't just "faster RDS" — it's a database engine redesigned from the ground up for the cloud with a host of features that standard RDS doesn't have: **self-healing storage**, **15 replicas with near-zero lag**, **auto scaling**, **custom endpoints**, **serverless**, **backtrack**, and **global database with sub-second replication**.
+
+**When to choose Aurora over RDS?**
+
+- Need **more than 5 read replicas** or **failover faster than 30 seconds**
+- Need **auto scaling** read replicas based on traffic
+- Need **global presence** with multi-region reads
+- Need **serverless** for unpredictable workloads
+- Want **backtrack** instead of having to restore from backup
+
+The only trade-off: Aurora is **about 20% more expensive** than RDS — but with everything it delivers, this is usually a worthwhile investment for production workloads.

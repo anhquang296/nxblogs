@@ -1,0 +1,329 @@
+---
+title: 'How DNS Works Under the Hood: The Internet Phone Book'
+date: '2026-04-25'
+tags: ['Networking', 'DNS']
+enableComment: true
+---
+
+# How DNS Works Under the Hood: The Internet Phone Book
+
+You type `google.com` and hit Enter. A few dozen milliseconds later, the Google homepage appears. Seems like nothing special — but between the moment you press Enter and the moment the browser knows which server to call, a chain of events has raced through multiple layers of servers scattered around the world. That's the work of **DNS**.
+
+Imagine the Internet as an enormous city with billions of houses. Each house has a long numerical address like `142.250.66.78` (IPv4) or `2607:f8b0:4006:80c::200e` (IPv6). Nobody can remember that many addresses. That's why we need a **phone book**: type a name ("google.com"), get back an address. That phone book is DNS — Domain Name System.
+
+![How DNS works under the hood](/how-dns-work-under-the-hood.svg)
+
+This article will peel back that layer: who holds the phone book, who looks things up for you, why resolving a single name goes through four different types of servers, and why the entire process still only takes a few milliseconds.
+
+> This article was referenced and expanded from the article *"How DNS Actually Works"* by **AlgoMaster**, with additional detailed explanations for each component.
+
+---
+
+## 1. What is DNS and why do we need it?
+
+**DNS** (Domain Name System) is a distributed system responsible for **translating domain names into IP addresses** that computers can understand. It works like an Internet phone book: the domain name is the "person's name", the IP is the "phone number".
+
+Why not just type the IP directly?
+
+- **Humans can't remember IPs.** `youtube.com` is easy; `142.250.190.46` is not.
+- **IPs can change.** Servers move to different data centers, switch cloud providers, or simply scale out to multiple IPs for load balancing — if users had to remember IPs, every change would be a crisis.
+- **One domain points to many IPs.** Large sites like Facebook or Netflix have hundreds of edge servers. DNS can return the IP closest to the user.
+
+In other words, DNS is an **indirection layer** placed between humans and infrastructure. Change backends, switch clouds, move regions — DNS hides everything behind the scenes, users just see the same name that never changes.
+
+---
+
+## 2. The journey of a DNS query — 7 steps
+
+When you type `example.com`, your query doesn't fly straight to some "central server". It passes through a chain of cache layers and hierarchical servers, each optimized for a different purpose.
+
+### 2.1. Browser Cache
+
+The browser is the first layer to check. Each browser maintains a small cache table in RAM, storing recently resolved domain names (a few minutes to a few hours depending on TTL).
+
+In Chrome, you can see this table at `chrome://net-internals/#dns`. If the domain already exists in the cache, the browser uses that IP directly — the entire journey below is skipped.
+
+### 2.2. OS Cache (stub resolver)
+
+If the browser cache misses, the query drops down to the operating system layer. Every OS has a **stub resolver** — a small component responsible for making DNS queries on behalf of all applications:
+
+- macOS: `mDNSResponder`
+- Linux: `systemd-resolved` or `dnsmasq`
+- Windows: `DNS Client Service`
+
+The stub resolver has its own cache, and more importantly, it reads the `hosts` file (`/etc/hosts` on Unix, `C:\Windows\System32\drivers\etc\hosts` on Windows) **before querying the network**. This is the mechanism that allows developers to override DNS locally — for example, forcing `myapp.local` to point to `127.0.0.1`.
+
+### 2.3. Recursive Resolver
+
+OS cache miss, the stub resolver sends the query out to a **recursive resolver** — this is the central character of the DNS system.
+
+A recursive resolver is like an **intermediary** you ask to look up the phone book for you. You don't personally go knocking on each tier of servers; you just ask the resolver one question: *"What's the IP of example.com?"* — and the resolver handles everything behind the scenes.
+
+Resolvers are typically operated by:
+
+- **ISPs** (Comcast, AT&T, Verizon...) — the default when you plug in an Internet cable at home.
+- **Public resolvers** — `8.8.8.8` (Google), `1.1.1.1` (Cloudflare), `9.9.9.9` (Quad9). Users can switch to these resolvers for faster or more secure resolution.
+- **Self-hosted by enterprises** — large companies often run internal resolvers for control and speed.
+
+Most importantly: **the resolver has the largest cache in the entire system**. A public resolver serves millions of users — if one of them just queried `youtube.com`, the result sits in cache for everyone who comes after, at least until the TTL expires.
+
+### 2.4. Root Servers
+
+If the resolver also cache misses, it starts from the top — and the top of the pyramid is the **root servers**.
+
+There are **13 root server clusters** named A through M (`a.root-servers.net` through `m.root-servers.net`), operated by 12 different organizations (including Verisign, ICANN, NASA, universities, and research organizations). Don't think "13 clusters" means "13 machines" — thanks to **anycast** (see section 5), there are actually thousands of physical servers sharing these 13 IP addresses, spread across every continent.
+
+Root servers **don't directly answer** the IP of `example.com`. They only do one thing: look at the tail end of the domain name (`.com`, `.org`, `.vn`...) and point the resolver to the corresponding TLD server. Like a switchboard operator directing you to the right regional phone book.
+
+### 2.5. TLD Servers
+
+**TLD** (Top-Level Domain) is the tail part of a domain. TLD servers manage the list of all domains under a specific extension — and specifically know **where each domain's authoritative server** is located.
+
+Some examples of TLD operators:
+
+- **Verisign** — manages `.com` and `.net` (the largest in the world, nearly 200 million domains).
+- **PIR** (Public Interest Registry) — manages `.org`.
+- **VNNIC** — manages `.vn`.
+- **Afilias / Identity Digital** — manages many new gTLDs like `.io`, `.info`...
+
+These organizations are collectively called **registries**, authorized by ICANN to manage **top level domains** (which can be one or multiple TLDs, but each TLD is managed by only one registry).
+
+**TLD servers** are the infrastructure operated by the registry.
+
+TLD servers also don't answer with the destination IP. They continue pointing the way: *"The authoritative servers for example.com are `ns1.example-host.com` and `ns2.example-host.com`, go ask them."*
+
+### 2.6. Authoritative Name Server
+
+This is the **ultimate source of truth** for a specific domain. The authoritative server stores the actual **zone file** — the file containing all records for the domain (A, AAAA, CNAME, MX...). It's the only server with the authority to say: *"The IP of example.com is 93.184.216.34."*
+
+When you buy a domain from Namecheap, GoDaddy, or Cloudflare, and you go to the dashboard to edit DNS records — you're actually editing the zone file on their authoritative server.
+
+Providers like Namecheap, GoDaddy, and Cloudflare are collectively called **registrars** — they're like retailers authorized to buy and sell domains.
+
+They provide users with an admin panel to purchase, sell, manage, and operate domains.
+
+**Example**: When user A buys the domain `myshop.com`, the registrar notifies the `.com` TLD server that `myshop.com` has been purchased by user A, and tells the TLD server about its Authoritative Name Server, so when a DNS resolver comes asking, the TLD server knows where to direct the resolver to find the answer.
+
+To prevent single points of failure, a domain almost always declares **at least 2 authoritative servers**:
+
+- **Primary (master)** — the source server where the zone file is edited.
+- **Secondary (slave)** — a server that periodically syncs from the primary via **zone transfer** (AXFR/IXFR). If the primary dies, the secondary can still answer.
+
+### 2.7. The return journey
+
+After the authoritative server returns the IP, the journey reverses:
+
+1. **Resolver** receives the IP, **caches** it with the TTL declared by the authoritative.
+2. **OS** receives the IP from the resolver, caches it in the stub resolver.
+3. **Browser** receives the IP from the OS, caches it in its internal table.
+4. **Browser opens a TCP/TLS** connection to that IP and begins the HTTP request.
+
+The next query within the next few seconds? Browser cache hit — none of the steps above are needed.
+
+> **Recursive vs Iterative query.** There are two query types that are easy to confuse:
+>
+> - **Recursive query**: the client (stub resolver) tells the recursive resolver: *"Give me the final IP, no matter how many tiers you need to go through."* This is how the stub resolver queries a public resolver.
+> - **Iterative query**: the recursive resolver tells root/TLD/authoritative servers: *"You don't need to answer everything, just tell me where to go next."* This is how the resolver climbs through each tier.
+>
+> The same resolver plays both roles: receives recursive queries from clients, sends iterative queries out to the Internet.
+
+---
+
+## 3. DNS Record Types
+
+A domain's zone file doesn't just contain "name → IP". There are many record types for different purposes. Here are the ones you'll encounter most frequently.
+
+### A — IPv4 address
+
+The most basic record type: maps a domain name to an IPv4 address.
+
+```
+example.com.    A    93.184.216.34
+```
+
+### AAAA — IPv6 address
+
+Equivalent to A but for IPv6. The name "AAAA" (read as "quad-A") comes from the fact that IPv6 is 4 times longer than IPv4 (128 bits vs 32 bits).
+
+```
+example.com.    AAAA    2606:2800:220:1:248:1893:25c8:1946
+```
+
+### CNAME — Canonical Name
+
+An alias pointing to another name. Useful when you want multiple subdomains to point to the same host:
+
+```
+www.example.com.    CNAME    example.com.
+api.example.com.    CNAME    my-loadbalancer.aws.com.
+```
+
+There's an important rule: **CNAME records cannot be placed at the apex** (meaning at `example.com` itself, without a subdomain). The reason is that the apex must have metadata records (NS, SOA), and CNAME doesn't allow coexistence with other records. To solve this, providers like Cloudflare and Route 53 invented **ALIAS / ANAME / CNAME flattening** — configured like a CNAME but "flattened" into an A record when returned.
+
+### MX — Mail Exchange
+
+Declares the server that receives email for the domain. Has **priority** for failover:
+
+```
+example.com.    MX    10 mx1.mail-provider.com.
+example.com.    MX    20 mx2.mail-provider.com.
+```
+
+When sending mail to `you@example.com`, the sending mail server reads the MX records and tries sending to the lowest priority first (10), falling back to 20 if that fails.
+
+### NS — Name Server
+
+Declares the authoritative name servers for a domain or subdomain. This is the foundation of **delegation** — the mechanism of "delegating" a subdomain to a separate set of NS:
+
+```
+example.com.        NS    ns1.example-host.com.
+example.com.        NS    ns2.example-host.com.
+sub.example.com.    NS    ns1.other-host.com.
+```
+
+The last line means: anyone asking about `sub.example.com` should go ask `ns1.other-host.com`, not the authoritative for `example.com`.
+
+### TXT — Text Record
+
+A free-form text string. Seems random, but TXT is where most "verification" and email security tasks happen:
+
+- **SPF** — list of IPs allowed to send mail on behalf of the domain.
+- **DKIM** — public key for verifying email signatures.
+- **DMARC** — policy for handling mail that fails SPF/DKIM.
+- **Domain ownership verification** — Google, AWS, Cloudflare require adding a TXT record to prove you own the domain.
+
+### PTR — Reverse DNS
+
+Reverse mapping: IP → name. Used primarily for **mail server reputation** — the receiving mail server checks that the sending IP has a PTR matching its hostname. Without a valid PTR, emails are likely to be flagged as spam.
+
+### SOA — Start of Authority
+
+A mandatory metadata record for every zone, containing information about synchronization between primary and secondary:
+
+- **Serial number** — the zone's version, incremented with each edit.
+- **Refresh / Retry** — how often the secondary checks the primary.
+- **Expire** — how long the secondary holds old data if it can't reach the primary.
+- **Minimum TTL** — default TTL for negative caching.
+
+### CAA — Certification Authority Authorization
+
+Declares which CA (Certificate Authority) is allowed to issue SSL certificates for the domain. This is a protective layer against "careless" CAs issuing certificates to non-domain-owners:
+
+```
+example.com.    CAA    0 issue "letsencrypt.org"
+```
+
+This means: only Let's Encrypt is allowed to issue certificates for `example.com`.
+
+### Modern records
+
+- **SRV** — specifies the host and port for a specific service (e.g., XMPP, SIP).
+- **SVCB / HTTPS** (RFC 9460) — new records designed to bundle multiple connection details (HTTP/3, ECH, port) in a single lookup, reducing the number of round-trips.
+
+---
+
+## 4. Caching and TTL — why DNS doesn't collapse
+
+The entire DNS system handles **trillions of queries every day**. If every query had to go from root to authoritative, root servers would have collapsed long ago. The secret to DNS scaling lies in **multi-layer caching** — and the soul of caching is **TTL**.
+
+**TTL** (Time-To-Live) is the number of seconds a resolver is allowed to keep a result in its cache before it must re-query. TTL is declared by the authoritative server, attached to each record.
+
+Choosing a TTL is a balancing act:
+
+- **Short TTL** (tens of seconds to minutes): when changing IPs, users get updated almost immediately. Suitable for systems that need fast failover, A/B testing, blue-green deployments. Trade-off: load on the authoritative server spikes.
+- **Long TTL** (hours to a day): lighter load, fast responses from cache. Trade-off: IP changes must wait for resolvers to expire their TTL before propagating. This is why people often say "DNS changes take 24-48 hours" — it's not that DNS is slow, but that **stale caches at resolvers along the path are still valid**.
+
+A common trick before migration: **lower the TTL to a few minutes** several days ahead, wait for old caches to expire, then change the IP. After stabilizing, increase the TTL again to reduce load.
+
+Another concept worth knowing: **Negative caching** (RFC 2308). When the authoritative returns NXDOMAIN ("doesn't exist"), the resolver also caches that "doesn't exist" response for a period of time. Without this, every time someone mistyped a domain name, the query would climb all the way to root — that wouldn't scale.
+
+---
+
+## 5. Speed and resilience infrastructure — why DNS only takes a few ms
+
+Caching is about the resolver side. On the authoritative server side, there are many other techniques that help DNS respond quickly and never "go down":
+
+### Anycast routing
+
+This is the most important technique. **Anycast** is when multiple physical servers at different geographic locations all announce **the same IP address** to the Internet via BGP. Routers automatically direct packets to the "nearest" server based on BGP metrics.
+
+For example: Cloudflare's `1.1.1.1` isn't a single server — it's hundreds of servers in over 300 cities all sharing that IP. When you query `1.1.1.1` from Hanoi, your packet is routed to the Cloudflare data center in Singapore or Ho Chi Minh City (depending on your ISP). Someone in New York querying the same IP has their packet routed to the New York data center.
+
+Root servers also use anycast — that's why "13 root clusters" actually means thousands of physical servers.
+
+### Redundant servers
+
+A domain should never have just 1 NS. Best practice is to declare **at least 2 NS, placed in different Autonomous Systems (AS), in different geographic regions**. If one data center burns down, the remaining NS still serves.
+
+### GeoDNS
+
+The authoritative server **returns different IPs based on the location of the querying resolver**. This is the foundation of:
+
+- **CDN routing** — Cloudflare/Akamai returns the edge IP closest to the user.
+- **Compliance** — EU users are given servers in the EU so data doesn't leave the region.
+- **Latency optimization** — game servers return the nearest region.
+
+Mechanism: the authoritative reads the resolver's source IP (or EDNS Client Subnet) → looks up a GeoIP database → selects the appropriate IP.
+
+### Load balancing via DNS
+
+The simplest approach: return **multiple A records simultaneously** in rotating order (round-robin DNS):
+
+```
+api.example.com.    A    10.0.0.1
+api.example.com.    A    10.0.0.2
+api.example.com.    A    10.0.0.3
+```
+
+Each resolver query receives a different order, distributing load. More advanced options include **weighted records** — assigning weights to send 80% of traffic to the primary region and 20% to the backup region.
+
+### CDN integration
+
+When you place a domain behind Cloudflare, Akamai, or AWS CloudFront, the authoritative DNS is actually the CDN's DNS. Every query combines anycast + GeoDNS + health checks to return the IP of the edge server that is **closest, healthy, and least loaded**. End users don't know — they just see the site loads fast.
+
+---
+
+## 6. DNS Security
+
+DNS was designed in the 1980s, when the Internet was small and everyone trusted each other. The consequence is that by default, DNS has two major problems:
+
+**1. No encryption.** DNS queries travel over UDP port 53, in plain text. Your ISP, someone sitting on the same coffee shop Wi-Fi, or anyone controlling a hop along the path — can all see which domain you're querying. This is a **privacy** issue.
+
+**2. No authentication.** Resolvers have no cryptographic way to verify that the answer they receive actually came from the real authoritative server, or from an attacker who injected themselves in the middle. This is the basis of **cache poisoning** and **DNS spoofing** attacks.
+
+Three main technologies address these two problems:
+
+### DoH — DNS over HTTPS
+
+DNS queries are encapsulated in standard HTTPS requests to the resolver. From the outside, it looks like regular HTTPS traffic, indistinguishable from web browsing. Widely supported: Firefox, Chrome, iOS, Android can all enable DoH.
+
+### DoT — DNS over TLS
+
+DNS queries travel over a dedicated TLS connection (port 853). The separate port makes DoT easier to filter at the enterprise level than DoH (which is why enterprises often prefer DoT, while end-users tend to prefer DoH).
+
+Both DoH and DoT only solve **privacy between client and resolver**. From the resolver out to the Internet, it's still plain DNS (which may change in the future).
+
+### DNSSEC — Domain Name System Security Extensions
+
+This is the solution for the **authentication** problem. DNSSEC adds **digital signatures** to each record. The resolver can verify that the answer genuinely came from the authoritative server through a chain of trust:
+
+- Root servers have **public keys** distributed in advance (trust anchors).
+- Root signs TLD NS records with root's private key.
+- TLD signs domain NS records with TLD's private key.
+- Authoritative signs domain records with the domain's private key.
+
+If any signature doesn't match, the resolver knows there's a forgery and rejects the result.
+
+DNSSEC prevents cache poisoning, but deployment is complex and it doesn't protect privacy — so in practice many domains still haven't enabled it. The current trend is to combine **DoH/DoT + DNSSEC** to address both issues.
+
+---
+
+## 7. Summary
+
+DNS isn't "one central server holding all domain names". It's a **distributed, hierarchical, multi-layer caching system**:
+
+- **Distributed** — no single party holds everything. Authority is divided among ICANN at root, registries at TLD, and registrars/domain owners at authoritative.
+- **Hierarchical** — each tier only knows the next tier. Root only knows TLD, TLD only knows authoritative, authoritative knows its own zone. This clear tree structure helps the system scale to billions of domains without bottlenecks.
+- **Multi-layer caching** — browser, OS, resolver, each tier holds results within TTL. As a result, over 95% of queries never reach the authoritative server.
+
+And most importantly, DNS is an **indirection layer** that hides all infrastructure changes behind the scenes. You switch clouds from AWS to GCP, move regions from Singapore to Tokyo, scale from 1 server to 1000 edge nodes — users still type the same name and everything works. That's why DNS, despite being designed in 1983, remains one of the most critical foundations of the modern Internet.

@@ -1,0 +1,76 @@
+---
+title: 'Conquering Azure Publisher Verification: From "Unverified" to the Blue "Verified" Badge'
+date: '2026-01-07'
+tags: ['Devops', 'Azure']
+enableComment: true
+---
+
+# Conquering Azure Publisher Verification: From "Unverified" to the Blue "Verified" Badge
+
+After sweating through the setup of a Client for end-users to use SSO with Azure, my next mission was to get the Verified badge for the application.
+
+This is the most stressful part for newcomers diving into the Azure ecosystem.
+
+The biggest headache I found when working with Azure is outdated documentation, many concepts have been revamped but the console hasn't been updated yet, and guides are extremely scarce.
+
+I went through this pain and decided to leave a trail here, hoping it will serve as a roadmap for those who come after to avoid getting lost.
+
+Since I'm also a newcomer to the Azure ecosystem, I may use some technical terms incorrectly -- please bear with me.
+
+## Setting Up Your "Registration" (App Registration)
+
+The journey begins at the Azure Portal. You need to register an App Registration to obtain the key information:
+
+Secret Keys: The credentials your application uses to communicate with Azure.
+
+Redirect URL: Used for Login purposes and data synchronization (such as Outlook, Mail).
+
+## Development & Branding (Don't Skip This Step!)
+
+Once you have the keys, we proceed with development. But wait -- before eagerly going live with the feature, go back to the Azure Portal and navigate to the Branding & properties section.
+
+Here, make sure to fill in all branding information. If you skip this, users will see your application labeled as "Unverified". This not only erodes trust but also triggers a series of annoying limitations from Microsoft.
+
+## Finding the MPN ID -- "Old Name, New Identity"
+
+In the Publisher Verification section, the system asks for something called the MPN ID.
+
+> This name is actually outdated. Today, Microsoft calls it the Partner ID (part of the Microsoft AI Cloud Partner Program).
+
+At this point, you'll be working with a third party: Microsoft Partner Center -- the entity responsible for verifying your business information.
+
+Create an account at Microsoft Partner Center.
+
+Go to: **Account settings** -> **Organization profile** -> **Legal info**.
+
+Update your business information, provide valid documentation, and wait for them to verify.
+
+After successful verification, go to: **Account settings** -> **Organization profile** -> **Identifiers** -> Copy the Partner ID with the type PartnerGlobal. This is the key value you've been looking for.
+
+## The 81st Trial -- Tenant Conflict
+
+Think you're done? Not quite -- the drama continues. I realized that the Partner Center account I just created belonged to a new Tenant (Tenant 2), which was completely different from the original Tenant (Tenant 1) -- where the App Registration was located.
+
+Result? When pasting the Partner ID into Azure Portal to verify, the system coldly returned: "The MPN ID you provided does not exist, or you do not have access to it."
+
+Essentially, your Azure Portal account doesn't have permission to reach that Partner ID because it's not under the same roof (it's only associated with Tenant 2).
+
+## The Solution: Joining the Same Table via the Root Account
+
+To resolve this, we need to find the Root (Global Admin) account of the Tenant where the application is registered.
+
+Reset the Root account password if you've forgotten it.
+
+Associate Tenant 1 with Partner Center by going to: **Account settings** -> **Organization profile** -> **Tenants** -> **Associate Microsoft Entra ID**.
+
+Log in with the Global Admin credentials of Tenant 1 to confirm.
+
+At this point, Tenant 1 has officially joined Tenant 2 under the Partner Center roof. Finally, use the Root account of Tenant 1 to go back to Azure Portal and add the MPN ID. Since you now have full permissions, everything will go smoothly.
+
+## Conclusion
+
+This process isn't technically difficult in terms of code, but it's extremely tricky when it comes to Microsoft's processes and permissions. I hope this article saves you some headaches when working with Azure.
+
+Good luck getting that blue badge!
+
+Reference: https://learn.microsoft.com/en-us/answers/questions/1118699/how-to-get-mpn-id-for-multi-tenent-app

@@ -1,0 +1,345 @@
+---
+title: 'ALB Under The Hood: What Really Lies Beneath the "Smart Receptionist"?'
+date: '2026-05-03'
+tags: ['Devops', 'AWS', 'SAA', 'SAP']
+enableComment: true
+---
+
+# ALB Under The Hood: What Really Lies Beneath the "Smart Receptionist"?
+
+When you create an Application Load Balancer on AWS, you get exactly **one thing**: a long DNS name like `my-alb-123456789.ap-southeast-1.elb.amazonaws.com`. No static IP. No server you can SSH into. So what's really behind that DNS name?
+
+This article will reveal the hidden architecture behind ALB — from the army of load balancer nodes working silently, to the scaling mechanisms, and why ALB never has a static IP.
+
+---
+
+## 1. Load Balancer Nodes — "The Hidden Army"
+
+When you create an ALB and select 3 Availability Zones (AZs), AWS **doesn't** create "one load balancer". Instead, AWS deploys **at least 1 load balancer node in each AZ** you selected. So with 3 AZs, you have a minimum of 3 nodes.
+
+### How do nodes scale?
+
+Each node starts at size `large`. As traffic increases, AWS will **scale vertically** (upgrade the node) following this progression:
+
+> `large` → `xlarge` → `2xlarge` → `4xlarge`
+
+When a node has reached `4xlarge` and still doesn't have enough capacity, AWS switches to **horizontal scaling** — adding new `4xlarge` nodes to that AZ. In total, an ALB can scale up to a maximum of **100 nodes** across all AZs.
+
+### Subnets must be "wide" enough
+
+Each node consumes **1 IP address** in the subnet. Therefore, AWS requires:
+
+- A minimum subnet of **/27** CIDR (32 IPs, of which at least **8 IPs must be free**)
+- If you have 50 nodes (10/AZ x 5 AZs), you need about 10 additional IPs/AZ for scaling room
+
+**What happens when the subnet runs out of IPs?** The ALB enters an `active_impaired` state — it still works but can't scale further, leading to **5xx errors** and timeouts for users. This is a "silent" failure that many teams don't notice until a traffic spike hits.
+
+> **Tip:** Always use subnet **/27 or larger** for ALB. If your system handles heavy traffic, consider **/26** or **/25** to ensure headroom for scaling.
+
+---
+
+## 2. Why Does ALB Only Have a DNS Name, No Static IP?
+
+This is a classic question: NLB can attach Elastic IPs (static), so why can't ALB?
+
+The answer lies in the very scaling mechanism described above:
+
+- ALB **continuously adds/removes nodes** to handle traffic. Each node has its own IP.
+- When a new node is added → **a new IP appears**
+- When a node is removed → **an old IP disappears**
+
+If AWS assigned a static IP to the ALB, which node would you attach it to? That node could be removed at any time. That's why AWS chose the **DNS abstraction** approach: a DNS name pointing to the current list of node IPs.
+
+### How does DNS work?
+
+When a client resolves the ALB's DNS name:
+
+1. Route 53 returns **multiple A records** — each record is the IP of an active node
+2. Alias records have a **fixed TTL of 60 seconds** (cannot be changed)
+3. When the ALB scales (adds/removes nodes), Route 53 **automatically updates** the IP list
+4. Clients will receive new IPs after at most 60 seconds
+
+### So how does NLB get a Static IP?
+
+NLB operates at Layer 4 — it only forwards TCP/UDP packets without inspecting content. NLB's architecture is much simpler:
+
+- NLB creates **1 fixed Elastic Network Interface (ENI)** per AZ
+- Each ENI can be assigned **1 Elastic IP** (static)
+- Internally, AWS uses **Hyperplane** technology to scale capacity without adding more ENIs
+
+In other words: NLB "hides" the scaling complexity behind a fixed ENI. ALB can't do this because it needs multiple real nodes to process Layer 7 traffic (inspecting HTTP headers, routing rules, SSL termination...).
+
+|                   | ALB                                      | NLB                                     |
+| ----------------- | ---------------------------------------- | --------------------------------------- |
+| **IP Model**      | Dynamic (changes when scaling)           | Static (Elastic IP per AZ)              |
+| **Addressing**    | DNS name only                            | DNS name + Elastic IP                   |
+| **Scaling Model** | Add/remove nodes                         | Scale behind fixed ENI (Hyperplane)     |
+| **Reason**        | Layer 7 processing is heavy, needs many nodes | Layer 4 forwarding is lightweight, 1 ENI suffices |
+
+> **Practical tip:** If you need a static IP for ALB (e.g., a partner requires IP whitelisting), place an **NLB in front of ALB**. AWS supports registering ALB as a target group type for NLB, allowing you to combine NLB's static IP with ALB's smart routing.
+
+---
+
+## 3. ALB Scaling — "Accelerates Like a Rocket, Lands Like a Feather"
+
+ALB scaling has an interesting characteristic: **it's asymmetric**.
+
+- **Scale up:** Extremely aggressive. ALB can **double capacity within 5 minutes**
+- **Scale down:** Very conservative. AWS reduces gradually to avoid the situation where scaling down is immediately followed by another traffic spike
+
+### LCU Reservation — "Pre-booking" for Traffic Spikes
+
+Previously, if you knew a large traffic event was coming (Black Friday, Flash Sale), you had to contact AWS Support to "pre-warm" ALB. Now, AWS provides the **LCU (Load Balancer Capacity Unit) Reservation** feature — allowing you to pre-book capacity yourself.
+
+**How it works:**
+
+1. Determine expected peak load from CloudWatch metrics (`PeakLCUs`) or load testing
+2. Set LCU Reservation via Console or ELBV2 API
+3. ALB will provision minimum capacity at your reserved level
+4. If traffic exceeds the reservation → ALB still auto-scales normally above that
+
+**Automation pattern for planned events:**
+
+```
+EventBridge Scheduler (1 hour before event)
+    → Lambda function
+        → Read ALB info from DynamoDB
+        → Call ELBV2 API to set LCU Reservation
+        → After event, reset to normal level
+```
+
+> **Note:** LCU Reservation is designed for **short durations** (hours to days), not for permanent capacity planning. Reserved LCUs use the Reserved rate (cheaper), and usage above the reservation uses the standard on-demand rate.
+
+---
+
+## 4. Cross-Zone Load Balancing
+
+When ALB has nodes in multiple AZs, how is traffic distributed?
+
+### Default: Enabled at ALB level
+
+With cross-zone load balancing **enabled** (default), each ALB node distributes traffic to **all targets across every AZ**, not just targets in its own AZ.
+
+**Example:** You have 10 targets in AZ-a and 5 targets in AZ-b. With cross-zone enabled, each target receives ~6.67% traffic (1/15), regardless of which AZ it's in.
+
+### When should you disable cross-zone?
+
+You can disable cross-zone at the **target group level** in certain cases:
+
+- Want to keep traffic within the same AZ to reduce latency
+- Using **zonal shift** (AZ evacuation) for disaster recovery
+- Want tight control over traffic distribution
+
+### Cost
+
+An important point: ALB **does not charge** for cross-zone data transfer between ALB nodes and targets. This is a major difference from NLB — where cross-zone data transfer is charged. This makes ALB more cost-effective for deployments spread across multiple AZs.
+
+---
+
+## 5. Connection Handling — ALB Is a Full Reverse Proxy
+
+Many people think ALB simply "forwards" requests to the backend. In reality, ALB is a **full reverse HTTP proxy** — it **terminates** the TCP connection from the client and **creates a new TCP connection** to the backend.
+
+### HTTP Multiplexing & Connection Pooling
+
+This is one of the biggest benefits that few people know about:
+
+- ALB receives requests from **thousands of clients** via thousands of TCP connections
+- But when sending to the backend, ALB uses **a small number of persistent TCP connections**
+- Multiple client requests are **multiplexed** over the same backend connection
+
+This helps the backend server save significant CPU, memory, and bandwidth — instead of maintaining thousands of connections, the backend only needs to handle a few dozen connections from ALB.
+
+### HTTP/2: Supported but with limitations
+
+ALB supports **HTTP/2 from the client side** (multiplexing, header compression, binary framing). However, when forwarding to the backend, ALB **converts HTTP/2 streams into individual HTTP/1.1 requests**. This means:
+
+- Client → ALB: HTTP/2 (multiple streams on 1 connection)
+- ALB → Backend: HTTP/1.1 (each stream becomes 1 separate request)
+
+> HTTP/2 stream multiplexing and prioritization **are not preserved** when passing through ALB.
+
+### Timeout Configuration — The Source of 502/504
+
+ALB has 2 important timeouts:
+
+| Timeout                     | Default            | Meaning                                              |
+| --------------------------- | ------------------ | ---------------------------------------------------- |
+| **Connection Idle Timeout** | 60 seconds         | How long a connection is kept idle before ALB closes it |
+| **HTTP Client Keep-Alive**  | 3600 seconds (1 hour) | Maximum time a connection is kept alive               |
+
+**Critical best practice:** Backend keep-alive timeout must be **greater than** ALB idle timeout.
+
+Why? If the backend closes the connection before ALB does (e.g., backend timeout 30s, ALB timeout 60s), a race condition occurs:
+
+1. ALB thinks the connection is still active → sends a request through
+2. Backend has already closed the connection → returns RST
+3. ALB returns **502 Bad Gateway** to the client
+
+> **Fix:** Set backend keep-alive timeout = ALB idle timeout + 5-10 seconds buffer. Example: ALB idle timeout 60s → backend keep-alive 70s.
+
+---
+
+## 6. How Does a Request Reach the Right Node? — Load Distribution at the DNS Layer
+
+Before discussing how ALB chooses a target backend, there's a more fundamental question: if the ALB has 6 nodes (2/AZ x 3 AZs), when a client sends a request, **what** determines which of those 6 nodes receives the request? Is there some "central router" in front distributing traffic?
+
+**The answer will surprise you: There is no "central router".** Node selection happens entirely at the **DNS layer, on the client side** — before the first packet even leaves the client machine.
+
+### How it works
+
+1. **Client queries DNS**: The browser/app asks "What's the IP of `my-alb-123.elb.amazonaws.com`?"
+
+2. **Route 53 returns a list of IPs**:
+   - Returns **up to 8 IPs** in a single response (each IP is 1 ALB node)
+   - The order is **randomly shuffled** in each response
+   - Fixed TTL of 60 seconds
+   - Only returns IPs of **healthy nodes** — impaired nodes are excluded from the response
+
+3. **Client picks 1 IP**:
+   - Most OS/libraries pick the **first** IP in the response (browser, JVM, libcurl, Go net/http...)
+   - Some advanced clients try the next IP if the first fails
+   - Client caches the IP for the duration of the TTL (60s)
+
+4. **Client opens a TCP connection directly to that IP** — that node handles the entire TCP/TLS connection for the lifetime of the connection.
+
+### So what is the "node distribution algorithm" really?
+
+This is something many people don't realize: **ALB does not have a load balancing algorithm between nodes**. Load distribution between nodes relies entirely on:
+
+- **Random shuffle** by Route 53 in each DNS response
+- **Law of Large Numbers** — when enough clients query, random distribution becomes statistically "even"
+
+In other words: load distribution between nodes is only "even" when you have **thousands of clients** per second. With low traffic, some nodes may be "idle" while others are busy — this is normal.
+
+### In summary: ALB Has 2 Completely Separate "Decision" Layers
+
+When a request passes through ALB, there are **2 independent decisions**:
+
+![ALB: Two Decision Layers](/alb-two-decision-layers.svg)
+
+Layer 1 (choosing a node) is **decided by AWS** — you can't configure anything beyond choosing the region and AZs. Layer 2 (choosing a target) is **under your control** via target group settings, which is what the next section covers in detail.
+
+> **Practical tip:** If you see uneven traffic distribution between ALB nodes (via CloudWatch per-node metrics), don't immediately assume ALB is broken — check the client's DNS caching behavior first.
+
+---
+
+## 7. Load Balancing Algorithms — How Does ALB Decide Which Target Gets the Request?
+
+After a request has reached an ALB node (via the DNS mechanism in section 6), that node must choose which **target backend** in the target group to forward to. This is where ALB has **3 algorithms** with distinct philosophies and use cases. You configure the algorithm at the **target group level** (not at the ALB level).
+
+### 7.1. Round Robin — "Take Turns" (Default)
+
+This is the **default** algorithm for ALB and the easiest to understand.
+
+**How it works:**
+
+Targets are arranged in a circle. The first request goes to target #1, the next to #2, then #3... After completing the circle, it loops back to #1.
+
+![Round Robin](/alb-round-robin.svg)
+
+**Advantages:**
+
+- Simple, predictable
+- Distributes evenly when all requests are "similar" (same complexity, same response time)
+- Doesn't require ALB to track much state
+
+**Disadvantages:**
+
+- **Doesn't care if a backend is busy or idle.** If target A is processing 50 "heavy" requests and target B is idle, Round Robin still sends new requests to A in turn.
+- Not suitable when requests have **uneven complexity** (e.g., an API endpoint mix of fast and slow operations)
+
+> **Use when:** Requests are uniform, backends are uniform (same instance type, same workload). Most standard web app use cases.
+
+### 7.2. Least Outstanding Requests (LOR) — "Whoever's Free Does the Work"
+
+This algorithm is smarter: ALB **counts the number of in-flight requests** (sent but no response received yet) to each target, and picks the target with the **fewest in-flight requests**.
+
+**How it works:**
+
+![Least Outstanding Requests (LOR)](/alb-lor.svg)
+
+ALB maintains a counter for each target: incremented when a request is sent, decremented when a response is received.
+
+**Advantages:**
+
+- **Dynamically self-balancing** based on actual target capacity. If a target is slow → its in-flight count decreases slowly → ALB automatically sends fewer requests to it.
+- Handles extremely well when requests have **uneven complexity**. For example: a GraphQL API with simple queries (10ms) and complex queries (2 seconds) — LOR will distribute appropriately.
+- Well-suited when **target instances are heterogeneous** (mix of large and small instances in the target group)
+- Useful for **WebSocket** or **long-lived connections** — where some connections may "tie up" a target for a long time
+
+**Disadvantages:**
+
+- ALB must track in-flight count → slightly more resource-intensive than round robin (but negligible)
+- **Not suitable with sticky sessions** — because sticky sessions override LOR's decisions
+
+> **Use when:** Requests have high response time variance (mix of fast/slow), API with many different endpoints, microservices with uneven workloads.
+
+### 7.3. Weighted Random with Anomaly Mitigation — "Weighted Probability + Anomaly Detection"
+
+This is the **newest** algorithm (AWS announced late 2023). The name is long but the concept has 2 parts:
+
+**Part 1: Weighted Random**
+
+Instead of choosing by order (Round Robin) or by counter (LOR), ALB selects a target **randomly with weights**. If all targets have equal weight → it's pure random. If weights differ → targets with higher weight have a higher probability of being selected.
+
+**Part 2: Anomaly Mitigation — Auto-detecting "Silently Failing" Targets**
+
+This is the truly interesting part. ALB continuously **monitors targets** and detects those with "anomalous" behavior compared to the rest of the target group:
+
+- Targets with an abnormally high **HTTP 5xx rate** (but haven't failed health checks)
+- Targets with abnormally high **connection errors**
+- Targets with abnormally long **response times**
+
+When an anomaly is detected, ALB **automatically reduces the target's weight** (sends less traffic) **without waiting for the health check to fail**. This is a form of **automatic circuit breaker** at the load balancer level.
+
+![Weighted Random + Anomaly Mitigation](/alb-weighted-random.svg)
+
+**Advantages:**
+
+- **Protects end users** from "sneaky" failures — a target isn't fully broken (still passes health checks) but is returning errors
+- **Automatically recovers** when the target returns to normal
+- Especially useful in **continuous deployment** environments — if a new version has a bug, ALB automatically reduces traffic to the faulty instance without intervention
+
+**Disadvantages:**
+
+- Can produce "false positives" in some cases (a target processing legitimate but heavy requests → gets traffic reduced unfairly)
+- Harder to debug — you see uneven traffic distribution and must understand that ALB is "punishing" a particular target
+
+> **Use when:** Production-critical workloads needing high resilience, environments with continuous deployment, API services where you want to auto-detect bad deployments.
+
+### Quick Comparison Table
+
+| Algorithm | Target selection logic | When to use | Avoid when |
+|---|---|---|---|
+| **Round Robin** | Sequential rotation | Uniform requests, uniform targets | Requests have high response time variance |
+| **Least Outstanding Requests** | Target with fewest in-flight requests | Uneven workloads, microservices | Mandatory sticky sessions |
+| **Weighted Random + Anomaly Mitigation** | Weighted random, auto-reduces weight for faulty targets | Production-critical, auto-resilience needed | Need deterministic distribution, easy debugging |
+
+### Where Does Sticky Session Fit?
+
+Sticky session (session affinity) **is not an algorithm** — it's an **override layer** sitting on top of the algorithms above. How it works:
+
+1. First request: ALB uses the algorithm (Round Robin / LOR / Weighted Random) to select target X
+2. ALB sets a `AWSALB` cookie in the response, encoding target X
+3. Subsequent requests from the same client: ALB reads the cookie → forwards directly to target X (bypassing the algorithm)
+
+This is useful for stateful applications (shopping carts, session-based auth not using JWT). But the trade-off is **losing load balancing effectiveness** — if target X goes down, the client only gets rerouted then.
+
+> **Tip:** If your app is stateless (uses JWT, sessions stored in Redis), **don't enable sticky sessions** — it only reduces load balancing effectiveness.
+
+---
+
+## Conclusion — Production Checklist
+
+ALB isn't "one load balancer" — it's a **fleet of nodes** that auto-scales to handle traffic. Understanding the underlying architecture helps you avoid many common production mistakes.
+
+**Checklist when deploying ALB:**
+
+- ALB subnets use **/27 or larger**, ensuring at least 8 free IPs per AZ
+- **Don't hardcode IPs** for ALB — always use the DNS name or Route 53 alias
+- Set backend keep-alive **greater than** ALB idle timeout (default 60s) to avoid 502
+- Use **LCU Reservation** before planned traffic events (Flash Sale, launch)
+- Monitor **SurgeQueueLength** and **SpilloverCount** — if SpilloverCount > 0, the backend is overloaded
+- Need a static IP? Place an **NLB in front of ALB** instead of trying to attach an IP to ALB
+- Choose the right **load balancing algorithm**: uniform workloads use Round Robin, uneven workloads use LOR, production-critical workloads enable Weighted Random + Anomaly Mitigation

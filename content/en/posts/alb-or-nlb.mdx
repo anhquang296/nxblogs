@@ -1,0 +1,101 @@
+---
+title: "Load Balancer: Choose the \"Smart\" ALB or the \"Lightning-Fast\" NLB? Don't Let Your Infrastructure Budget Evaporate!"
+date: '2026-01-02'
+tags: ['Devops', 'AWS']
+enableComment: true
+---
+
+# Load Balancer: Choose the "Smart" ALB or the "Lightning-Fast" NLB? Don't Let Your Infrastructure Budget Evaporate!
+
+In modern system architecture, a Load Balancer is more than just a traffic distribution tool. It is the "gatekeeper" that determines the stability, security, and most importantly, **your monthly Cloud bill**. However, the battle between choosing an **Application Load Balancer (ALB)** or a **Network Load Balancer (NLB)** remains a headache for many engineers.
+
+This article will dissect the differences and help you make the most cost-effective choice for your system.
+
+---
+
+## 1. What is a Load Balancer?
+
+At its core, a Load Balancer acts as a "referee" between users and backend servers. Instead of letting clients connect directly to a specific server, they go through the Load Balancer. There, traffic is distributed to the resources that are healthy and most available.
+
+In the AWS ecosystem, we have 3 main options:
+
+* **ALB (Layer 7):** Understands "application language" (HTTP/HTTPS).
+* **NLB (Layer 4):** Focuses on pure network connections (TCP/UDP/IP).
+* **GLB (Layer 3):** Specialized for managing third-party virtual appliances (Firewall/IDS).
+
+---
+
+## 2. ALB: The "Smart Receptionist"
+
+Operating at the **Application Layer (Layer 7)**, ALB has the ability to inspect the content of data packets.
+
+### Strengths:
+
+* **Flexible Routing:** Can route based on URL (e.g., `/api` goes to the API cluster, while `/images` goes to S3 or Storage).
+* **Application-level Security:** Deep integration with WAF (Web Application Firewall) to block attacks like SQL Injection or XSS.
+* **SSL/TLS Offloading:** Automatically handles certificate decryption, reducing compute load on backend servers.
+
+### Weaknesses:
+
+* **Higher Latency:** Because it needs to "unbox" packets to inspect content, ALB takes more processing time (measured in milliseconds - ms).
+* **Dynamic IP:** ALB's IP address changes frequently. This is a "nightmare" if your partners require a static IP for Whitelisting.
+
+> **When to use?** Web Apps, Microservices, systems that need to split traffic by path-based or host-based routing.
+
+---
+
+## 3. NLB: The "Super-Speed Pipeline"
+
+Operating at the **Transport Layer (Layer 4)**, NLB is extremely minimalist: it only looks at IP and Port, then forwards the packet immediately.
+
+### Strengths:
+
+* **Extreme Performance:** Capable of handling millions of requests per second with ultra-low latency (measured in microseconds - us).
+* **Static IP Address:** Provides a fixed Elastic IP, making it extremely easy to work with enterprise Firewalls.
+* **Source IP Preservation:** Backend servers see the client's IP directly without needing complex header configuration.
+
+### Weaknesses:
+
+* **Less "Smart":** It doesn't care which web page you're accessing; it only knows how to push data from one port to another.
+* **Limited Security Features:** Cannot block attacks hidden deep within web content (Layer 7).
+
+> **When to use?** Online gaming (UDP), financial systems requiring near-zero latency, IoT (MQTT), or B2B connections requiring static IP.
+
+---
+
+## 4. Performance vs Cost: Are You "Overusing" ALB?
+
+Many engineers have the habit of conveniently choosing ALB because of its versatility. But let's look at the reality:
+
+### Performance:
+
+ALB performs **"Connection Termination"** (terminates the client connection and creates a new connection to the backend). In contrast, NLB simply **"Forwards"** the packet. This makes NLB significantly more resilient during sudden traffic spikes (like Flash Sales).
+
+### Cost:
+
+While hourly maintenance fees are comparable, data processing fees (Capacity Units) tell a different story:
+
+* **ALB (LCU):** Charges based on the number of routing rules, SSL processing, and bandwidth.
+* **NLB (NLCU):** Primarily charges based on bandwidth and number of connections.
+
+> **Expert tip:** For data-heavy systems (Video Streaming, Big Data), switching from ALB to NLB can save you **30-50%** on your Load Balancer bill.
+
+---
+
+## 5. Quick Comparison Table: Which One to Choose?
+
+| Criteria | Choose ALB if... | Choose NLB if... |
+| --- | --- | --- |
+| **Protocol** | Using HTTP/HTTPS only. | Using TCP, UDP, TLS, or MQTT. |
+| **Flexibility** | Need to split traffic by `/v1` or `/v2`. | Only need to push to a fixed group of servers. |
+| **Static IP** | Not important. | Mandatory for partner Whitelisting. |
+| **Speed** | Standard latency is fine. | Need "near-zero" latency (Real-time). |
+| **Cost** | Medium traffic, complex logic. | Extremely high traffic, maximizing ROI. |
+
+---
+
+## Conclusion
+
+Don't choose a Load Balancer just because it's "smart." Choose based on your specific traffic characteristics and security requirements. If you need flexibility, **ALB is king**. But if you need raw power, static IP, and cost optimization at scale, don't hesitate to choose **NLB**.
+
+**What type of Load Balancer are you using for your system? Share in the comments below!**

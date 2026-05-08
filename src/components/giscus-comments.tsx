@@ -1,10 +1,13 @@
 'use client'
 
-import React from 'react'
 import Giscus from '@giscus/react'
 import { useTheme } from 'nextra-theme-blog'
 
-const GiscusComments = () => {
+type Props = {
+  lang?: string
+}
+
+const GiscusComments = ({ lang = 'vi' }: Props) => {
   const { theme } = useTheme()
 
   return (
@@ -19,7 +22,7 @@ const GiscusComments = () => {
       emitMetadata="0"
       inputPosition="top"
       theme={theme === 'dark' ? 'dark_tritanopia' : 'light_tritanopia'}
-      lang="vi"
+      lang={lang}
       loading="lazy"
     />
   )

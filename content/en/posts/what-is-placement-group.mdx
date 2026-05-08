@@ -1,0 +1,109 @@
+---
+title: 'What is a Placement Group? Strategies for Optimizing Instance Placement'
+date: '2026-01-26'
+tags: ['Devops', 'AWS', 'SAA', 'SAP']
+enableComment: true
+---
+
+# What is a Placement Group? Strategies for Optimizing Instance Placement
+
+![Placement group diagram](/ec2-instance-placement-groups-diagram.jpg)
+
+When working with traditional physical infrastructure, you have full control over placing Server A next to Server B (plugged into the same switch for faster networking) or placing Server C in a different building (for disaster protection). But when moving to the Cloud, everything is virtualized -- how do we control this?
+
+The answer is **Placement Group**.
+
+Today, let's explore what Placement Groups are and how to use them to optimize performance or safety for your systems on AWS.
+
+## 1. What is a Placement Group?
+
+Simply put, a **Placement Group (PG)** is a logical configuration that allows you to "hint" to AWS about how to arrange your EC2 Instances on physical hardware.
+
+When you launch a group of virtual servers, AWS places them randomly by default to optimize for AWS. However, with PG, you can request AWS to:
+
+- Place them **as close together as possible** (to optimize throughput, reduce latency).
+- Or place them **as far apart as possible** (to optimize availability, reduce hardware risk).
+
+Currently, AWS provides 3 main strategies: **Cluster**, **Spread**, and **Partition**.
+
+---
+
+## 2. Types of Placement Groups
+
+### A. Cluster Placement Group
+
+This is the "strength in unity" strategy.
+
+- **Mechanism:** AWS will try to place your instances within the same Availability Zone (AZ), and even on the same or adjacent server racks.
+- **Advantages:**
+- Extremely low network latency.
+- Extremely high throughput between nodes (up to 10-100 Gbps).
+
+- **Disadvantages:** "All or nothing." Since they are clustered together, if that rack experiences a power or network failure, your entire cluster of instances could go down at once.
+- **Use Case:** Suitable for High Performance Computing (HPC) applications, graphics rendering, or big data processing applications that require continuous and instantaneous network communication.
+
+### B. Spread Placement Group
+
+The opposite of Cluster, this is the "divide and conquer" strategy aimed at maximizing safety by avoiding "putting all your eggs in one basket."
+
+- **Mechanism:** Instances are guaranteed to be placed on completely different hardware (racks, power supplies, networks).
+- **Advantages:** Extremely high availability. A hardware failure on one instance will definitely not affect another.
+- **Disadvantages:**
+- Limited in quantity. You can have a maximum of **7 running instances** per AZ within a Spread PG. The reason is simply that physical space for complete isolation is finite.
+
+- **Use Case:** Suitable for critical applications and database clusters where the survival of each node is the top priority.
+
+### C. Partition Placement Group
+
+This is the "hybrid child," the perfect balance between Cluster and Spread designed for modern distributed systems.
+
+- **Mechanism:**
+- AWS divides your group into logical partitions called **Partitions**.
+- Instances **within the same Partition** can share hardware (like Cluster).
+- But **different Partitions** are placed on different racks (like Spread).
+- Supports up to **7 partitions** per AZ.
+
+- **Advantages:**
+- Allows scaling to a much larger number of instances than Spread (since each partition can hold many instances).
+- Still ensures fault isolation: if Partition 1's rack fails, Partition 2 continues running normally.
+- **Special feature:** Instances can access **Metadata** to know exactly which Partition they are in, enabling applications to self-coordinate data placement (Topology-aware).
+
+- **Use Case:** Large-scale distributed data systems (Big Data) such as **Hadoop HDFS, Cassandra, Kafka**. (For example: Kafka can replicate data to a partition on a different rack to ensure safety).
+
+---
+
+## 3. Quick Comparison Table
+
+| Feature           | Cluster                      | Spread                    | Partition                           |
+| ------------------ | ---------------------------- | ------------------------- | ----------------------------------- |
+| **Primary Goal** | Network Performance | Availability | Balance (Distributed Systems)      |
+| **Physical Location**  | Same Rack / Same AZ        | Completely Different Racks       | Same Rack (within 1 partition), Different Racks (between partitions) |
+| **Limits** | No instance limit | Max 7 instances / AZ | Max 7 partitions / AZ |
+| **Multi-AZ Support** | No (Single AZ only) | Yes | Yes |
+| **Best For** | HPC, Super computing | Database, Critical Apps | HDFS, Kafka, Cassandra |
+
+---
+
+## 4. How to Use
+
+A typical example is when you need to deploy a backend API application that requires high availability. You immediately think of the Spread strategy to distribute your instances across different racks, and even different AZs.
+
+You need to go to the AWS Console and create a Spread Placement Group.
+
+Then deploy your instances and assign them to the Placement Group you just created. That's it -- super simple.
+
+## 5. Important Notes
+
+To use Placement Groups effectively, you need to remember the following rules:
+
+1. **Cost:** The good news is that creating a Placement Group is completely **free**. You only pay for the resources (EC2, EBS, etc.) you use inside it.
+2. **Scope:** Placement Groups (regardless of type) **do not support Multi-Region**. You cannot group instances located in Singapore and Virginia into a single PG.
+3. **Optimization strategy:**
+
+- Need speed? Choose **Cluster**.
+- Need servers that never fail together? Choose **Spread**.
+- Running Big Data / Distributed Apps? Choose **Partition**.
+
+---
+
+_I hope this article gives you a clearer understanding of one of AWS's infrastructure configuration "hidden gems." See you in the next articles about AWS!_

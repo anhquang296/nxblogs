@@ -1,0 +1,259 @@
+---
+title: 'Cache Handbook: When Cache and Database "Lie" to Each Other - Decoding the Cache Consistency Problem'
+date: '2026-03-28'
+tags: ['Backend', 'System Design', 'Cache']
+enableComment: true
+---
+
+# Cache Handbook: When Cache and Database "Lie" to Each Other - Decoding the Cache Consistency Problem
+
+> This article is compiled and adapted from the book **"A Cache Handbook for Software Engineers"** by **Quang Hoang** (Software Engineer at Google). This is part **2/4** of the series.
+
+In a distributed system, Cache and Database are two independent entities residing on different servers. Ensuring consistency between them is a significant challenge.
+
+Imagine you are writing in **two notebooks placed at opposite ends of the city**. When you finish writing a line in notebook A (Database), there is no "magic" that instantly makes that line appear in notebook B (Cache). Every operation must travel through an unreliable medium: **the Network**.
+
+In theory, we could use **Distributed Transactions** (such as 2PC, 3PC protocols) to ensure Atomicity. However, "tying" both Cache and Database into a single transaction would cause significant latency. Therefore, a more practical goal is to achieve **Eventual Consistency**: Data may be inconsistent for a few milliseconds, but will eventually synchronize.
+
+---
+
+## 1. Cache Update Strategy: Delete or Overwrite?
+
+When data in the DB changes, we have two options:
+
+1. **Update Cache:** `cache.set(key, new_value)` — overwrite with the new value.
+2. **Delete (Invalidate) Cache:** `cache.del(key)` — delete the key, forcing the next read to fetch from DB.
+
+> **Recommendation:** Choose **Delete Cache**. This is the standard "Cache-Aside" pattern.
+
+### Why You Shouldn't "Update Cache" (The Double Write Problem)
+
+Suppose there are 2 threads A and B simultaneously updating the value of key `price`:
+
+- Thread A: Wants to set `price = 100`.
+- Thread B: Wants to set `price = 200`.
+
+**Failure scenario:**
+
+1. Thread A updates DB -> `price_db = 100`
+2. Thread B updates DB -> `price_db = 200`
+3. Thread B updates Cache -> `price_cache = 200`
+4. Thread A updates Cache -> `price_cache = 100`
+
+**Result:** DB stores **200** but Cache stores **100**. This inconsistency persists until the key expires (TTL).
+
+With the **Delete** strategy, both threads execute delete commands, and the final result is always an empty Cache (`null`), forcing the next request to reload the correct value from DB.
+
+---
+
+## 2. Order of Operations: Delete Cache First or Update DB First?
+
+Even with the Delete strategy, the **order of operations** still determines data correctness.
+
+### If You Delete Cache Before Updating DB
+
+Assume `price_db = price_cache = 100`. Thread A wants to update `price = 200`:
+
+1. Thread A deletes Cache -> `price_cache = null`
+2. Thread B queries, Cache Miss, reads DB -> `price_db = 100` (not yet updated)
+3. Thread B writes stale data to Cache -> `price_cache = 100`
+4. Thread A updates DB -> `price_db = 200`
+
+**Result:** Cache stores **100** (stale), DB stores **200** (new). Inconsistency!
+
+### If You Update DB Before Deleting Cache (Cache-Aside Pattern)
+
+1. Thread A updates DB -> `price_db = 200`
+2. Thread A deletes Cache -> `price_cache = null`
+
+This is the **most widely used pattern**. All read requests after step 2 will experience a Cache Miss and reload fresh data from DB.
+
+---
+
+## 3. Edge Cases That Cause Data Inconsistency
+
+Even with the standard Cache-Aside approach, distributed systems still have gaps due to network latency and architectural characteristics.
+
+### 3.1. Zombie Reader (Stale Set)
+
+This occurs when a Read Request is "delayed" at the wrong moment:
+
+1. **Thread A (Read)** has a Cache Miss, queries DB -> `price_db = 100`. Thread A suddenly stalls (GC pause or context switching).
+2. **Thread B (Write)** updates DB -> `price_db = 200` and deletes Cache -> `price_cache = null`.
+3. **Thread A (Read)** wakes up and writes the **stale** value **100** to Cache -> `price_cache = 100`.
+
+**Result:** `price_cache = 100`, `price_db = 200`.
+
+> Condition for this to happen: Thread B's DB Write + Cache Delete must complete faster than the time it takes Thread A to receive the DB result and write it to Cache. In practice, this probability is very low, but it can absolutely happen.
+
+### 3.2. Master-Slave Replication Lag
+
+In a **Master-Slave** (Leader-Follower) architecture:
+
+- All write operations (`INSERT`, `UPDATE`, `DELETE`) go to the **Master Database**
+- Master writes change logs (MySQL: `binlog`, PostgreSQL: `WAL`)
+- **Slaves** copy and replay the logs
+- Read operations (`SELECT`) go to **Slaves**
+
+**Failure scenario:** Assume `price = 100` across Master, Slave, and Cache.
+
+1. Thread A updates Master -> `price_master = 200`
+2. Thread A deletes Cache -> `price_cache = null`
+3. Thread B reads, Cache Miss -> queries **Slave**
+4. Due to **Replication Lag**, Slave hasn't received the new value -> returns `price_slave = 100`
+5. Thread B writes to Cache -> `price_cache = 100`
+6. Replication completes -> `price_slave = price_master = 200`
+
+**Result:** `price_master = price_slave = 200`, but `price_cache = 100`.
+
+### 3.3. Partial Failure
+
+When the App Server communicates with Database and Cache, we face the **Dual Write** problem (writing to 2 places):
+
+1. App sends `UPDATE` to Database -> **Success**.
+2. App prepares to send `DELETE` to Cache.
+3. **FAILURE:** App Server crashes (OOM, power loss), Cache Server times out, or network disconnects.
+4. The Cache delete command **never executes**.
+
+**Result:** Database has stored the new value, but Cache still holds the old value.
+
+---
+
+## 4. Solutions
+
+### 4.1. Delayed Double Delete
+
+This method deletes Cache **twice** to ensure cleanup of "remnants" caused by Replication Lag:
+
+1. Update DB -> `price_db = 200`
+2. Delete Cache -> `price_cache = null`
+3. **Sleep** for a duration `T`
+4. Delete Cache a second time -> `price_cache = null`
+
+Duration `T` must be greater than the Replication Lag time + the read thread execution time. Steps 3 and 4 are typically pushed to a **Background Worker** (Message Queue or background goroutine).
+
+**Drawbacks:** It is very difficult to choose the exact value for `T`:
+
+- `T` too small -> won't catch the Race Condition
+- `T` too large (e.g., 10 minutes) -> keeps stale data alive longer
+
+> **Practical tip:** Choose `T` in the range: `P99 Replication Lag + P99 Read Time < T < TTL`
+
+### 4.2. Change Data Capture (CDC)
+
+This is a more thorough solution, commonly used by large tech companies (Shopee also uses this approach) to **decouple Cache logic from Application Code**.
+
+**Processing flow:**
+
+1. The application **only executes DB Update commands**.
+2. DB writes changes to its log (Binlog/WAL). A CDC tool (such as **Debezium**, **Canal**) listens to the log and sends messages to a **Message Queue** (Kafka/RabbitMQ).
+3. An independent **Consumer Service** reads messages from the Queue and executes **Delete Cache** commands.
+
+**Advantages:**
+
+- Cache is only deleted after DB update succeeds. No worries about App crashing midway.
+- **Retry:** If the delete command fails, the Message Queue retries until it succeeds -> ensures Eventual Consistency.
+- **Decoupling:** Cleaner application code.
+
+**Drawbacks:** Does not fully solve Replication Lag. Can be improved with **Update Mode** (writing the new value directly to Cache instead of deleting), but this isn't always applicable because database logs typically contain raw data, while Cache stores complex objects (Aggregated Data).
+
+> You can absolutely **combine CDC and Delayed Double Delete** to increase reliability.
+
+### 4.3. Lease & Remote Marker
+
+This solution was published by **Facebook** in their 2013 paper, combining two mechanisms:
+
+- **Lease:** Grants write permission to Cache.
+- **Remote Marker:** Warns that data in the Master DB has just changed, and Slaves may not have synced yet.
+
+**Phase 1 — Writer updates data (Master DB side):**
+
+1. Write new data to Master DB.
+2. Set a **Remote Marker** in Cache (e.g., key `marker:product:123`) with a short TTL (1-2 seconds). Meaning: *"Warning! Source data just changed. Any data read from Slave right now is unreliable."*
+3. Delete old data in Cache (also deleting any existing Lease Token).
+
+**Phase 2 — Reader reads data (Slave DB side):**
+
+1. **Check Marker:** Does `marker:product:123` exist?
+   - **YES:** Return "Dirty Data" error. The user must retry or read directly from Master -> **prevents Replication Lag issues**.
+   - **NO:** Continue to step 2.
+2. **Lease Get:** Cache issues User A a Token T1.
+3. **Read DB:** User A reads data from Slave DB.
+4. **Lease Set:** User A returns to Cache to write data with Token T1. Cache checks whether the Token is still valid. If while A was away, another Writer ran Phase 1 (invalidating the Token), Token T1 will be rejected -> **prevents Zombie Reader**.
+
+**Pseudo Code:**
+
+```python
+MARKER_TTL = 2  # seconds
+MARKER_PREFIX = "marker:"
+
+def update_data_with_lease(key, new_data):
+    db_master.update(key, new_data)
+    marker_key = f"{MARKER_PREFIX}{key}"
+    cache.set(marker_key, "DIRTY", MARKER_TTL)
+    cache.delete(key)
+
+LEASE_TOKEN = "WORKING..."
+LEASE_TTL = 5  # seconds
+
+def read_data_with_cas_lease(key):
+    current_val = cache.get(key)
+
+    # Cache Hit
+    if current_val is not None and current_val != LEASE_TOKEN:
+        return current_val
+
+    # Cache Miss
+    if cache.setnx(key, LEASE_TOKEN, LEASE_TTL) == True:
+        db_data = db_slave.read(key)
+        # Check-and-Set (CAS): swap LEASE_TOKEN for db_data
+        # only if current value is still LEASE_TOKEN
+        success = cache.check_and_set(key, LEASE_TOKEN, db_data)
+        if not success:
+            # CAS failed! Zombie Reader successfully prevented!
+            log("Stale Set prevented by CAS!")
+        return db_data
+    else:
+        # Another request is holding the LEASE
+        sleep(50)
+        return read_data_with_cas_lease(key)
+```
+
+**Drawbacks:**
+
+- **High complexity:** Client-side logic becomes more complex.
+- **Increased latency:** During the time the Marker exists, read requests must retry or read from Master.
+- **Marker Eviction:** When Cache memory is full, marker keys may be evicted, losing their effect.
+
+---
+
+## 5. Comparison Matrix: Edge Cases vs. Solutions
+
+| | Zombie Reader | Replication Lag | Partial Failure | Complexity |
+|---|---|---|---|---|
+| **Cache-Aside** | :x: | :x: | :x: | Low |
+| **Delayed Double Delete** | :warning: (OK if lag < T) | :warning: (OK if lag < T) | :x: | Medium |
+| **CDC** | :x: | :warning: (if using Update Mode) | :white_check_mark: | High |
+| **Lease** | :white_check_mark: | :x: | :x: | Very High |
+| **Lease + Remote Marker** | :white_check_mark: | :white_check_mark: | :x: | Very High |
+
+> :white_check_mark: Solved — :warning: Mitigated — :x: Failed
+
+---
+
+## 6. Practical Advice
+
+In System Design, perfection often comes with a high cost. For most applications (social networks, news, e-commerce, blogs...), users seeing stale data for a few seconds is perfectly acceptable.
+
+1. **Start with Cache-Aside.** It is the industry standard for simplicity and effectiveness.
+2. **If you need higher reliability, consider CDC.** It strikes a good balance between Complexity and Consistency.
+3. **Only consider Lease & Remote Marker** when you are operating at "Hyperscale" like Facebook, where even 0.01% inconsistency affects millions of users.
+
+---
+
+## Series: Cache Handbook
+
+1. [Core Foundations of Caching](/posts/cache-fundamentals)
+2. **Decoding the Cache Consistency Problem** ← You are here
+3. [6 Classic "Traps" When Using Cache](/posts/cache-pitfalls)
+4. [From Monitoring to Scaling](/posts/cache-monitoring-and-scaling)

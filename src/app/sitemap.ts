@@ -4,6 +4,8 @@ import { getPageMap } from 'nextra/page-map'
 
 export const dynamic = 'force-static'
 
+const LOCALES = ['en', 'vi']
+
 interface SitemapEntry {
   url: string
   lastModified: string
@@ -18,16 +20,13 @@ const isFolder = (value: unknown): value is Folder =>
 const isMdxFile = (value: unknown): value is MdxFile =>
   typeof value === 'object' && value !== null && 'name' in value && 'route' in value && 'frontMatter' in value
 
-// Check if a page should be hidden based on meta
 const isPageHidden = (name: string, metaData: Record<string, Meta>): boolean => {
   const metaEntry = metaData[name]
 
-  // Check specific entry first
   if (typeof metaEntry === 'object' && metaEntry !== null && 'display' in metaEntry) {
     return metaEntry.display === 'hidden'
   }
 
-  // Check wildcard '*' fallback
   const wildcardEntry = metaData['*']
   if (typeof wildcardEntry === 'object' && wildcardEntry !== null && 'display' in wildcardEntry) {
     return wildcardEntry.display === 'hidden'
@@ -38,13 +37,11 @@ const isPageHidden = (name: string, metaData: Record<string, Meta>): boolean => 
 
 const toSitemapEntry = (pageMapEntry: PageMapItem, metaData: Record<string, Meta> = {}): SitemapEntry[] => {
   if (isFolder(pageMapEntry)) {
-    // Check if folder should be hidden
     if (isPageHidden(pageMapEntry.name, metaData)) {
       return []
     }
     return parsePageMapItems(pageMapEntry.children)
   } else if (isMdxFile(pageMapEntry)) {
-    // Check if page should be hidden
     if (isPageHidden(pageMapEntry.name, metaData)) {
       return []
     }
@@ -63,13 +60,11 @@ const toSitemapEntry = (pageMapEntry: PageMapItem, metaData: Record<string, Meta
 }
 
 const parsePageMapItems = (items: PageMapItem[]): SitemapEntry[] => {
-  // Get metadata if it exists
   const metaFile = items.find((item) => isMetaJsonFile(item))
   const metaData = (metaFile as MetaJsonFile | undefined)?.data ?? {}
 
-  // Process ALL items (not just those in meta)
   const sitemapEntries: SitemapEntry[] = items
-    .filter((item) => !isMetaJsonFile(item)) // Skip meta files themselves
+    .filter((item) => !isMetaJsonFile(item))
     .flatMap((pageMapEntry) => toSitemapEntry(pageMapEntry, metaData))
 
   return sitemapEntries
@@ -77,14 +72,30 @@ const parsePageMapItems = (items: PageMapItem[]): SitemapEntry[] => {
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://yoursite.com'
-  const pageMap = await getPageMap()
 
-  const entries = parsePageMapItems(pageMap)
+  const allRoutes = new Set<string>()
+  const latestModified = new Map<string, string>()
 
-  return entries.map((entry) => ({
-    url: `${baseUrl}${entry.url}`,
-    lastModified: entry.lastModified,
+  for (const locale of LOCALES) {
+    try {
+      const pageMap = await getPageMap(`/${locale}`)
+      const entries = parsePageMapItems(pageMap)
+      for (const entry of entries) {
+        allRoutes.add(entry.url)
+        const existing = latestModified.get(entry.url)
+        if (!existing || entry.lastModified > existing) {
+          latestModified.set(entry.url, entry.lastModified)
+        }
+      }
+    } catch {
+      // locale has no content yet
+    }
+  }
+
+  return Array.from(allRoutes).map((route) => ({
+    url: `${baseUrl}${route}`,
+    lastModified: latestModified.get(route)!,
     changeFrequency: 'weekly' as const,
-    priority: entry.url === '/' ? 1 : 0.8,
+    priority: route === '/' ? 1 : 0.8,
   }))
 }

@@ -3,8 +3,8 @@ import { useMDXComponents as getMDXComponents } from '@/mdx-components'
 import type { Metadata } from 'next'
 import { PostDetail } from '@/components/post-detail'
 
-// Define types for params and metadata
 type PageParams = {
+  lang: string
   mdxPath: string[]
 }
 
@@ -18,11 +18,11 @@ export type CustomMetadata = Metadata & {
   tags?: string[]
 }
 
-export const generateStaticParams = generateStaticParamsFor('mdxPath')
+export const generateStaticParams = generateStaticParamsFor('mdxPath', 'lang')
 
 export async function generateMetadata(props: PageProps): Promise<Metadata> {
   const params = await props.params
-  const { metadata } = await importPage(params.mdxPath)
+  const { metadata } = await importPage(params.mdxPath, params.lang)
   return metadata
 }
 
@@ -30,7 +30,7 @@ const Wrapper = getMDXComponents().wrapper
 
 export default async function Page(props: PageProps) {
   const params = await props.params
-  const result = await importPage(params.mdxPath)
+  const result = await importPage(params.mdxPath, params.lang)
 
   const { default: MDXContent, toc, metadata } = result
 
@@ -40,7 +40,7 @@ export default async function Page(props: PageProps) {
     // @ts-ignore
     <Wrapper toc={toc} metadata={metadata}>
       {isPostPage && (
-        <PostDetail metadata={metadata} toc={toc}>
+        <PostDetail metadata={metadata} toc={toc} lang={params.lang}>
           <MDXContent {...props} params={params} />
         </PostDetail>
       )}

@@ -1,0 +1,93 @@
+---
+title: 'Simplify SSH Login with a Handy Config File'
+date: '2026-01-05'
+tags: ['Tips']
+enableComment: true
+---
+
+If you frequently work with remote servers, typing long SSH commands with IP addresses and key file paths every time you log in is truly painful.
+
+Today, I'll share a small but powerful tip: Using the SSH Configuration File to turn complex commands into a short, memorable name!
+
+## 1. What Is the SSH Config File?
+
+Instead of remembering the IP, Username, and Port for each server, you can store all of them in a single configuration file. This works perfectly on **MacOS** and **Linux**. On **Windows**, you can do the same if you're using OpenSSH (available in newer versions of PowerShell or Command Prompt).
+
+---
+
+## 2. Super Simple Setup
+
+### Step 1: Open (or create) the config file
+
+Open your terminal and type the following command to edit the SSH configuration file (this file is located in the hidden `.ssh` directory in your Home folder):
+
+```bash
+nano ~/.ssh/config
+
+```
+
+*(You can also use `vim`, `code`, or any text editor you prefer).*
+
+### Step 2: Add Server Information
+
+Paste the following configuration into the file:
+
+```plaintext
+Host email-server
+    HostName 123.456.78.90
+    User ec2-user
+    IdentityFile ~/.ssh/my-key-pair.pem
+
+```
+
+**Where:**
+
+* **`Host`**: An alias you choose (e.g., `email-server`, `web-prod`, `db`). This is the name you'll use to log in.
+* **`HostName`**: The Public IP address or domain name of the server.
+* **`User`**: The username for login (e.g., `root`, `ubuntu`, `ec2-user`).
+* **`IdentityFile`**: The path to your Private Key file (`.pem` or `.pub`).
+
+### Step 3: Save and exit
+
+If using `nano`, press `Ctrl + O` then `Enter` to save, and `Ctrl + X` to exit.
+
+---
+
+## 3. Set File Permissions (Important)
+
+To ensure security and avoid "Permission denied" errors from SSH, you need to set permissions so that only your account can read this file:
+
+```bash
+chmod 600 ~/.ssh/config
+
+```
+
+---
+
+## 4. Result: Log In in 1 Second!
+
+Now, instead of typing a tedious command like this:
+
+```bash
+ssh -i ~/.ssh/my-key-pair.pem ec2-user@123.456.78.90
+
+```
+
+You only need to type:
+
+```bash
+ssh email-server
+
+```
+
+**That's it!** You're in your server in the blink of an eye.
+
+---
+
+## Why You Should Do This Right Now
+
+* **Save time**: No more copy-pasting IPs or hunting for key file paths.
+* **Avoid mistakes**: No risk of mistyping an IP or username.
+* **Professional management**: When your server list grows to 5-10 entries, this config file will be your lifesaver for keeping everything organized.
+
+Try it now and level up your workflow!

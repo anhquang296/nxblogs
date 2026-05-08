@@ -1,0 +1,134 @@
+---
+title: 'How to Test Side Effect of Burst CPU on AWS Auto Scaling'
+date: '2026-05-03'
+tags: ['Devops', 'AWS']
+enableComment: true
+---
+
+# How to Test Side Effect of Burst CPU on AWS Auto Scaling
+
+When deploying an Auto Scaling Group (ASG) on AWS, I always have a question in mind: **"Will the scaling policy actually work when CPU exceeds the threshold?"** Instead of waiting until production gets overwhelmed to find out, I decided to stress test it myself to witness ASG spinning up additional instances.
+
+This article shares how I SSH into an EC2 instance, use the `stress` tool to push CPU high, and observe everything happening on CloudWatch.
+
+---
+
+## Why Test?
+
+There are 2 main use cases I wanted to verify:
+
+**Use case 1: Verify ASG Scaling Policy**
+
+You've configured ASG with a scaling policy -- for example, scale out when average CPU exceeds 70%. But does it actually work? Don't wait until your production system is under real load to discover a misconfigured policy. Test first, rest easy later.
+
+**Use case 2: Verify CloudWatch Alarm & Notification**
+
+Beyond auto scaling, you also need to ensure that **CloudWatch Alarm sends notifications at the right time** -- via email, SMS, or Slack through an SNS topic. When the system is overloaded, your team needs to be notified **immediately** so they can intervene in time. Stress testing helps you verify the entire pipeline: CPU spikes -> Alarm triggers -> Notification reaches the right people.
+
+---
+
+## Prerequisites
+
+Before starting, make sure you have:
+
+- **ASG** configured with a scaling policy (Target Tracking or Step Scaling) with a CPU threshold (e.g., 70%)
+- **CloudWatch Alarm** set up with SNS notification (email, SMS, Slack...)
+- **EC2 instances** running in the ASG
+- **SSH access** to the instances
+
+---
+
+## Step 1: SSH into the EC2 instance and install stress
+
+SSH into one of the EC2 instances running in the ASG:
+
+```bash
+ssh -i your-key.pem ec2-user@<instance-public-ip>
+```
+
+Next, install the `stress` tool:
+
+**Amazon Linux 2:**
+
+```bash
+sudo amazon-linux-extras install epel -y
+sudo yum install stress -y
+```
+
+**Amazon Linux 2023+:**
+
+```bash
+sudo dnf install stress -y
+```
+
+**Ubuntu:**
+
+```bash
+sudo apt-get update
+sudo apt-get install stress -y
+```
+
+---
+
+## Step 2: Run stress to push CPU high
+
+After installation, run the following command to spike CPU:
+
+```bash
+stress --cpu 4 --timeout 300s
+```
+
+Explanation:
+- `--cpu 4`: Creates 4 worker processes, each running continuous calculations to burn CPU. If your instance has 2 vCPUs, 4 workers will push CPU close to 100%.
+- `--timeout 300s`: Runs for 5 minutes. Enough time for CloudWatch to collect metrics and trigger alarms (CloudWatch collects metrics every 5 minutes for basic monitoring by default, or every 1 minute for detailed monitoring).
+
+Open another terminal, SSH into the same instance, and run `top` to watch CPU usage in real time:
+
+```bash
+top
+```
+
+You'll see CPU usage jump to nearly **100%** immediately. For a more visual interface, use `htop`:
+
+```bash
+sudo yum install htop -y  # Amazon Linux
+htop
+```
+
+> **Tip:** If you want to test on multiple instances simultaneously, SSH into each instance and run `stress` on all of them. This will push the **average CPU utilization** of the entire ASG up faster, triggering the scaling policy sooner.
+
+---
+
+## Step 3: Observe the results
+
+After running stress, go back to the AWS Console and observe:
+
+### CloudWatch Monitoring
+
+Go to **CloudWatch -> Metrics -> EC2**, and you'll see the instance's CPU Utilization spike to nearly 100%. The graph line will jump sharply -- this is the moment you've been waiting for.
+
+### CloudWatch Alarm
+
+Go to **CloudWatch -> Alarms**, and the alarm you configured will switch to the **"In alarm"** state (red). At this point:
+
+- The SNS topic gets triggered
+- You'll receive an **email or SMS alert** that the system is overloaded
+- If Slack is integrated, an alert message will also appear in the channel
+
+This is when you verify that: **when the system truly encounters an issue, the team will be notified immediately**.
+
+### Auto Scaling Group
+
+Go to **EC2 -> Auto Scaling Groups**, and you'll see:
+
+- **Desired Capacity** increases (e.g., from 2 to 3)
+- A new instance is being **launched** (status Pending -> InService)
+- **Activity History** records the scaling event with a clear reason
+
+The entire process from CPU spike to new instance creation typically takes about **3-5 minutes**, depending on your evaluation period and cooldown period configuration.
+
+---
+
+## Conclusion
+
+With just a simple tool like `stress` and a few minutes of waiting, you can verify that both the **ASG scaling policy** and **CloudWatch Alarm notification** work as expected. This is something you should do every time you set up new infrastructure -- don't wait until the system is actually overloaded to discover that the alarm isn't firing or ASG isn't scaling.

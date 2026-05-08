@@ -1,0 +1,131 @@
+---
+title: 'Automating Free Wildcard SSL with acme.sh and Namecheap DNS API'
+date: '2025-05-02'
+tags: ['Devops']
+enableComment: true
+---
+
+# Automating Free Wildcard SSL with acme.sh and Namecheap DNS API
+
+Since my company uses Namecheap as our DNS provider, I want to share this specific workflow. However, if you use a different provider, don't worry — `acme.sh` supports over 100 different DNS providers including Cloudflare, Google Cloud, and Azure.
+
+Managing SSL certificates manually has always been a lingering pain for DevOps engineers, especially when Let's Encrypt certificates expire every 90 days. Today, I'll walk you through how to fully automate the SSL lifecycle: **Issue -> Install -> Auto-Renew** for Wildcard SSL certificates using `acme.sh`.
+
+---
+
+## 1. Why Choose acme.sh?
+
+Compared to the popular Certbot tool, `acme.sh` has some outstanding advantages that I really appreciate:
+
+* **Extremely lightweight:** It's a pure shell script with no dependency on Python or any heavy libraries.
+* **Broad support:** Integrates with over 100 DNS providers via API.
+* **Easy Wildcard handling:** Simplifies the process of issuing certificates for both the root domain and all subdomains (e.g., `*.domain.com`).
+
+---
+
+## 2. Prerequisites
+
+To use the **DNS-01 Challenge** method (required for Wildcard SSL), you need:
+
+1. **Namecheap account:** Must have API access enabled.
+> *Note:* Namecheap requires a minimum account balance of $50 or a certain spending history to unlock this feature.
+
+
+2. **API Credentials:** Your API Key and Username.
+3. **Whitelisted IP:** You must add the public IP address of the server running `acme.sh` to the whitelist in Namecheap's API control panel.
+
+---
+
+## 3. Detailed Implementation Steps
+
+### Step 0: Install acme.sh
+
+```bash
+curl https://get.acme.sh | sh -s email=<your-email-here>
+```
+
+### Step 1: Configure Environment Variables
+
+First, you need to declare the API credentials so that `acme.sh` can automatically create TXT records for DNS validation.
+
+```bash
+export NAMECHEAP_USERNAME="your_username"
+export NAMECHEAP_API_KEY="your_api_key"
+export NAMECHEAP_SOURCEIP="your_server_ip"
+
+```
+
+> **Hard-learned lesson:** If you forget `NAMECHEAP_SOURCEIP`, the process will fail immediately because Namecheap's API will reject requests from unverified sources.
+
+### Step 2: Issue the Wildcard SSL Certificate
+
+Run the following command to start the validation and issuance process. Here I'm using Let's Encrypt as the CA (Certificate Authority).
+
+```bash
+acme.sh --issue \
+  --dns dns_namecheap \
+  -d aidenthenotorious.com -d *.aidenthenotorious.com \
+  --server letsencrypt
+
+```
+
+**Command explanation:**
+
+* `--dns dns_namecheap`: Uses the dedicated script for Namecheap to automatically create TXT records.
+* `-d aidenthenotorious.com -d *.aidenthenotorious.com`: Registers for both the root domain and all subdomains.
+* `--server letsencrypt`: Specifies Let's Encrypt as the CA (since `acme.sh` now defaults to ZeroSSL).
+
+### Step 3: DNS Validation
+
+After running the command, `acme.sh` will add TXT records to your DNS. The system typically waits about 20 seconds for DNS to propagate globally. When you see the `Success` message, your certificate has been saved at: `~/.acme.sh/aidenthenotorious.com_ecc/`.
+
+---
+
+## 4. Auto-Renewal
+
+The real power of `acme.sh` lies in its ability to self-manage a Cronjob to check and renew certificates before they expire.
+
+### Set Up Cronjob and Auto-Reload Nginx
+
+To avoid manually restarting the web server every time the certificate is updated, use this command:
+
+```bash
+acme.sh --install-cronjob --reloadcmd "sudo systemctl reload nginx"
+
+```
+
+**What does this command do?**
+
+1. **Schedules:** Creates a daily Cronjob.
+2. **Checks:** If the certificate is about to expire, it automatically runs the renewal command.
+3. **Hot Reload:** After successful renewal, it triggers `reload nginx` to apply the new certificate without dropping user connections.
+
+---
+
+## 5. Results
+
+After completion, you'll have the following important files in the directory:
+
+* **Cert:** `aidenthenotorious.com.cer`
+* **Key:** `aidenthenotorious.com.key`
+* **Fullchain:** `fullchain.cer` (**Note:** Always use this file for your Nginx configuration).
+
+### Nginx Configuration Reference:
+
+```nginx
+ssl_certificate /home/username/.acme.sh/aidenthenotorious.com_ecc/fullchain.cer;
+ssl_certificate_key /home/username/.acme.sh/aidenthenotorious.com_ecc/aidenthenotorious.com.key;
+
+```
+
+---
+
+## Conclusion
+
+With the combination of `acme.sh` and Namecheap API, SSL management is now a "set it and forget it" task. The system will run reliably on its own, and you no longer need to worry about your website showing "not secure" warnings.
+
+**Final security warning:** Always protect the environment files containing your API Key. If this information is exposed, an attacker could take control of your entire DNS records!
+
+---
+
+*Are you using a different tool to manage SSL? Share your experience in the comments below!*

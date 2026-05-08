@@ -1,0 +1,246 @@
+---
+title: 'RDS Read Replica vs Multi-AZ: Both Are "Copies", but Don''t Mix Them Up!'
+date: '2026-05-03'
+tags: ['Devops', 'AWS', 'Database']
+enableComment: true
+---
+
+# RDS Read Replica vs Multi-AZ: Both Are "Copies", but Don't Mix Them Up!
+
+When first working with AWS RDS, there's a question that almost everyone has stumbled on at least once:
+
+> "Read Replica and Multi-AZ — aren't they both just copies of the database? So does it matter which one I pick?"
+
+The answer is **NO**. These two things look similar on the surface (both involve "adding another DB instance alongside") but they were created to solve **two completely different problems**:
+
+- **Multi-AZ** — designed for **High Availability (HA)**: the system doesn't go down when an AZ dies.
+- **Read Replica** — designed for **Read Scaling**: offloading read traffic from the primary so the DB doesn't get overwhelmed.
+
+Confusing these two concepts has caused many production incidents. In this article, I'll break down how each one works, when to use them, and most importantly — **why real production systems usually need both**.
+
+---
+
+## 1. Before Diving In: Synchronous vs Asynchronous Replication
+
+Since the entire article revolves around these two concepts, let me clarify them first. Both describe **how the primary "transfers" data to the copy**, differing only in **whether the primary waits for the copy to confirm before telling the client "write complete"**.
+
+### Synchronous — "I won't move on until you're done"
+
+When the client sends an `INSERT/UPDATE` statement, the primary will:
+
+```
+Client ──► Primary
+           1. Write to local storage
+           2. Send to Standby, WAIT for standby to finish writing
+           3. Standby confirms "write complete"
+           4. Only then Primary returns "OK" to Client
+```
+
+Characteristics:
+
+- **No data loss** when the primary dies — because every commit is already present on the standby.
+- **Higher latency** — each write requires a network round-trip to another AZ (~1-2ms within the same region) before the user sees "success".
+- **Depends on standby health** — if the standby is slow or the network between AZs is poor, writes on the primary will also slow down.
+
+> This is why AWS only does sync replication within **a single region** (across nearby AZs with low latency). Syncing across regions would be a latency nightmare.
+
+### Asynchronous — "Go ahead, I'll catch up on my own"
+
+![Asynchronous Replication](/rds-async-replication.svg)
+
+Characteristics:
+
+- **Low latency** — the primary returns OK as soon as it finishes writing locally, without waiting for anyone.
+- **Has replication lag** — the replica is always "behind" the primary by a small margin. Under normal conditions it's a few ms; under heavy load or poor network conditions, it can grow to several seconds or more.
+- **Risk of data loss** if the primary dies before logs are sent to the replica → the last few transactions may "vanish".
+- **Scales well** — since the primary isn't blocked, you can have many replicas in parallel, even in other regions.
+
+### Quick Comparison
+
+| Criteria                          | Synchronous            | Asynchronous               |
+| --------------------------------- | ---------------------- | -------------------------- |
+| Primary waits for copy?           | Yes                    | No                         |
+| Write latency                     | Higher                 | Low                        |
+| Replication lag                   | ~0                     | Yes (ms → s)               |
+| Data loss when primary dies?      | No                     | Possible (last transactions)|
+| Best suited for                   | HA / zero data loss    | Scaling, cross-region      |
+
+Remember this: **Multi-AZ uses synchronous, Read Replica uses asynchronous**. This is the root reason why they behave completely differently in the sections below.
+
+---
+
+## 2. Multi-AZ Deployment: The Silent Standby
+
+Multi-AZ (Multi Availability Zone) is the feature that keeps your database alive when an entire AWS Availability Zone goes down.
+
+### How It Works
+
+When you enable Multi-AZ, AWS creates:
+
+- **1 Primary instance** in AZ-A — serves all read/write traffic.
+- **1 Standby instance** in AZ-B — a **synchronous replication** copy of the primary.
+
+![Multi-AZ Synchronous Replication](/rds-multi-az-sync.svg)
+
+The "special" point that's often misunderstood:
+
+> **The standby instance does NOT serve any traffic** — not even read queries. It just sits there, continuously syncing data, waiting for the moment... the primary goes down.
+
+### When Failover Occurs
+
+- Primary dies → AWS automatically switches the DNS endpoint to the standby (~60-120s).
+- The app **doesn't need to change its connection string** — same endpoint, just a different instance behind it.
+- After failover, AWS automatically provisions a new standby in the remaining AZ.
+
+### Trade-offs of Multi-AZ
+
+This is a point that's **very often overlooked** when discussing Multi-AZ. Because replication is **synchronous**, every `INSERT/UPDATE/DELETE` statement needs an extra round-trip to another AZ before the primary returns "OK" to the app.
+
+![Write Latency: Single AZ vs Multi-AZ](/rds-write-latency.svg)
+
+Specifically:
+
+- **Each commit adds ~1-3ms of latency** (networking between AZs in the same region is well-optimized by AWS, but it's still not free).
+- **Write throughput** may decrease slightly, especially with **OLTP workloads with many small transactions** (each transaction = one wait for standby acknowledgment).
+- **If the standby is slow or the inter-AZ network has issues**, writes on the primary also slow down — because the primary is blocked waiting for the ack.
+
+Impact varies by workload:
+
+| Workload type                    | Affected?                      |
+| -------------------------------- | ------------------------------ |
+| Read-heavy                       | Barely noticeable              |
+| Large write batches (few commits)| Minimal                        |
+| OLTP with many small transactions| **Noticeably impacted**        |
+| Row-by-row bulk inserts          | Noticeable — should batch instead|
+
+> **This is the real trade-off: you exchange a few ms of write latency for High Availability.**
+
+In almost every production scenario, **this is an excellent deal** — trading 1-3ms for 99.95% uptime SLA and not getting woken up at 3 AM. If your app is sensitive to 2ms, the issue is usually elsewhere (N+1 queries, missing connection pool, app↔DB network...) not Multi-AZ.
+
+Only consider disabling Multi-AZ when:
+
+- You've measured specifically and confirmed Multi-AZ is the actual bottleneck.
+- Your workload prioritizes extreme write throughput (log ingestion, time-series) — and at that point you should switch to a different database (DynamoDB, ClickHouse, Timestream) rather than tuning RDS.
+- It's a dev/staging environment that doesn't need HA.
+
+### When to Use?
+
+> **Any production database.** Multi-AZ is basic "insurance" — the cost is roughly double plus a few ms of write latency, but you get uptime SLA and don't have to wake up at 3 AM because AZ-A had an incident.
+
+### A Note: Multi-AZ Cluster (Newer Option)
+
+Recently AWS added the **Multi-AZ DB Cluster** option with **1 writer + 2 readable standbys**. This means the 2 standbys can now serve read traffic. It sounds like Read Replica but it's still synchronous, and the primary goal is still HA, not horizontal read scaling. Don't confuse it with regular Read Replicas.
+
+---
+
+## 3. Read Replica: The "Copy" for Offloading Reads
+
+When your primary starts getting overwhelmed by read queries — dashboards, reports, list pages... — that's when Read Replica enters the picture.
+
+### How It Works
+
+```
+                     ┌──────────────────┐
+              ┌──────│   Primary (DB)   │──────┐
+              │      │   read + write   │      │
+              │      └──────────────────┘      │
+   async replication                            async replication
+              │                                 │
+              ▼                                 ▼
+   ┌──────────────────┐               ┌──────────────────┐
+   │  Read Replica 1  │               │  Read Replica 2  │
+   │   (read-only)    │               │   (read-only)    │
+   │  separate endpoint│              │  separate endpoint│
+   └──────────────────┘               └──────────────────┘
+```
+
+Core differences from Multi-AZ:
+
+- **Asynchronous replication** — the primary doesn't wait for the replica to confirm, so writes are faster, but replicas always have **lag (replication lag)**, from a few ms to several seconds depending on load.
+- **Replicas serve read traffic** — you route analytics queries, reports, list pages... to the replica to free up the primary.
+- **Separate endpoints** for each replica — the app must **proactively** route read queries to replicas (via proxy, config, or Aurora's reader endpoint).
+- **Can be placed cross-Region** — serve users in other regions with lower latency, and also serves as a form of DR (Disaster Recovery).
+- Maximum **5 replicas** with MySQL/MariaDB/PostgreSQL/Oracle, **15 replicas** with Aurora.
+
+### The Biggest Trap: Replication Lag
+
+Since replication is async, if a user just POSTed a comment and immediately GETs the list, the GET request might be routed to a replica that hasn't received the data yet — and the user sees their "comment disappear."
+
+This is the **Read-Your-Writes Consistency** problem. I wrote a separate detailed article: [Solving the "Just Wrote It, Can't See It" Problem](/posts/read-your-write-consistency).
+
+### When to Use?
+
+> When the primary has been optimized to the max (indexes, queries, instance size) and is still running hot — especially with **read-heavy** workloads (reports, dashboards, search). Or when you need to serve users cross-region.
+
+Additionally, when the primary goes down, RDS allows you to promote a read replica to become the new primary.
+
+---
+
+## 4. Quick Comparison Table
+
+| Criteria              | Multi-AZ                       | Read Replica                    |
+| --------------------- | ------------------------------ | ------------------------------- |
+| **Purpose**           | High Availability              | Scale reads                     |
+| **Replication**       | Synchronous                    | Asynchronous                    |
+| **Serves traffic**    | No (traditional standby)       | Yes (read-only)                 |
+| **Auto failover**     | Yes                            | No (manual promotion required)  |
+| **Endpoint**          | Same endpoint as primary       | Separate endpoint               |
+| **Cross-Region**      | No                             | Yes                             |
+| **Replication lag**   | ~0 (sync)                      | Yes (a few ms → a few seconds)  |
+| **Cost**              | ~2x instance                   | +1x per replica                 |
+
+---
+
+## 5. So Which One Should You Choose?
+
+- **Only need HA** (database isn't overloaded with reads): Multi-AZ is sufficient.
+- **Only need to scale reads** (dev/staging or heavy read workloads where you accept downtime if an AZ fails): Read Replica.
+- **Real production**: use **both**.
+
+```
+                  ┌────────────────────┐
+                  │  Primary (AZ-A)    │
+                  │  read + write      │◄────┐
+                  └─────────┬──────────┘     │
+                            │ sync           │ async
+                            ▼                │
+                  ┌────────────────────┐     │
+                  │  Standby (AZ-B)    │     │
+                  │  HA failover       │     │
+                  └────────────────────┘     │
+                                             │
+                  ┌────────────────────┐     │
+                  │  Read Replica(s)   │─────┘
+                  │  scale read        │
+                  └────────────────────┘
+```
+
+A useful tip: in a "major fire" situation, a Read Replica can be **promoted** to become a standalone primary — this is a fairly common cross-region DR strategy when Multi-AZ (which only works within the same region) isn't enough.
+
+---
+
+## 6. Common Pitfalls
+
+**1. Treating Read Replica as a backup.**
+Wrong. The replica also replicates destructive operations. `DROP TABLE` on the primary → a few seconds later the replica also loses that table. Real backups require **Automated Backup / Snapshot / PITR**.
+
+**2. Reading from a Replica and expecting "instant visibility after writing."**
+Replication lag is inherent with async. Design your UX/query routing to accept lag, or force reads back to the primary for flows requiring consistency.
+
+**3. Treating Multi-AZ as multi-region DR.**
+Multi-AZ only protects at the **AZ level within a single Region**. If the entire us-east-1 Region goes down (it has happened), Multi-AZ can't help. Cross-region DR requires cross-region Read Replicas or Aurora Global Database.
+
+**4. Believing the Multi-AZ standby is "wasted" and trying to open read traffic to it.**
+The traditional standby doesn't have a separate endpoint — you can't read from it. If you want the standby to serve reads, switch to **Multi-AZ DB Cluster** (3 nodes) or use Aurora.
+
+---
+
+## Conclusion
+
+One sentence to remember:
+
+> **Multi-AZ for uptime. Read Replica for throughput.**
+
+Two mechanisms with different goals, different replication methods, and different ways the app interacts with them. In a serious production environment, don't treat them as interchangeable — you usually need both, each solving a different problem.
+
+Next time you set up RDS, ask the right question: "Am I worried about downtime, or am I worried about the DB running too hot?" The answer will naturally lead you to the right choice.

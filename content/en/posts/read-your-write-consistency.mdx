@@ -1,0 +1,79 @@
+---
+title: 'Solving the "Just Wrote It, Can''t Read It" Problem: Read-Your-Writes Consistency & Session Sticky'
+date: '2026-01-14'
+tags: ['Database']
+enableComment: true
+---
+
+![Read Your Write Consistency](/read-your-write-consistency.jpeg)
+
+# Solving the "Just Wrote It, Can't Read It" Problem: Read-Your-Writes Consistency & Session Sticky
+
+You just set up Database Replication to offload your Primary DB and optimize latency for users across different geographic regions. Everything seems fine until users start complaining: *"I just saved my post, but when I refresh, I see the old content"*.
+
+Welcome to the world of **Replication Lag**.
+
+## 1. The Root Cause: When Eventual Consistency Backfires
+
+In the **Asynchronous Replication** model, when you write data to the Primary, it takes some time (from a few milliseconds to several seconds) to sync to the Replicas. This delay is called **Replication Lag**.
+
+If a User performs a **Write** to the Primary, then immediately performs a **Read** but the Load Balancer routes the request to a Replica that hasn't caught up yet, the user will see stale data. This violates the principle of **Read-Your-Writes (RYW) Consistency**.
+
+## 2. Strategies: From Simple to Complex
+
+### Approach 1: Pinning User to Primary (Session Sticky)
+
+This is the most common approach. After a User performs a write operation, the system "marks" them and forces all subsequent read requests from that User to go to the Primary for a set period of time (e.g., 10-30 seconds).
+
+* **Pros:** Extremely easy to implement at the Application or Load Balancer layer.
+* **Cons:** If the application has a high write volume, the Primary still gets stressed. Replicas may be underutilized.
+* **Variation (Fragmented Pinning):** Only route "Critical Reads" (tables that were just written to) to the Primary, while other static data is still read from Replicas.
+
+### Approach 2: Bitbucket's Approach - Smart Routing Based on LSN
+
+While browsing the internet, I found a pretty clever solution from Bitbucket *[Link](https://ujjwal18.hashnode.dev/implementing-read-your-write-consistency-in-distributed-databases-a-deep-dive-into-bitbuckets-approach)*
+
+Bitbucket solved this problem elegantly by tracking the **LSN (Log Sequence Number)** or **Timestamp**.
+
+* **Mechanism:** When a User writes data successfully, the Primary DB returns an identifier for that record (LSN). The application stores this LSN in the User's **Cookie** or **Session**.
+* **On Read:** The application sends this LSN along with the request. The system checks: *Has this Replica caught up to this LSN?*
+* **If yes:** Allow reading from the Replica.
+* **If no:** Route to the Primary or make the Replica wait until it catches up to that LSN.
+
+
+* **Benefit:** Maximizes Replica utilization while ensuring 100% that users see their own latest data.
+
+### Approach 3: Using a Cache Layer (Redis) as a Buffer
+
+Instead of relying entirely on the DB, write new data to Redis with a short TTL (equal to or slightly greater than the Max Replication Lag).
+
+* **Logic:** Read from Redis first -> If not found, then Read from the DB.
+* **Caution:** This is a double-edged sword. If not managed well, you'll run into complex **Cache Invalidation** issues, leading to extremely smelly code that is incredibly hard to debug when data between Redis and the DB doesn't match.
+
+### Approach 4: Database-Level Solutions (AWS Aurora Write Forwarding)
+
+Some modern Cloud services like AWS Aurora support **Write Forwarding**. You can send Write commands directly to a Read Replica, which will automatically forward them to the Primary and keep the session consistent so users always see the latest data. This is a premium solution since it's expensive, but extremely convenient for Engineers.
+
+---
+
+## 3. Contrarian Views: Should You Even Use Replicas for Read Traffic?
+
+There are strong opinions arguing: Don't push Read Traffic from your App to Replicas just to reduce load. Handling RYW Consistency is overly complex. If your system requires 100% fresh data, forcing Replicas into the mix will create dozens of hidden bugs.
+
+Instead, measure your primary instance. If CPU is consistently at 60-70% or below, it's still handling the load well. Consider vertical scaling first -- increase the primary instance's power within reasonable limits (since this is the simplest approach with immediate results).
+
+Consider using Replicas for use cases like reporting, analytics, or applications that don't require 100% fresh data.
+
+If you need high performance, focus on **Caching (Redis/Memcached)** instead of trying to optimize Replication Lag.
+
+---
+
+## 4. Summary & Deployment Advice
+
+Choosing the right solution depends on your risk tolerance and system complexity:
+
+1. **Small/medium systems:** Use **Session Sticky (Pinning to Master)**. After a write, let the user read from Master for 20s. Simple and effective.
+2. **Large-scale systems (like Bitbucket/GitHub):** Implement **LSN Tracking** via Cookies to leverage Replicas without sacrificing user experience.
+3. **Systems requiring ultra-high speed:** Use **Redis** as a front buffer layer, but make sure you have a clear invalidation pattern to avoid logic errors.
+
+**Final advice:** Before applying any complex technique, benchmark your Primary DB. Sometimes a good Index or a DB configuration upgrade is enough to solve the problem without needing dozens of Replica nodes.

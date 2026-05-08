@@ -1,0 +1,400 @@
+---
+title: 'Redis Sorted Set: Skip List + Hash Table — The Data Structure Duo Behind Redis O(log N)'
+date: '2026-05-06'
+tags: ['Backend', 'Redis', 'Data Structures']
+enableComment: true
+---
+
+# Redis Sorted Set: Skip List + Hash Table — The Data Structure Duo Behind Redis O(log N)
+
+You're building a leaderboard for a game with 10 million players. Every second, thousands of score updates pour in. The system needs to answer two questions in **under 1ms**: *"What rank is Player X?"* and *"Who are the top 100?"*
+
+If you use SQL: `SELECT * FROM scores ORDER BY score DESC LIMIT 100` on a 10 million row table — even with an index — still takes tens to hundreds of milliseconds. Add a `WHERE` for individual rank and you'd have to scan the entire table.
+
+Then someone says: *"Just use Redis `ZADD` and `ZREVRANK`."* You try it — **sub-millisecond**. But why? What data structure inside Redis makes it this fast?
+
+If you've read the [Rate Limiting Patterns](/posts/rate-limiting-patterns) article, you've already seen Sorted Set appear in the Sliding Window Log section — `ZADD`, `ZREMRANGEBYSCORE`, `ZCARD`. This article will dissect what's happening **underneath** those commands.
+
+---
+
+## 1. What is a Sorted Set?
+
+**Sorted Set** (or **ZSet**) is a Redis data type that stores `(member, score)` pairs:
+
+- **Member**: a unique string (no duplicates) — like a key in a hash map.
+- **Score**: a 64-bit real number (IEEE 754 double) — used for ordering.
+
+Redis **automatically maintains order** by score (ascending). If two members have the same score, they are sorted by lexicographic order of the member name.
+
+![Sorted Set Overview](/sorted-set-overview.svg)
+
+### Key commands and their complexity
+
+| Command | Complexity | Purpose |
+|---------|-----------|---------|
+| `ZADD` | O(log N) | Add/update a member |
+| `ZSCORE` | O(1) | Get a member's score |
+| `ZRANK` | O(log N) | Get a member's rank |
+| `ZRANGE` | O(log N + M) | Get a range of members by rank |
+| `ZRANGEBYSCORE` | O(log N + M) | Get a range of members by score |
+| `ZREM` | O(log N) | Remove a member |
+| `ZPOPMIN` | O(log N) | Remove and return the member with the lowest score |
+| `ZINCRBY` | O(log N) | Increment a member's score |
+
+> N = total number of elements, M = number of elements returned.
+
+Notice something: `ZSCORE` is **O(1)**, while `ZRANK` and `ZRANGE` are **O(log N)**. If you used only a single data structure, you couldn't achieve both complexities simultaneously. This is the clue that inside Sorted Set there are **two data structures** working together.
+
+---
+
+## 2. Hash Table — The O(1) "Phone Book"
+
+### 2.1. What is a Hash Table?
+
+A hash table is a data structure that stores data as **key-value** pairs, using a **hash function** to map keys to positions (buckets) in an array.
+
+Think of a hash table like a **phone book**: you know the name of the person you need to call, flip to the right alphabetical page, and find their phone number almost instantly. No need to flip through every page from the beginning.
+
+- **Lookup**: O(1) average
+- **Add/remove**: O(1) average
+- **Downside**: no ordering — you can't ask "what are the 10 smallest phone numbers?"
+
+### 2.2. Role in Sorted Set
+
+In a Sorted Set, the hash table handles one very specific task: **mapping `member → score`**.
+
+![Hash Table in Sorted Set](/sorted-set-hash-table.svg)
+
+Thanks to the hash table, three operations become extremely fast:
+
+1. **`ZSCORE key member`** — returns the member's score in O(1). Just hash the member name → find the bucket → get the score.
+2. **Duplicate check during `ZADD`** — before adding a new member, Redis checks the hash table to see if the member already exists. If so → this is a score update (delete old position in skip list, insert new position). If not → new insert.
+3. **`ZREM key member`** — needs to find the member to delete. The hash table locates the member in O(1), then deletes it from the skip list.
+
+In short: the hash table is the "fast lookup engine" — whenever Redis needs to answer *"does this member exist? what's its score?"*, the hash table answers in O(1).
+
+But the hash table **doesn't know about ordering**. You can't ask the hash table *"who's ranked #1?"* or *"list all members with scores from 1000 to 2000"*. That's the skip list's job.
+
+---
+
+## 3. Skip List — The O(log N) "Express Train System"
+
+### 3.1. The problem to solve
+
+We need a data structure that supports:
+- Data that is **always sorted** by score
+- Fast **Insert/Delete** (without shifting the entire array)
+- Efficient **Range queries** ("get all members with scores from 1000 to 2000")
+- **Rank queries** ("what position is member X?")
+
+Let's look at the candidates:
+
+| Structure | Insert | Search | Range Query | Problem |
+|-----------|--------|--------|-------------|---------|
+| Array (sorted) | O(N) — must shift elements | O(log N) — binary search | O(log N + M) | Slow insert |
+| Linked List | O(1) — if position is known | O(N) — sequential scan | O(N) | Slow search |
+| Balanced BST (Red-Black Tree) | O(log N) | O(log N) | O(log N + M) | Complex, rotation |
+| **Skip List** | **O(log N)** | **O(log N)** | **O(log N + M)** | Memory overhead |
+
+Skip list achieves O(log N) like a balanced BST but is much simpler to implement. This is why Redis chose it.
+
+### 3.2. How does a Skip List work?
+
+Imagine a **subway system** with multiple lines:
+
+- **Level 1 (local train)**: stops at **every station** — every node in the list.
+- **Level 2 (express train)**: only stops at **some stations** — skips over many nodes.
+- **Level 3 (bullet train)**: stops at **very few stations** — makes even bigger jumps.
+
+Want to reach station X? Start from the highest line, travel as fast as possible. When you've gone too far → drop down to a lower line, slow down. Repeat until you find the right station.
+
+![Skip List Multi-level Structure](/sorted-set-skiplist.svg)
+
+Each node has a **random "height"**: when inserting a new node, Redis "flips a coin" — each time it lands tails (50% probability), it adds another level. Maximum 32 levels. The average result: each node has **~2 forward pointers**.
+
+### 3.3. Example: finding score = 2100
+
+![Skip List Search Walkthrough](/sorted-set-skiplist-search.svg)
+
+Only 5 steps instead of sequentially scanning 4 nodes. With 1 million elements, a skip list needs on average ~20 steps (log2 1,000,000 ≈ 20) — compared to 1 million steps with sequential scanning.
+
+### 3.4. Role in Sorted Set
+
+The skip list handles all **order-related operations**:
+
+- **`ZRANGE key 0 9`** — jump to node #0, traverse the next 10 nodes → O(log N + M)
+- **`ZRANGEBYSCORE key 1000 2000`** — use the skip list to find the first node with score ≥ 1000, traverse forward until score > 2000
+- **`ZRANK key member`** — count the number of nodes before the member
+
+```ts
+function zrangebyscore(zset, min, max) {
+  let node = skiplist.firstNodeGreaterOrEqual(min)
+
+  const results = []
+  while (node && node.score <= max) {
+    results.push({ member: node.member, score: node.score })
+    node = node.level[0].forward
+  }
+  return results
+}
+```
+
+### 3.5. A special detail in Redis: the `span` field
+
+Standard skip lists (from textbooks) don't support efficient rank queries. To find "what rank is alice", you'd have to count from the beginning — O(N).
+
+Redis solves this by adding a **`span`** field to each forward pointer. `span` records the **number of nodes skipped** by that pointer. During search, accumulate `span` along the path → get the rank in O(log N).
+
+![Span field for ZRANK](/sorted-set-span.svg)
+
+### 3.6. Why did Redis choose skip list over Red-Black Tree?
+
+Salvatore Sanfilippo (Redis author) explained the reasons:
+
+1. **Simpler**: skip list insert/delete code is ~100 lines, Red-Black tree needs 300+ lines with complex rotations.
+2. **Natural range queries**: skip list traverses forward on level 1 for range queries. Red-Black tree needs more complex in-order traversal.
+3. **Easier to debug and maintain**: probabilistic structure instead of deterministic balancing → fewer edge cases.
+
+---
+
+## 4. Two encoding modes: Listpack vs Skiplist+Hashtable
+
+Redis **doesn't always use** skiplist+hashtable for Sorted Set. When data is small, Redis uses an entirely different encoding — **listpack** — optimized for memory.
+
+### 4.1. What is a Listpack?
+
+**Listpack** is a contiguous memory block, storing member-score pairs **sequentially side by side**:
+
+![Listpack memory layout](/sorted-set-listpack.svg)
+
+Characteristics:
+- **No pointers**: all data sits contiguously in RAM → **CPU cache-friendly** — when the CPU loads one element, adjacent elements are already in the cache line.
+- **Operations are O(N)**: insert/search must scan sequentially. But when N is small (≤128), O(N) on contiguous memory is actually **faster** than O(log N) on a skip list — because the skip list must chase pointers across different RAM regions (cache miss).
+- Header is only 6 bytes. Integers use 1-8 bytes, strings have a 1-5 byte length prefix.
+
+> Before Redis 7.0, Redis used **ziplist** instead of listpack. Ziplist had a bug: when inserting/deleting in the middle, it could cause **cascading updates** — resizing one entry forces the next entry to re-encode, propagating to the end of the list. Listpack fixes this by storing only forward size + backlen suffix, eliminating dependencies between entries.
+
+### 4.2. When does Redis switch to Skiplist+Hashtable?
+
+Redis decides encoding based on **two thresholds**:
+
+```
+zset-max-listpack-entries  128
+zset-max-listpack-value     64
+```
+
+If the Sorted Set exceeds **either** of these two thresholds → Redis automatically **promotes** from listpack to skiplist+hashtable. The process:
+
+1. Allocate new hash table and skip list
+2. Iterate through the listpack, inserting each element into both structures
+3. Free the old listpack memory
+
+This is an **O(N)** and **blocking** operation — the event loop is blocked during conversion. With N=128 (default threshold), the conversion time is negligible. But if you increase the threshold to 10,000, the latency spike during conversion will be very noticeable.
+
+### 4.3. Memory overhead comparison
+
+| Encoding | Average memory/element | When to use |
+|----------|----------------------|-------------|
+| Listpack | ~29 bytes | ≤128 elements AND each member ≤64 bytes |
+| Skiplist+Hashtable | ~136 bytes | Exceeds either threshold above |
+
+Listpack saves **3-5x memory** compared to skiplist+hashtable. This is why Redis defaults to listpack for small sets — most Sorted Sets in production actually have fewer than 128 elements.
+
+### 4.4. Overview of both modes
+
+![Encoding decision flowchart](/sorted-set-encoding-decision.svg)
+
+---
+
+## 5. Why is Sorted Set performance so good?
+
+The power of Sorted Set comes from **combining two data structures that compensate for each other's weaknesses**:
+
+![Dual structure routing table](/sorted-set-dual-structure.svg)
+
+- **Hash table alone** gives O(1) lookup but doesn't know ordering → can't do range queries or rank.
+- **Skip list alone** gives O(log N) sorted operations but lookup has to be O(log N) instead of O(1).
+- **Combining both**: O(1) when fast lookup is needed, O(log N) when ordered operations are needed.
+
+Additionally:
+
+1. **Listpack for small sets**: when N is small, skip both "heavy" structures, use contiguous memory → cache-friendly, low memory overhead.
+2. **Redis single-threaded**: no lock contention, no context switching → every operation runs atomic without synchronization overhead.
+3. **In-memory**: all data resides in RAM → no disk I/O latency.
+
+Results with 1 million elements:
+- `ZADD`: ~3-5 microseconds
+- `ZSCORE`: ~1-2 microseconds
+- `ZRANGE 0 99` (top 100): ~10-15 microseconds
+
+For comparison: a `SELECT ... ORDER BY score DESC LIMIT 100` on PostgreSQL with 1M rows (with index) costs ~1-5 milliseconds — **100-500x** slower.
+
+---
+
+## 6. Trade-offs of Sorted Set
+
+There's no free lunch. Sorted Set is fast, but you pay the price in the following areas:
+
+### 6.1. Memory overhead (~2x for large sets)
+
+In the skiplist+hashtable encoding, each member is stored **twice** — once in the hash table, once in the skip list. Skip list nodes also have an array of forward pointers (average 2 pointers/node) and an array of span values.
+
+Estimate: a Sorted Set with 1M members uses **~2x the memory** of a simple hash. Use `MEMORY USAGE key` to monitor.
+
+### 6.2. Write amplification
+
+Every write must update **both** data structures:
+
+| Operation | Hash Table | Skip List | Total |
+|-----------|-----------|-----------|-------|
+| `ZADD` (new member) | 1 insert | 1 insert | 2 operations |
+| `ZADD` (update score) | 1 update | 1 delete + 1 insert | 3 operations |
+| `ZREM` | 1 delete | 1 delete | 2 operations |
+
+Updating a score is the most expensive: the old node must be removed from the skip list (because the sorted position changes) and then reinserted.
+
+### 6.3. Listpack → Skiplist conversion spike
+
+When a Sorted Set grows and exceeds the 128 element threshold (or member > 64 bytes), Redis must convert the entire listpack to skiplist+hashtable. This is an O(N) operation that **blocks the event loop**.
+
+With N=128, the spike is negligible. But if you increase `zset-max-listpack-entries` to a high value → the spike will be noticeable. Mitigation: if you know in advance that a Sorted Set will grow large, you can pre-seed a dummy member with a string longer than 64 bytes to force promotion from the start.
+
+### 6.4. No TTL per member
+
+Redis only supports TTL at the **key** level, not the member level. You can't set "member alice expires after 5 minutes".
+
+A common workaround: use **score as timestamp**, then periodically run `ZREMRANGEBYSCORE` to remove old entries. This is exactly the pattern that [Sliding Window Log](/posts/rate-limiting-patterns) uses for rate limiting.
+
+```ts
+const cutoff = Date.now() - 60_000
+await redis.zremrangebyscore('my-sorted-set', 0, cutoff)
+```
+
+### 6.5. Trade-off summary
+
+| Trade-off | Impact Level | Mitigation |
+|-----------|-------------|------------|
+| ~2x memory (large sets) | High | Monitor with `MEMORY USAGE` |
+| Write amplification | Medium | Batch writes with pipeline |
+| Conversion spike | Low (one-time) | Tune thresholds or pre-seed |
+| No per-member TTL | By design | Score-as-timestamp pattern |
+
+---
+
+## 7. Common use cases
+
+### 7.1. Leaderboard / Ranking
+
+This is the use case "born to use Sorted Set".
+
+```ts
+import Redis from 'ioredis'
+const redis = new Redis()
+
+await redis.zadd('leaderboard', 2500, 'player:42')
+
+const rank = await redis.zrevrank('leaderboard', 'player:42')
+
+const top10 = await redis.zrevrange('leaderboard', 0, 9, 'WITHSCORES')
+```
+
+Why Sorted Set fits: `ZADD` O(log N) for real-time updates, `ZREVRANK` O(log N) for rank lookup, `ZREVRANGE` O(log N + M) for top-N — all sub-millisecond even with millions of players.
+
+### 7.2. Rate Limiting — Sliding Window Log
+
+Details are covered in the [Rate Limiting Patterns](/posts/rate-limiting-patterns) article. Summary: score = timestamp, member = request ID. For each new request: `ZREMRANGEBYSCORE` removes expired entries, `ZADD` adds the new request, `ZCARD` counts → compare against the limit.
+
+```ts
+async function slidingWindowLog(userId: string, limit: number, windowSec: number) {
+  const key = `ratelimit:${userId}`
+  const now = Date.now()
+  const cutoff = now - windowSec * 1000
+
+  const pipe = redis.pipeline()
+  pipe.zremrangebyscore(key, 0, cutoff)
+  pipe.zadd(key, now, `${now}-${Math.random()}`)
+  pipe.zcard(key)
+  pipe.expire(key, windowSec)
+
+  const results = await pipe.exec()
+  const count = results[2][1] as number
+
+  return { allowed: count <= limit, count }
+}
+```
+
+Sorted Set fits because: `ZREMRANGEBYSCORE` removes by score range (= timestamp) in O(log N + M), `ZCARD` counts in O(1).
+
+### 7.3. Priority Queue
+
+Score = priority (lower number = higher priority). `ZPOPMIN` (Redis 5.0+) atomically pops the element with the highest priority.
+
+```ts
+await redis.zadd('task-queue', 1, 'send-email:urgent')
+await redis.zadd('task-queue', 5, 'generate-report:low')
+await redis.zadd('task-queue', 3, 'process-payment:medium')
+
+const [task, priority] = await redis.zpopmin('task-queue')
+```
+
+Comparison: list-based queues (`LPUSH`/`RPOP`) only support FIFO. Sorted Set allows **sorting by priority** at O(log N) cost.
+
+### 7.4. Time-series / Sliding Window
+
+Score = Unix timestamp, member = event data. Range queries by time become `ZRANGEBYSCORE`.
+
+```ts
+await redis.zadd('events:user:42', Date.now(), JSON.stringify({
+  action: 'page_view',
+  page: '/products/123'
+}))
+
+const fiveMinAgo = Date.now() - 5 * 60 * 1000
+const recentEvents = await redis.zrangebyscore(
+  'events:user:42', fiveMinAgo, '+inf'
+)
+```
+
+### 7.5. Trending / Weighted Feeds
+
+Score = engagement metric (likes + comments\*2 + shares\*3). `ZINCRBY` updates the score in real-time when new interactions occur.
+
+```ts
+await redis.zincrby('trending:today', 1, 'post:456')
+
+await redis.zincrby('trending:today', 3, 'post:456')
+
+const trending = await redis.zrevrange('trending:today', 0, 19, 'WITHSCORES')
+```
+
+### Use case summary
+
+| Use case | Key commands | Why Sorted Set fits |
+|----------|-------------|---------------------------|
+| Leaderboard | `ZADD`, `ZREVRANK`, `ZREVRANGE` | Sorted + fast rank lookup |
+| Rate limiting | `ZADD`, `ZREMRANGEBYSCORE`, `ZCARD` | Score-as-timestamp + range delete |
+| Priority queue | `ZADD`, `ZPOPMIN` | Auto-sorted by priority |
+| Time-series | `ZADD`, `ZRANGEBYSCORE` | Range query by timestamp |
+| Trending | `ZINCRBY`, `ZREVRANGE` | Incremental score update + sorted output |
+
+---
+
+## 8. Playground
+
+Visualize how Sorted Set works internally with **hash table + skip list** combined. Choose an operation, fill in the parameters, click **Run**, and watch each execution step: how the hash table is looked up, how the skip list traverses from high to low levels, and how both structures are updated in parallel.
+
+<RedisSortedSetSimulator />
+
+---
+
+## Conclusion
+
+There's nothing "magical" about Sorted Set — its power comes from a simple insight: **use two data structures that compensate for each other's weaknesses**.
+
+- Hash table for O(1) fast lookup.
+- Skip list for O(log N) ordered operations.
+- Listpack for memory-optimized small sets.
+
+The trade-off is ~2x memory and write amplification. But for most use cases — leaderboards, rate limiting, priority queues — the performance gain far outweighs the cost.
+
+Back to the problem at the beginning: a leaderboard with 10 million players, querying rank in sub-millisecond. Now you know exactly which pointers are being followed, and why each step only takes O(log N).

@@ -1,0 +1,93 @@
+---
+title: 'Getting Started with AWS: From Global Infrastructure to Security Thinking with IAM'
+date: '2026-01-10'
+tags: ['Devops', 'AWS', 'SAA', 'SAP']
+enableComment: true
+---
+
+# Getting Started with AWS: From Global Infrastructure to Security Thinking with IAM
+
+Hello everyone, I'm in the process of studying AWS and realized that before touching any complex services, understanding **Infrastructure** and **Identity and Access Management (IAM)** is the most important foundation.
+
+Today, I'd like to share the notes I've distilled from my learning. I hope they'll be helpful for those of you who are also just getting started!
+
+---
+
+## 1. How Does AWS "Cover" the World?
+
+To understand AWS, you first need to understand how they've built their hardware empire.
+
+### Region & Availability Zones (AZ)
+
+Each AWS **Region** (geographic area) typically has a minimum of **3 AZs** (and a maximum of 6).
+
+* **What is an AZ?** Each AZ consists of one or more separate Data Centers.
+* **Why multiple AZs?** The core objective is **High Availability**. AZs operate independently, physically separated by enough distance so that if one AZ encounters an incident (natural disaster, power outage), the remaining AZs still stand firm.
+* **Connectivity:** Despite being separate, AZs within the same Region are connected by an extremely high-bandwidth, ultra-low-latency network.
+
+### Point of Presence (Edge Location)
+
+If you've heard of CDN (Content Delivery Network), this is it. With over 400 points across 90 cities, Edge Locations help deliver content as close to users as possible, minimizing latency.
+
+> **Quick note:** Not every service is available in every Region. And remember to check the Region on the Console, because an EC2 you created in the US won't appear when you're viewing the Singapore region!
+
+---
+
+## 2. IAM - The Dedicated "Gatekeeper"
+
+IAM (Identity and Access Management) is where you manage who can do what on your system.
+
+### Root Account: "Supreme Power"
+
+When you first create an account, you have the **Root Account**. The hard-earned advice is: **Never use the Root Account for daily work.** Use it to create a separate admin User for yourself, set up MFA (Multi-Factor Authentication), and lock this Root "key" away in a glass cabinet.
+
+### User, Group, and Policies
+
+* **User:** Represents a person or an application.
+* **Group:** A collection of Users. A User can belong to multiple Groups, but a Group cannot contain other Groups.
+* **Policies:** JSON documents that define permissions.
+* **Least Privilege Principle:** This is the "guiding principle" of security. Only grant exactly enough permissions for a person to do their job -- no more, no less. Don't turn the intern's account into an Admin -- that's a disaster waiting to happen!
+
+---
+
+## 3. Shifting Mindset: From "Long-term" to "Temporary" Credentials
+
+This is the part I found most interesting when diving deep into IAM.
+
+### The Traditional Approach (Old)
+
+We used to create an IAM User, get the **Access Key & Secret Key**, and paste them into a `.env` file.
+
+* **Risk:** If you accidentally push this file to GitHub, you've essentially handed your wallet to hackers. These keys last forever until you delete them.
+
+### The Modern Approach: IAM Identity Center (SSO)
+
+According to the AWS Well-Architected Framework, AWS recommends using **IAM Identity Center**. Instead of holding a permanent key, you log in through a Portal and receive a **Temporary Credential** (valid for only 1-12 hours).
+
+* **For Developers:** Instead of storing static keys, use the `aws sso login` command once a day before coding (remember to increase the **Temporary Credential** expiration to 12 hours to avoid interruptions during deep work -- the default is 1 hour). The SDK will automatically understand and retrieve access without storing sensitive information in your code.
+* **For Production-ready apps:** Assign an IAM Role with least permissions directly to the service running your application. Or manage it through IaC tools like CloudFormation.
+
+### IAM Role: The Key for Services
+
+Don't give an Access Key to an EC2 to access S3. Instead, assign it an **IAM Role**. A Role is like a "mask" that a service can put on to perform tasks securely.
+
+---
+
+## 4. How Do You Know Your System is Secure?
+
+AWS provides two extremely useful tools for identifying issues:
+
+1. **IAM Credentials Report:** A comprehensive account-level report showing who is using what, and which keys are overdue for rotation.
+2. **IAM Access Advisor:** View which permissions a User has actually used and for how long. If a permission was granted but hasn't been used for 6 months? Revoke it immediately (Least Privilege in action!).
+
+---
+
+## Summary: Survival Checklist for Beginners
+
+- Don't use the Root Account.
+- Enable MFA for all accounts.
+- Prioritize using IAM Roles and IAM Identity Center.
+- Strictly apply the Least Privilege principle.
+- Periodically review permissions using Access Advisor.
+
+Learning AWS isn't just about learning technology -- it's about learning **systems thinking and security**. I hope these notes give you a better overview of the first building blocks of the AWS cloud!

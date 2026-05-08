@@ -1,0 +1,475 @@
+---
+title: 'Cache Stampede: When Thousands of Requests "Trample" the Database'
+date: '2026-05-05'
+tags: ['Backend', 'System Design', 'Cache']
+enableComment: true
+---
+
+# Cache Stampede: When Thousands of Requests "Trample" the Database
+
+Imagine you are running an e-commerce platform. 11:59 PM, a flash sale begins. 50,000 users simultaneously access the hottest product page. The cache key for that product just expired at that exact moment. Result? 50,000 requests **simultaneously** hit the Database — DB overloads, timeouts cascade, the entire system crashes within seconds.
+
+This is **Cache Stampede** — also known as the **Thundering Herd Problem** or **Dog-piling Effect**. One of the most dangerous failure modes when working with caching.
+
+In the [Cache Pitfalls](/posts/cache-pitfalls) article, we briefly covered this issue at a high level. This article will dive deep into **5 solutions** with production code, diagrams, and a decision framework you can apply immediately.
+
+---
+
+## 1. Anatomy of a Cache Stampede
+
+### 1.1. Prerequisites
+
+Cache Stampede occurs when **3 factors** combine simultaneously:
+
+1. **High concurrency**: Many clients accessing the same resource
+2. **Hot key**: A specific key with extremely high read volume
+3. **Single point of expiry**: The key expires at a specific point in time
+
+Removing just one of these three factors prevents a stampede. This is a key insight — each solution below targets breaking at least one of these three conditions.
+
+### 1.2. Four Root Causes
+
+| Cause                  | Description                           | Example                            |
+| ---------------------- | ------------------------------------- | ---------------------------------- |
+| **Cold Start**         | Cache is completely empty             | New deploy, service restart        |
+| **Synchronized Expiry** | Many keys with the same TTL expire simultaneously | Batch import data with the same TTL |
+| **Cache Invalidation** | Data is actively invalidated          | Admin updates product, clears cache |
+| **Cache Eviction**     | Cache is full, evicts hot keys        | Memory pressure, LRU eviction      |
+
+### 1.3. The Domino Effect
+
+A stampede doesn't just slow down the DB — it creates a **cascading failure**:
+
+```
+Cache Miss (hot key)
+  -> 10,000 concurrent DB queries
+    -> DB connection pool exhausted
+      -> Query timeout
+        -> Client retry (x3)
+          -> 30,000 queries (retry storm)
+            -> DB completely unresponsive
+              -> All services depending on DB fail
+```
+
+![Cache Stampede Anatomy](/cache-stampede-anatomy.svg)
+
+---
+
+## 2. Request Coalescing (Singleflight)
+
+This is the **strongest and most common** solution — especially effective for single-instance or CDN edge.
+
+### How It Works
+
+When multiple requests ask for the same key that is currently missing, instead of all of them querying the DB, the system **allows only ONE request** to go through. The remaining requests **wait** until the first one completes, then share the result.
+
+![Request Coalescing Flow](/cache-stampede-coalescing.svg)
+
+### Implementation with Node.js + TypeScript
+
+Node doesn't have a built-in library like Go's `singleflight`, but thanks to the single-threaded nature of the event loop, we can implement this pattern with just a `Map<string, Promise>`. The idea: if there's already an in-flight promise for that key, **return the same promise** to every caller — all requests will `await` the same result.
+
+```ts
+class SingleFlight<T> {
+  private inflight = new Map<string, Promise<T>>()
+
+  async do(key: string, fn: () => Promise<T>): Promise<T> {
+    const existing = this.inflight.get(key)
+
+    if (existing) {
+      return existing
+    }
+
+    const promise = fn().finally(() => {
+      this.inflight.delete(key)
+    })
+
+    this.inflight.set(key, promise)
+
+    return promise
+  }
+}
+
+const group = new SingleFlight<Product>()
+
+async function getProduct(productID: string): Promise<Product> {
+  const cached = await cache.get(productID)
+
+  if (cached) {
+    return cached
+  }
+
+  return group.do(productID, async () => {
+    const product = await db.queryProduct(productID)
+
+    await cache.set(productID, product, 300)
+
+    return product
+  })
+}
+```
+
+**Why does this work in Node?**
+
+Because Node.js is single-threaded, the `inflight.get()` -> `inflight.set()` sequence is atomic — there is no race condition. When request #1 sets a promise in the map, requests #2..#N (arriving in the same tick or the next tick) will see that promise and `await` the same result.
+
+> **Production note**: If running multiple Node instances (cluster mode or Kubernetes pods), singleflight only coalesces **within the same process**. Each process will still send 1 query to the DB. To solve cross-process stampede, combine with **Distributed Locking** in the section below.
+
+**Existing libraries**: If you don't want to implement it yourself, you can use [`p-memoize`](https://www.npmjs.com/package/p-memoize) or [`async-cache-dedupe`](https://www.npmjs.com/package/async-cache-dedupe) — the latter is maintained by the Fastify team and supports both TTL and Redis backend.
+
+### Pros and Cons
+
+| Pros                                              | Cons                                        |
+| ------------------------------------------------- | ------------------------------------------- |
+| Simple, minimal code                              | Only works within **a single process**      |
+| Zero latency overhead for the first request       | Doesn't solve cross-instance stampede       |
+| Battle-tested (widely used by Cloudflare, Google) | First request still has to wait for DB      |
+| No additional infrastructure needed               | If DB query fails, all waiters fail         |
+
+### When to Use
+
+- Single-instance services
+- CDN/reverse proxy layer (Nginx `proxy_cache_lock`)
+- Combined with Distributed Locking for multi-instance setups
+
+---
+
+## 3. Distributed Locking
+
+When a system has **multiple instances** (horizontal scaling), singleflight within a single process is not enough. A **distributed lock** is needed to ensure only one instance regenerates the cache.
+
+### How It Works
+
+```
+Request arrives at Instance A -> Cache MISS
+  -> Try SETNX "lock:product:123" (Redis)
+    -> Success: Query DB -> Set cache -> Release lock
+    -> Failure: Sleep 50ms -> Retry reading cache
+```
+
+### Implementation
+
+```ts
+import { randomUUID } from 'crypto'
+import Redis from 'ioredis'
+
+const redis = new Redis()
+
+async function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function getProductDistributed(productID: string): Promise<Product> {
+  const cached = await cache.get(productID)
+
+  if (cached) {
+    return cached
+  }
+
+  const lockKey = `lock:product:${productID}`
+  const lockValue = randomUUID()
+  const lockTTL = 5
+
+  const acquired = await redis.set(lockKey, lockValue, 'EX', lockTTL, 'NX')
+
+  if (acquired === 'OK') {
+    try {
+      const product = await db.queryProduct(productID)
+
+      await cache.set(productID, product, 300)
+
+      return product
+    } finally {
+      const releaseScript = `
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+          return redis.call("del", KEYS[1])
+        else
+          return 0
+        end
+      `
+
+      await redis.eval(releaseScript, 1, lockKey, lockValue)
+    }
+  }
+
+  for (let i = 0; i < 20; i++) {
+    await sleep(50 + Math.random() * 30)
+
+    const cached = await cache.get(productID)
+
+    if (cached) {
+      return cached
+    }
+  }
+
+  return db.queryProduct(productID)
+}
+```
+
+### Important Gotchas
+
+**1. Lock TTL must be short**: If the instance holding the lock crashes, the lock must auto-expire. TTL should be 2-3x the average DB query time.
+
+**2. Owner verification**: In production, use a unique value (UUID) when calling SETNX and only DEL if the value matches — preventing instance A from releasing instance B's lock.
+
+**3. Retry thundering**: If 1000 requests all retry after 50ms, they will simultaneously check cache. Add **jitter** to the sleep time:
+
+```ts
+await sleep(50 + Math.random() * 30) // 50-80ms with jitter
+```
+
+**4. Existing libraries**: [`redlock`](https://www.npmjs.com/package/redlock) implements the standard Redis Redlock algorithm, supporting multi-node Redis clusters and auto-extend for long-running operations.
+
+### Pros and Cons
+
+| Pros                              | Cons                                             |
+| --------------------------------- | ------------------------------------------------ |
+| Works cross-instance              | Adds dependency on Redis                         |
+| Ensures only 1 DB query globally  | Increased latency for waiting requests           |
+| Familiar pattern (SETNX)         | Complex lock management (TTL, owner, deadlock)   |
+
+### When to Use
+
+- Multi-instance deployment (Kubernetes, ECS)
+- Cache-aside pattern with Redis
+- Hot keys with expensive DB queries (> 100ms)
+
+---
+
+## 4. Probabilistic Early Expiration — XFetch
+
+Instead of **reacting** when a stampede occurs (lock, coalesce), XFetch **proactively prevents** stampede by refreshing cache **before** it expires.
+
+The idea behind this solution is that each request accessing cache has a probability of extending the data's expiry time. This probability is small enough (it needs to be small to determine whether a key is a **hot key** or not) and increases over time.
+
+### Intuition
+
+Think of cache TTL as a countdown timer. Instead of waiting for the clock to reach 0 (when all requests simultaneously see a cache miss), each request "rolls the dice" — the closer to 0, the higher the probability of a hit. The request that "wins" proactively refreshes the cache, ensuring cache **never actually expires**.
+
+The logic of XFetch connects with Temporal Locality as follows:
+
+1. **A frequently accessed key** -> each request "rolls the dice" with XFetch
+2. **The closer to expiry, the more "rolls"** -> the probability of a request "winning" and refreshing early increases
+3. **Hot key = many rolls** -> almost certainly a request refreshes **before** TTL expires
+
+The elegance of the algorithm lies in the fact that it **doesn't need to know which keys are hot**. XFetch runs the exact same probability formula for every request, every key — no access frequency counter, no hit-rate tracker.
+
+The "hot key gets protected" effect **emerges naturally** from traffic patterns:
+
+- **Key with 10,000 req/s**: in the last 100ms before expiry, there are ~1,000 dice rolls -> the probability of AT LEAST one request "winning" and refreshing early is nearly 100%
+- **Key with 1 req/hour**: across the entire TTL there are only 1-2 rolls -> the key will likely expire normally, and the next request encounters a cache miss and fetches again
+
+This is not a bug — it is a feature that **aligns with exactly what we need**: cold keys don't suffer from stampede (because there are too few concurrent requests to cause one), so they don't need protection either. XFetch automatically allocates the "early refresh budget" exactly where it's needed, without any explicit classification logic.
+
+### The XFetch Formula
+
+```
+should_refresh = (current_time + beta x gap x (-ln(random()))) >= expiry_time
+```
+
+Where:
+
+- `current_time`: Current timestamp
+- `expiry_time`: Cache expiration time
+- `gap`: Average time to recompute the value (DB query time)
+- `beta` (beta): Adjustment factor, default = 1. Increasing beta -> refreshes earlier
+- `random()`: Random number (0, 1]
+
+![XFetch Probability Curve](/cache-stampede-xfetch.svg)
+
+### Implementation
+
+```ts
+interface CacheEntry<T> {
+  value: T
+  gap: number
+  expiry: number
+}
+
+async function getWithXFetch<T>(key: string, fetchFn: () => Promise<T>, ttlMs = 3_600_000, beta = 1.0): Promise<T> {
+  const cached = await cache.get<CacheEntry<T>>(key)
+
+  if (!cached) {
+    const start = Date.now()
+    const value = await fetchFn()
+    const gap = Date.now() - start
+
+    await cache.set(key, {
+      value,
+      gap,
+      expiry: Date.now() + ttlMs,
+    })
+
+    return value
+  }
+
+  const now = Date.now()
+  const { expiry, gap } = cached
+
+  const randVal = Math.random() || Number.EPSILON
+  const offset = beta * gap * -Math.log(randVal)
+
+  if (now + offset >= expiry) {
+    const start = Date.now()
+    const value = await fetchFn()
+    const newGap = Date.now() - start
+
+    await cache.set(key, {
+      value,
+      gap: newGap,
+      expiry: Date.now() + ttlMs,
+    })
+
+    return value
+  }
+
+  return cached.value
+}
+```
+
+### Tuning the beta Parameter
+
+- `beta = 0.5`: Refreshes later, saves DB calls. Higher stampede risk.
+- `beta = 1.0`: Balanced (recommended default).
+- `beta = 2.0`: Refreshes early, almost never expires. More DB calls.
+
+With a hot key (>1000 req/s), `beta = 1.0` nearly guarantees **at least one request** refreshes the cache before TTL expires — thanks to the statistical properties of `-ln(random())`.
+
+### Pros and Cons
+
+| Pros                              | Cons                                               |
+| --------------------------------- | -------------------------------------------------- |
+| No lock or coordination needed    | Doesn't solve Cold Start (first cache miss)        |
+| Works well at any scale           | Needs to store metadata (gap, expiry) with value   |
+| Mathematically proven optimal     | Less effective with low-traffic keys               |
+| Zero latency overhead             | Requires tuning beta for specific workloads        |
+
+### When to Use
+
+- Hot keys with steady traffic (homepage, trending content)
+- When you don't want additional infrastructure (no Redis lock needed)
+- Combined with singleflight for best-of-both-worlds
+
+---
+
+## 5. Stale-While-Revalidate
+
+The idea: **return stale data immediately**, while triggering a background refresh. Users never have to wait for a DB query.
+
+### Dual-TTL Mechanism
+
+```ts
+interface SwrEntry<T> {
+  value: T
+  softExpiry: number
+  hardExpiry: number
+}
+
+async function getStaleWhileRevalidate<T>(key: string, fetchFn: () => Promise<T>): Promise<T> {
+  const cached = await cache.get<SwrEntry<T>>(key)
+  const now = Date.now()
+
+  if (!cached || now >= cached.hardExpiry) {
+    return fetchAndCache(key, fetchFn)
+  }
+
+  if (now >= cached.softExpiry) {
+    fetchAndCache(key, fetchFn).catch((err) => {
+      console.error(`Background refresh failed for ${key}:`, err)
+    })
+
+    return cached.value
+  }
+
+  return cached.value
+}
+```
+
+This pattern is widely adopted:
+
+- HTTP header `Cache-Control: stale-while-revalidate=60`
+- Nginx: `proxy_cache_use_stale updating`
+- Java Caffeine: `refreshAfterWrite` + `expireAfterWrite`
+
+### When to Use
+
+- Data that doesn't need to be real-time (product catalog, user profile)
+- UX-first: users won't tolerate latency spikes
+- Combined with XFetch: stale-while-revalidate for soft guarantee, XFetch for statistical guarantee
+
+---
+
+## 6. Cache Warming + TTL Jitter
+
+Two **preventive** techniques that are simple yet highly effective.
+
+### Cache Warming
+
+Before the service receives traffic (after deploy, before flash sale), run a script to **pre-populate** hot keys:
+
+```ts
+async function warmCache() {
+  const hotProducts = await db.query<{ id: string }>('SELECT id FROM products ORDER BY views DESC LIMIT 1000')
+
+  await Promise.all(
+    hotProducts.map(async ({ id }) => {
+      const data = await db.getProduct(id)
+
+      await cache.set(`product:${id}`, data, 3600)
+    })
+  )
+}
+```
+
+### TTL Jitter
+
+Avoid synchronized expiry by adding randomness to TTL:
+
+```ts
+const baseTtl = 3600 // 1 hour
+const jitter = Math.floor(Math.random() * 600) - 300 // +/-5 minutes
+await cache.set(key, value, baseTtl + jitter)
+```
+
+Details on these two techniques are covered in [Cache Avalanche — the Cache Pitfalls article](/posts/cache-pitfalls).
+
+---
+
+## 7. Summary: Which Solution to Choose?
+
+### Comparison Table
+
+| Solution                    | Complexity | Latency Impact       | Data Freshness            | Distributed? | Best For                      |
+| --------------------------- | ---------- | -------------------- | ------------------------- | ------------ | ----------------------------- |
+| **Singleflight**            | Low        | Waiters wait         | Real-time                 | No           | Single instance, CDN          |
+| **Distributed Lock**        | Medium     | Waiters wait + retry | Real-time                 | Yes          | Multi-instance, cache-aside   |
+| **XFetch**                  | Medium     | None                 | Near real-time            | Yes          | Hot keys, steady traffic      |
+| **Stale-While-Revalidate**  | Low        | None                 | Eventually fresh          | Yes          | Non-critical data, UX-first   |
+| **Warming + Jitter**        | Low        | None                 | Depends on refresh cycle  | N/A          | Cold start, scheduled events  |
+
+### Defense-in-Depth Strategy
+
+There is no silver bullet. Production systems should combine multiple layers:
+
+1. **Layer 1 — Prevention**: TTL Jitter + Cache Warming (prevent stampede from occurring)
+2. **Layer 2 — Proactive**: XFetch (refresh cache before it expires)
+3. **Layer 3 — Reactive**: Singleflight + Distributed Lock (if stampede still occurs)
+4. **Layer 4 — Protection**: Circuit Breaker + Rate Limiting at the DB layer (protect DB when everything fails)
+
+### Edge Cases to Watch
+
+- **Negative caching**: Cache "not found" results (empty results) as well — avoid stampede when users repeatedly query non-existent keys
+- **Lock holder crash**: Always set a TTL on distributed locks. If the lock holder dies, the lock auto-releases after a few seconds
+- **Stale fallback**: When the DB is completely unresponsive, serve last-known-good data instead of returning error 500 to all users
+
+---
+
+## Conclusion
+
+**3 things to remember:**
+
+1. Cache Stampede occurs when **hot key + high concurrency + expiry** combine — breaking just one condition is enough.
+2. **Singleflight** is the simplest first-line defense. **XFetch** is the most elegant. **Distributed Lock** is the most robust for multi-instance setups.
+3. Production systems need **defense-in-depth**: prevention (jitter) -> proactive (XFetch) -> reactive (locking) -> protection (circuit breaker).
+
+To monitor and detect stampede in production (cache miss ratio spikes, DB query surges), see the next article: [Cache Monitoring & Scaling](/posts/cache-monitoring-and-scaling).

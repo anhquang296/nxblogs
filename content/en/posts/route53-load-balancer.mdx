@@ -1,0 +1,343 @@
+---
+title: 'Route 53: The "Free Load Balancer" You Already Have'
+date: '2026-05-08'
+tags: ['Devops', 'AWS', 'DNS', 'SAA']
+enableComment: true
+---
+
+# Route 53: The "Free Load Balancer" You Already Have
+
+> **Recommendation:** If you're not yet familiar with how DNS works — resolvers, authoritative servers, record types, TTL — read the [How DNS Works Under the Hood](/posts/how-dns-works-under-the-hood) article first. This article will be much easier to follow once you have that foundation.
+
+Are you paying $16/month for an ALB just to distribute traffic between two A/B testing environments? Or considering setting up another Load Balancer in a different region for Disaster Recovery?
+
+Here's some good news: **you already have a "Load Balancer" in hand** — and you're likely paying $0.50/month for it without fully leveraging it. That's **Amazon Route 53**.
+
+At its core, Route 53 is a **DNS service** — or more precisely, an **authoritative DNS server** combined with a **domain registrar**. If you've ever purchased a domain on **Namecheap**, **GoDaddy**, or used **Cloudflare** DNS — Route 53 plays a similar role: it's where you manage your domain and configure DNS records (A, CNAME, MX, ...). It's also just a DNS like any other: receives queries, looks up records, returns IPs.
+
+But the key difference: while Namecheap or GoDaddy mostly return IPs in a "rigid" manner — whatever record exists returns that exact IP — Route 53 can **make decisions** based on weights, geographic location, network latency, or server health before choosing which IP to return. Cloudflare also has similar features (Load Balancing, geo-steering), but those are separate paid plans — with Route 53, these routing policies are already **included** in the base cost.
+
+At that point, DNS is no longer just a phone book — it becomes a **load balancer**.
+
+Route 53 provides **8 routing policies** that let you turn DNS resolution into different traffic distribution strategies: from A/B testing, canary releases, blue/green deployments to multi-region failover. All at the DNS layer — no additional infrastructure needed, no code changes required.
+
+---
+
+## 1. Why Is Route 53 a "Load Balancer"?
+
+Most engineers think of Load Balancers as ALB or NLB — services operating at Layer 4/7, sitting between client and server to distribute requests. But Route 53 operates at the **DNS layer** — much earlier in the request lifecycle.
+
+![Route 53 vs ALB: Which Layer Do They Operate At?](/route53-dns-vs-alb-layer.svg)
+
+The core difference:
+
+- **Route 53** decides **BEFORE** the client connects — "Which IP should you call?"
+- **ALB/NLB** decides **AFTER** the client has connected — "Which backend should this request go to?"
+
+This means Route 53 can't do what ALB does (path-based routing, SSL termination, sticky sessions). But conversely, there are problems that Route 53 solves **more simply, cheaply, and at a global scope** — something a single ALB cannot.
+
+Every Hosted Zone on Route 53 is already a Load Balancer waiting to be configured. You just need to choose the right **routing policy**.
+
+---
+
+## 2. Route 53's 8 Load Balancing "Modes"
+
+| Routing Policy | How it works | When to use |
+| --- | --- | --- |
+| **Simple** | Returns 1 (or multiple) values, no logic | Dev/staging, simple setup |
+| **Weighted** | Splits traffic by weight ratio | A/B testing, canary, blue/green |
+| **Latency** | Picks the region with lowest latency | Global apps, UX optimization |
+| **Failover** | Primary/Secondary, auto-switches on failure | Disaster Recovery |
+| **Geolocation** | Routes by country/continent | Regional content, compliance |
+| **Geoproximity** | Routes by distance + bias | Expand/shrink serving areas |
+| **Multivalue Answer** | Returns up to 8 healthy IPs | Basic client-side LB |
+| **IP-based** | Routes by client CIDR | Internal/external traffic routing |
+
+Let's dive deep into each policy:
+
+### 2.1 Simple Routing — "Default, no thinking needed"
+
+This is the default mode when you create a record on Route 53. One domain points to one (or multiple) IPs. If there are multiple IPs, Route 53 returns them all in random order — similar to DNS round-robin.
+
+**Limitation:** No health checks. If a server dies, Route 53 will happily continue returning that IP.
+
+**Configuration on AWS Console:**
+
+| Record name | Type | Routing policy | Value | TTL |
+| --- | --- | --- | --- | --- |
+| `app.example.com` | A | Simple | `10.0.1.100`, `10.0.2.100` | 300 |
+
+> **When to use?** Dev/staging environments, or when you only have a single endpoint.
+
+### 2.2 Weighted Routing — "Splitting the pie by percentage"
+
+This is the **star** of this article. Weighted Routing lets you assign weights to each record, and Route 53 distributes traffic proportionally.
+
+![Weighted Routing: Split Traffic by Ratio](/route53-weighted-routing.svg)
+
+Example: you need to split traffic for `api.example.com` between Production (80%) and Canary (20%). You create **2 records with the same name** with routing policy = Weighted:
+
+| Record name | Type | Routing policy | Value | Weight | Set ID | TTL | Health check |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `api.example.com` | A | Weighted | `10.0.1.100` | 80 | `production-v1` | 60 | (optional) |
+| `api.example.com` | A | Weighted | `10.0.2.100` | 20 | `canary-v2` | 60 | (optional) |
+
+Result: **80%** of DNS queries return the Production IP, **20%** return the Canary IP. It's that simple.
+
+Formula for calculating percentage:
+
+```
+% traffic = Weight of record / Sum of all weights
+```
+
+If you set a weight of **0** for a record, Route 53 will stop sending traffic to it — extremely useful when you need to "disable" an endpoint without deleting the record.
+
+> **Tip:** Weights don't have to add up to 100. Route 53 calculates the ratio automatically. Weights of 3 and 7 produce the same result as 30 and 70.
+
+### 2.3 Latency-based Routing — "Whoever's closer gets the call"
+
+Route 53 maintains a data table of **network latency** between AWS regions and user locations. When receiving a DNS query, it returns the IP in the region with the lowest latency.
+
+Unlike Geolocation (which routes by hard geographic boundaries), Latency-based routing cares about **actual speed**. A user in Vietnam might be routed to Tokyo instead of Singapore if the connection to Tokyo is faster at that moment.
+
+| Record name | Type | Routing policy | Value | Region | Set ID | TTL | Health check |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A | Latency | `10.0.1.100` | ap-southeast-1 | `singapore` | 60 | `hc-singapore` |
+| `app.example.com` | A | Latency | `10.0.2.100` | ap-northeast-1 | `tokyo` | 60 | `hc-tokyo` |
+| `app.example.com` | A | Latency | `10.0.3.100` | us-east-1 | `virginia` | 60 | `hc-virginia` |
+
+Users in Vietnam will automatically be routed to Singapore or Tokyo — whichever region has lower latency at the time of the query.
+
+> **When to use?** Global applications that need to optimize response time for users in multiple regions.
+
+### 2.4 Failover Routing — "Disaster defense"
+
+Failover routing operates on an **Active-Passive** model: you designate a Primary and a Secondary record. Route 53 continuously checks the Primary's health via health checks. When the Primary "falls", traffic automatically switches to the Secondary.
+
+![Failover Routing: Automatic Failover During Incidents](/route53-failover-routing.svg)
+
+| Record name | Type | Routing policy | Failover type | Value | Set ID | TTL | Health check |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A | Failover | Primary | `10.0.1.100` | `primary-us-east-1` | 60 | `hc-primary` (required) |
+| `app.example.com` | A | Failover | Secondary | `10.0.2.100` | `secondary-eu-west-1` | 60 | `hc-secondary` (recommended) |
+
+**Health Check configuration for Primary:**
+
+| Protocol | Endpoint | Port | Path | Request interval | Failure threshold |
+| --- | --- | --- | --- | --- | --- |
+| HTTPS | `10.0.1.100` | 443 | `/health` | 30 seconds | 3 |
+
+With a health check interval of 30 seconds and a threshold of 3 failures, Route 53 detects failures within approximately **60-90 seconds**. Combined with a low TTL (60s), most clients will switch to the backup endpoint within **2-3 minutes**.
+
+> **When to use?** Disaster Recovery, active-passive setup between regions.
+
+### 2.5 Geolocation & Geoproximity — "Vietnamese users see Vietnamese servers"
+
+**Geolocation** routes by hard geographic boundaries: country, state, or continent. Users in Vietnam → Singapore server. Users in Germany → Frankfurt server. No exceptions.
+
+| Record name | Type | Routing policy | Location | Value | Set ID | TTL |
+| --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A | Geolocation | Vietnam | `10.0.1.100` (Singapore) | `vietnam-to-sg` | 300 |
+| `app.example.com` | A | Geolocation | Europe | `10.0.2.100` (Frankfurt) | `europe-to-fra` | 300 |
+| `app.example.com` | A | Geolocation | **Default** | `10.0.3.100` (US) | `default-us` | 300 |
+
+> **Important:** Always create a **Default** record — otherwise, users in countries that aren't mapped will receive an NXDOMAIN response (domain not found).
+
+**Geoproximity** is more sophisticated: it routes by physical distance but adds a **bias** parameter that lets you "expand" or "shrink" a resource's serving area. Set a positive bias to expand — useful when a region has spare capacity and you want it to absorb traffic from neighboring areas.
+
+| Record name | Type | Routing policy | Region | Value | Bias | Set ID |
+| --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A | Geoproximity | ap-southeast-1 | `10.0.1.100` | +25 (expand) | `singapore` |
+| `app.example.com` | A | Geoproximity | ap-northeast-1 | `10.0.2.100` | 0 (default) | `tokyo` |
+
+With a bias of +25 for Singapore, Singapore's serving area "expands" — attracting more traffic from neighboring regions that would normally route to Tokyo.
+
+> **When to use?** Geolocation for compliance (GDPR, data residency). Geoproximity for flexible load optimization.
+
+### 2.6 Multivalue Answer — "Round-robin with health awareness"
+
+Like Simple Routing but **with health checks**. Route 53 returns up to 8 healthy IPs per query. The client randomly picks one IP to connect to.
+
+Unlike Simple Routing: if a server dies, Route 53 removes that IP from the returned list. This is the most basic form of client-side load balancing.
+
+You create **multiple separate records**, each pointing to an IP with a health check attached:
+
+| Record | Value | Set ID | Health check |
+| --- | --- | --- | --- |
+| `app.example.com` | `10.0.1.100` | `server-1` | `hc-server-1` |
+| `app.example.com` | `10.0.1.101` | `server-2` | `hc-server-2` |
+| `app.example.com` | `10.0.1.102` | `server-3` | `hc-server-3` |
+| `app.example.com` | `10.0.1.103` | `server-4` | `hc-server-4` |
+
+All have **Routing policy = Multivalue answer**, **TTL = 60**. When `server-2` goes down and its health check fails, Route 53 automatically removes `10.0.1.101` from the response — clients only receive the 3 remaining IPs.
+
+> **Note:** Multivalue Answer is **not** a replacement for ALB/NLB. It's only suitable for simple systems that need a health check layer at the DNS level.
+
+### 2.7 IP-based Routing — "Know where the client comes from"
+
+Routes based on the client IP address's **CIDR block**. You define a mapping table: which IP range → which endpoint.
+
+**Step 1:** Create a CIDR collection and CIDR blocks on Route 53:
+
+| CIDR Collection | CIDR Block | Location Name |
+| --- | --- | --- |
+| `my-company` | `10.0.0.0/8` | `internal-network` |
+| `my-company` | `203.0.113.0/24` | `isp-a` |
+| `my-company` | `198.51.100.0/24` | `isp-b` |
+
+**Step 2:** Create records with IP-based routing:
+
+| Record name | Type | Routing policy | CIDR location | Value | Set ID | TTL |
+| --- | --- | --- | --- | --- | --- | --- |
+| `api.example.com` | A | IP-based | `internal-network` | `10.0.1.100` | `internal` | 60 |
+| `api.example.com` | A | IP-based | `isp-a` | `10.0.2.100` | `isp-a` | 60 |
+| `api.example.com` | A | IP-based | Default | `10.0.3.100` | `default` | 60 |
+
+Traffic from internal company IP ranges (`10.0.0.0/8`) routes to the internal API, ISP-A routes to the nearest CDN, and the rest routes to the default endpoint.
+
+> **When to use?** Enterprise traffic routing, ISP-based optimization, or blocking traffic from specific IP ranges.
+
+---
+
+## 3. Real-world Scenarios — 3 Common Use Cases
+
+### 3.1 A/B Testing with Weighted Routing
+
+Want to test a new API version on 20% of users? Create two weighted records:
+
+| Record name | Type | Routing policy | Value | Weight | Set ID | TTL |
+| --- | --- | --- | --- | --- | --- | --- |
+| `api.example.com` | A | Weighted | `10.0.1.100` | 80 | `production-v1` | 60 |
+| `api.example.com` | A | Weighted | `10.0.2.100` | 20 | `canary-v2` | 60 |
+
+Then gradually change the weights following a canary roadmap:
+
+1. **Start:** Weight 95/5 — only 5% traffic to the new version
+2. **Observe:** Monitor error rate, latency for 30 minutes
+3. **Increase gradually:** 80/20 → 50/50 → 20/80
+4. **Complete:** 0/100 — fully switch to the new version
+
+> **Important:** Set a low TTL (60s) so weight changes take effect quickly. A high TTL means clients will cache the old IP longer.
+
+### 3.2 Blue/Green Deployment
+
+Blue/Green is simpler than canary: two environments, instant switch.
+
+![Blue/Green + Canary: Transition Roadmap](/route53-bluegreen-canary.svg)
+
+**Step 1:** Both environments are ready. Traffic is 100% on Blue.
+
+| Record name | Type | Routing policy | Value | Weight | Set ID | TTL |
+| --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A | Weighted | `10.0.1.50` (Blue) | 100 | `blue` | 60 |
+| `app.example.com` | A | Weighted | `10.0.2.50` (Green) | 0 | `green` | 60 |
+
+**Step 2:** Flip — set Blue weight to 0, Green weight to 100.
+
+| Record name | Type | Routing policy | Value | Weight | Set ID | TTL |
+| --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A | Weighted | `10.0.1.50` (Blue) | **0** | `blue` | 60 |
+| `app.example.com` | A | Weighted | `10.0.2.50` (Green) | **100** | `green` | 60 |
+
+**Step 3:** If issues arise, flip back in seconds. Rollback is just a weight change.
+
+> **Comparison:** Blue/Green with Route 53 doesn't require creating additional ALBs or Target Groups. Just change DNS records — zero infrastructure overhead.
+
+### 3.3 Multi-Region DR with Failover + Latency
+
+An advanced scenario: combining **two routing policies** using Alias records.
+
+**Layer 1 — Latency routing** for `internal.example.com` (selects the nearest region):
+
+| Record name | Type | Routing policy | Value | Region | Set ID | TTL | Health check |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `internal.example.com` | A (Alias) | Latency | ALB us-east-1 | us-east-1 | `us-east` | 60 | `hc-us-east` |
+| `internal.example.com` | A (Alias) | Latency | ALB eu-west-1 | eu-west-1 | `eu-west` | 60 | `hc-eu-west` |
+
+**Layer 2 — Failover routing** for `app.example.com` (DR when both primary regions go down):
+
+| Record name | Type | Routing policy | Failover type | Value | Set ID | TTL | Health check |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A (Alias) | Failover | Primary | `internal.example.com` | `primary` | 60 | `hc-primary` |
+| `app.example.com` | A (Alias) | Failover | Secondary | ALB ap-southeast-1 | `dr-singapore` | 60 | `hc-dr` |
+
+When both us-east-1 and eu-west-1 are operational: users are routed to the nearest region (via the Latency layer). When both "fall": traffic automatically switches to the DR site in Singapore (via the Failover layer).
+
+---
+
+## 4. Limitations — When Route 53 Is NOT a Load Balancer
+
+Route 53 is powerful, but **not a silver bullet**. Understanding the limits helps you avoid misuse:
+
+- **DNS Caching / TTL:** Even if you set TTL = 60s, many DNS resolvers cache longer than specified. Some applications (especially Java with its infinite default TTL) cache permanently. Traffic changes are **never instant** — always measured in minutes, not seconds.
+
+- **No Sticky Sessions:** Each DNS query is independent. There's no way to guarantee user X always goes to server Y through DNS. If you need session affinity, use ALB.
+
+- **Can't Read Request Content:** Route 53 only knows "who's asking" (the resolver's IP), not the URL path, headers, cookies, or body. Routing by `/api/v1` vs `/api/v2` is ALB's job.
+
+- **Balancing at Query Level, Not Request Level:** A client resolves DNS once, then sends thousands of requests to the same IP until the TTL expires. Route 53 has no control over traffic after DNS resolution.
+
+- **Failover Isn't Instant:** Health check interval (10-30s) x failure threshold (1-3 times) + TTL propagation = **several minutes of downtime** in a failover scenario. Compare: ALB switches traffic in seconds.
+
+- **Inconsistent Client Behavior:** Browsers, OSes, HTTP libraries — each caches DNS differently. You can't control them all.
+
+- **No Dynamic Registration:** ALB automatically detects new instances when an Auto Scaling Group scales out — you add 10 instances, ALB immediately distributes traffic to all 10. Route 53 can't do this. Each record must be created or updated **manually** (or via API/CLI). If your system needs flexible horizontal scaling — continuously adding/removing instances based on load — Route 53 simply isn't suited to stand alone. You need ALB/NLB behind it to handle distribution within the instance cluster.
+
+> **Principle:** If you need decisions based on **request content** → use ALB. If you just need to decide **where to send the user before connecting** → Route 53 is sufficient.
+
+---
+
+## 5. Route 53 vs ALB vs NLB — "The Golden Triangle"
+
+If you've read the [ALB or NLB](/posts/alb-or-nlb) article, this is the final piece to complete the picture:
+
+| Criteria | Route 53 | ALB | NLB |
+| --- | --- | --- | --- |
+| **Operating layer** | DNS (before connection) | Layer 7 (HTTP) | Layer 4 (TCP/UDP) |
+| **Base cost** | ~$0.50/zone/month | ~$16/month | ~$16/month |
+| **Granularity** | Per DNS query | Per HTTP request | Per TCP connection |
+| **Health check** | Yes (charged separately) | Built-in | Built-in |
+| **Sticky session** | No | Yes | Yes |
+| **SSL termination** | No | Yes | Yes (TLS) |
+| **Path-based routing** | No | Yes | No |
+| **Weighted traffic** | Yes | Yes (target group) | No |
+| **Failover speed** | Minutes (TTL) | Seconds | Seconds |
+| **Scope** | Global | Regional | Regional |
+
+![Which Load Balancer to Choose?](/route53-alb-nlb-decision-tree.svg)
+
+---
+
+## 6. Combining Route 53 + ALB — "The Perfect Combo"
+
+In practice, Route 53 and ALB/NLB **don't exclude each other** — they complement each other at two different layers.
+
+**The classic model:**
+
+- **Route 53 (Global Layer):** Latency-based or Geolocation routing to send users to the nearest region
+- **ALB (Regional Layer):** Path-based routing to distribute requests to the right microservice within that region
+
+![Combined Architecture: Route 53 + ALB](/route53-combo-architecture.svg)
+
+With this architecture:
+
+- Route 53 handles **global distribution** (Vietnamese users → Singapore, US users → Virginia)
+- ALB handles **local distribution** (`/api` → API service, `/web` → Web service)
+- Failover routing at the DNS layer protects against an entire region going down
+
+This is the model that most large-scale production systems use — and the Route 53 cost in this combo is virtually **negligible** compared to ALB.
+
+---
+
+## Final words
+
+Route 53 isn't a replacement for ALB or NLB — it's a **supplementary layer** that many teams overlook. At $0.50/month per hosted zone, you get:
+
+- **A/B testing** just by changing weights
+- **Blue/Green deployment** without additional infrastructure
+- **Multi-region failover** with automatic health checks
+- **Latency-based routing** for global applications
+
+The "golden triangle" for load balancing on AWS: **Route 53** for global steering, **ALB** for smart routing, **NLB** for raw speed. Knowing when to use each one — that's the real skill.
+
+**What scenarios are you using Route 53 for? Share below!**

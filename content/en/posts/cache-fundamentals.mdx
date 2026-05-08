@@ -1,0 +1,131 @@
+---
+title: 'Cache Handbook: "Faster, Cheaper, but Not Simpler" - Core Foundations of Caching'
+date: '2026-03-27'
+tags: ['Backend', 'System Design', 'Cache']
+enableComment: true
+---
+
+# Cache Handbook: "Faster, Cheaper, but Not Simpler" - Core Foundations of Caching
+
+> This article is compiled and adapted from the book **"A Cache Handbook for Software Engineers"** by **Quang Hoang** (Software Engineer at Google). This is part **1/4** of the series.
+
+There is a common misconception in software design: *"System too slow? Just slap Redis on it and call it a day."* The truth is, adding a Cache layer never makes your system simpler. It only shifts complexity from one place to another.
+
+In this first article of the series, we will build a solid foundation on Caching — from basic concepts to performance metrics.
+
+---
+
+## 1. What is Caching?
+
+**Caching** is the technique of temporarily storing a copy of data in a location with extremely fast read/write speed. In software systems, this is typically **RAM**, allowing applications to retrieve data almost instantly instead of spending time querying the source (such as a Database).
+
+Imagine your Database as a **massive library located in the suburbs** (Disk/SSD). Each time you want to read a book, it takes an hour to drive there. Cache is the **desk right in front of you** (RAM). You copy the most frequently read books onto your desk. Next time you want to read, it only takes a second to reach out and grab one.
+
+---
+
+## 2. The Pareto Principle and Data Locality
+
+Storing the entire Database in RAM is cost-prohibitive for most systems. However, user data access patterns typically follow the **Pareto Principle** (Zipfian Distribution) and **Temporal Locality**:
+
+- **Temporal Locality:** Recently accessed data tends to be accessed again in the near future.
+- **Zipfian Distribution:** About **80% of traffic** in a system typically concentrates on just **20% of "hot" data** (Hot Keys).
+
+These two principles allow us to focus on caching a small portion of data (20%-30%) to handle the majority of system load.
+
+---
+
+## 3. Usage Strategy: When SHOULD and SHOULDN'T You Use Cache?
+
+Caching is not a silver bullet for every performance problem. Applying it in the wrong context leads to unnecessary complexity and data inconsistency issues.
+
+### When SHOULD you use Cache?
+
+- **Read-Heavy Workloads:** Systems with high Read/Write ratios (typically >= 90/10) such as social networks, product catalogs.
+- **High computation cost:** Results from complex, CPU-intensive queries (Aggregation, Reports).
+- **Infrequently changing data:** Static data or data with low update frequency (Static assets, Config, User profiles).
+
+### When SHOULDN'T you use Cache?
+
+- **Write-Heavy:** Data changes constantly. The cost of Cache synchronization (Invalidation) negates the benefits of faster reads.
+- **High Consistency requirements:** For example, financial systems, real-time stock trading, where displaying stale data (even for a few ms) is unacceptable.
+- **Simple & fast queries:** If a DB query only takes 50ms and the DB isn't overloaded, adding Cache only increases architectural complexity (Over-engineering).
+
+---
+
+## 4. Cache Classification
+
+### 4.1. By Location (Topology)
+
+**Local Cache**
+
+Stores data directly in the RAM of the process running the application (In-process memory). The key characteristic is extremely fast access speed (**sub-microsecond**) since it eliminates Network I/O.
+
+**Remote Cache**
+
+Data is stored centrally on a separate cluster of servers (e.g., **Redis**, **Memcached**). The downside is additional network latency when the app server communicates with the cache server, but Remote Cache has a **higher hit rate** than Local Cache.
+
+> **Hit Rate** is the percentage of times the system finds the requested data already present in the Cache out of the total number of data access requests.
+
+### 4.2. By Interaction Model
+
+**Look-Aside (Lazy Loading)**
+
+This is the most common model. The App Server acts as the intermediary coordinator:
+
+1. App Server reads data from Cache.
+2. If **Cache Miss** -> App Server reads data from DB.
+3. App Server updates Cache with data from DB.
+
+**Inline Cache (Read-Through / Write-Through)**
+
+The App Server treats Cache as the "primary data source" and **never interacts directly with DB**. The Cache Server handles reading/writing data from/to DB.
+
+---
+
+## 5. AMAT - Cache Efficiency Metric
+
+### 5.1. The AMAT Formula
+
+Cache efficiency is measured by **AMAT** (Average Memory Access Time). This is the foundational formula for evaluating the average latency of a system:
+
+```
+AMAT = Hit Time + (Miss Rate x Miss Penalty)
+```
+
+Where:
+- **Hit Time:** Time to read from Cache.
+- **Miss Penalty:** Time to read from Database.
+- **Miss Rate:** % of requests that must go to DB. `Miss Rate = 1 - Hit Rate`.
+
+**Example:** Assume Hit Time = 1ms (Redis), Miss Penalty = 100ms (MySQL).
+
+- **No Cache** (Miss Rate = 100%): `AMAT = 100ms`
+- **Cache with Miss Rate 5%**: `AMAT = 1 + (5% x 100) = 6ms`
+- **Cache with Miss Rate 1%**: `AMAT = 1 + (1% x 100) = 2ms`
+
+> By reducing the Miss Rate by just **4%**, we can reduce latency by up to **3x**.
+
+### 5.2. Hit Rate and Tail Latency
+
+The **Tail Latency p99** metric represents the slowest 1% of requests in the system. In a system using Cache, p99 is directly influenced by the **Hit Rate**.
+
+Consider two scenarios:
+
+1. **Hit Rate = 99.5%** (Miss Rate = 0.5%): Since only 0.5% of requests miss, the slowest 1% threshold still falls within requests that hit the Cache. Result: **p99 ~ 1ms**.
+
+2. **Hit Rate = 98.5%** (Miss Rate = 1.5%): Since 1.5% exceeds the 1% threshold, the entire "slowest 1% of requests" group now has to query the DB. **p99 jumps to 100ms+**.
+
+A slight drop in Cache Hit Rate (from 99.5% to 98.5%) makes p99 performance **100x worse**.
+
+**Chain reaction effect:** When p99 shifts toward DB, the DB must handle more requests, causing DB queries themselves to slow down, making the p99 "tail" even longer and worse.
+
+> **Lesson:** To keep Tail Latency low, your goal is not just to optimize Cache speed but also to keep the **Miss Rate below the percentile threshold** you are monitoring.
+
+---
+
+## Series: Cache Handbook
+
+1. **Core Foundations of Caching** ← You are here
+2. [Decoding the Cache Consistency Problem](/posts/cache-consistency)
+3. [6 Classic "Traps" When Using Cache](/posts/cache-pitfalls)
+4. [From Monitoring to Scaling](/posts/cache-monitoring-and-scaling)

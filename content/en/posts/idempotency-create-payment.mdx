@@ -1,0 +1,267 @@
+---
+title: 'Idempotency 101: Why "Clicking Twice" Doesn''t Charge You Twice — Dissecting the Create Payment API'
+date: '2026-04-28'
+tags: ['Backend', 'System Design', 'API']
+enableComment: true
+---
+
+# Idempotency 101: Why "Clicking Twice" Doesn't Charge You Twice — Dissecting the Create Payment API
+
+Imagine this: you're at an online checkout, clicking the **"Pay $100"** button. The spinner spins. 5 seconds pass. 10 seconds. The coffee shop wifi keeps cutting in and out. You get impatient and click again. And again.
+
+Half an hour later, you receive **3 confirmation emails** and your account has been charged **$300**.
+
+This is the classic nightmare of every payment team, and the reason behind a concept that sounds very academic: **Idempotency**. This article will trace its mathematical origins, explain how it works in APIs, and finally walk through a working implementation for **Create Payment** with Node.js + Redis.
+
+---
+
+## 1. Origins and Context
+
+### 1.1. Definition: What Is an Idempotent Operation?
+
+In Computer Science, an **operation** (function, API call) is called idempotent if:
+
+```
+f(f(x)) = f(x)
+```
+
+In other words: **running the operation 1 time or N times produces the same result on the system**.
+
+- `SET x = 5` → idempotent (run it 100 times and `x` is still 5).
+- `x = x + 1` → **not** idempotent (each run increments `x`).
+- `DELETE FROM users WHERE id = 7` → idempotent (first time deletes, subsequent times are no-ops).
+- `INSERT INTO users(name) VALUES('Quang')` → **not** idempotent (each insert creates a new row).
+
+### 1.2. HTTP — RFC 2616 (1999) → RFC 9110 (2022)
+
+When the web took off, the IETF standardized this concept into **HTTP semantics**. According to RFC 9110:
+
+| Method   | Idempotent? | Safe? |
+| -------- | ----------- | ----- |
+| GET      | ✅          | ✅    |
+| HEAD     | ✅          | ✅    |
+| OPTIONS  | ✅          | ✅    |
+| PUT      | ✅          | ❌    |
+| DELETE   | ✅          | ❌    |
+| **POST** | **❌**      | ❌    |
+| PATCH    | ❌          | ❌    |
+
+`POST` is intentionally **not** idempotent because it's designed to "create a new resource" — each POST creates a new entity.
+
+> This is a **semantic contract**, not an implementation guarantee. The RFC only says that _if you implement correctly_, these methods should be idempotent. If a bug breaks that... it's still broken.
+
+### 1.3. Distributed Systems Era: Stripe and the Idempotency-Key
+
+By the mid-2010s, microservices and mobile exploded. The network became a second-class citizen: timeouts, retries, mobile network handoffs, proxy retries... all became everyday occurrences. **The problem is that `POST` is not idempotent**, yet businesses have countless critical `POST` operations: creating orders, processing payments, transferring money...
+
+In 2015, **Stripe** published a famous blog post introducing the **`Idempotency-Key`** pattern — an HTTP header that clients send to make `POST` "safe to retry." This pattern quickly became an industry standard: Square, PayPal, Shopify, AWS... all adopted it.
+
+> "The network is unreliable. Any request can time out, any response can be lost. Idempotency is the _contract_ between client and server: 'go ahead and retry, I won't corrupt your data'."
+
+---
+
+## 2. How It Works: The Core of an Idempotent Operation
+
+### 2.1. Why Does Create Payment Need Idempotency?
+
+Let's list the scenarios that cause **double-charges** in practice:
+
+1. **Network timeout between client and server.** The server has finished processing and charged the account, but the response is lost on the way back due to a TCP reset. The client thinks it failed, retries → charged a second time.
+2. **User refresh / double-click.** The page is loading slowly, the user hits F5 or clicks twice. The browser sends 2 nearly simultaneous requests.
+3. **Mobile retry policy.** Mobile SDKs (especially when switching from wifi to 4G) automatically retry failed requests.
+4. **Proxy / Load Balancer retry.** Some proxies are configured to retry on upstream timeout. The client may not even be aware.
+
+In all of these scenarios, **the client has no way of knowing whether the server has already processed the request**. The only safe approach is... to ask the server. Idempotency enables that question in the form of: _"This is a retry of request X, please don't process it again."_
+
+### 2.2. "Natural" vs "Artificial" Idempotency
+
+Some endpoints are **naturally** idempotent by semantics:
+
+- `GET /balance` — read-only, doesn't change state.
+- `PUT /users/123 {"name": "Quang"}` — sets state to a specific value; running it 10 times produces the same state.
+- `DELETE /orders/abc` — first call deletes, subsequent calls are no-ops (or return idempotent 404).
+
+But `POST /payments` is **not** naturally idempotent. Each POST by default = a new payment. To make it idempotent, we need an **external identifier** — that's the **Idempotency Key**.
+
+### 2.3. General Flow Diagram
+
+1. **Client** generates a unique `Idempotency-Key` (UUID v4) for each _intent_ to create a payment.
+2. Client sends the request `POST /payments`, attaching the key in the HTTP header.
+3. **Server** checks the key in storage (Redis):
+   - **Not found** → atomic acquire lock, mark as `running`, execute business logic, save result to storage, return response.
+   - **Found + `completed`** → read the stored response, return it verbatim (status code + body).
+   - **Found + `running`** → return `409 Conflict` (the original request is still processing, please wait).
+4. The key has a **TTL** (Stripe uses 24h) to prevent storage from growing indefinitely.
+
+Key point: the client generates the key, not the server. Because the server doesn't know what the client's "intent" is — two identical requests with 2 different keys represent 2 different intents (the user genuinely wants to pay twice), while 2 requests with the same key are retries of the same intent.
+
+---
+
+## 3. Stripe's Idempotency-Key: The Reference Design
+
+Stripe is the reference design most widely followed by the industry. Their key design decisions:
+
+- **Header name**: `Idempotency-Key: <string ≤ 255 chars>`. Any string, but UUID v4 is recommended to avoid collisions between clients.
+- **TTL**: **24 hours** from the first request. After that, the key is "forgotten" and a retry will create a new payment.
+- **Request fingerprint**: Stripe hashes the request body. If the same key is used with a different body → returns an error (default `400 Bad Request`). This prevents clients from accidentally reusing a key for a completely different request.
+- **Scope**: only applies to `POST` (since other methods are already semantically idempotent).
+- **Response cached verbatim**: the status code + body from the first response are saved and replayed exactly for all retries. The client cannot distinguish a replay from an original response (nor does it need to).
+- **Server errors (`5xx`) are not cached**: allows clients to retry. Deterministic client errors (`4xx` like validation failures) are cached — because retrying would produce the same error.
+- **In-progress state**: if a request is still running when a retry arrives, Stripe returns `409 Conflict` to tell the client to wait.
+
+Official reference: [stripe.com/docs/api/idempotent_requests](https://stripe.com/docs/api/idempotent_requests).
+
+---
+
+## 4. Code Sample: Create Payment with Express + Redis
+
+Stack: **Node.js 20 + TypeScript + Express + ioredis**. Redis is used as storage for idempotency records because it natively supports `SET NX` (atomic) and `EX` (TTL) — exactly the two things we need.
+
+### 4.1. Schema Stored in Redis
+
+We use a discriminated union for the 2 states of a record:
+
+```ts
+type IdempotencyRecord =
+  | {
+      status: 'running'
+      requestHash: string
+    }
+  | {
+      status: 'completed'
+      requestHash: string
+      statusCode: number
+      body: any
+    }
+```
+
+- `requestHash`: SHA-256 of the request body, to detect key reuse for a different request.
+- `statusCode` + `body`: the original response, for replay.
+
+### 4.2. Three-File Structure
+
+For readability and testability, we split the logic into 3 files:
+
+- `type.ts` — type definitions for the idempotency record.
+- `controller.ts` — the actual handler + body hash helper + simulated PSP call.
+- `app.ts` — Express setup, mount route, listen on port.
+
+#### `type.ts`
+
+```ts
+export type IdempotencyRecord =
+  | {
+      status: 'running'
+      requestHash: string
+    }
+  | {
+      status: 'completed'
+      requestHash: string
+      statusCode: number
+      body: any
+    }
+```
+
+#### `controller.ts`
+
+```ts
+import { Request, Response } from 'express'
+import Redis from 'ioredis'
+import { createHash, randomUUID } from 'crypto'
+import type { IdempotencyRecord } from './type'
+
+const TTL_SECONDS = 24 * 60 * 60
+const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379')
+
+function hashBody(body: any): string {
+  return createHash('sha256').update(JSON.stringify(body)).digest('hex')
+}
+
+async function chargeCustomer(body: any) {
+  return { id: randomUUID(), status: 'succeeded', amount: 100 }
+}
+
+export async function createPayment(req: Request, res: Response) {
+  const key = req.header('Idempotency-Key')
+
+  if (!key) {
+    return res.status(400).json({ error: 'Idempotency-Key header is required' })
+  }
+
+  const requestHash = hashBody(req.body)
+  const redisKey = `idem:payments:${key}`
+
+  const initialRecord: IdempotencyRecord = { status: 'running', requestHash }
+  const acquired = await redis.set(redisKey, JSON.stringify(initialRecord), 'EX', TTL_SECONDS, 'NX')
+
+  if (!acquired) {
+    const raw = await redis.get(redisKey)
+    const existing = JSON.parse(raw!) as IdempotencyRecord
+
+    if (existing.requestHash !== requestHash) {
+      return res.status(422).json({
+        error: 'Idempotency-Key was reused with a different request body',
+      })
+    }
+
+    if (existing.status === 'running') {
+      return res.status(409).json({
+        error: 'A request with the same Idempotency-Key is still being processed',
+      })
+    }
+
+    return res.status(existing.statusCode).json(existing.body)
+  }
+
+  try {
+    const payment = await chargeCustomer(req.body)
+
+    const completed: IdempotencyRecord = {
+      status: 'completed',
+      requestHash,
+      statusCode: 201,
+      body: payment,
+    }
+    await redis.set(redisKey, JSON.stringify(completed), 'EX', TTL_SECONDS)
+
+    return res.status(201).json(payment)
+  } catch (err) {
+    await redis.del(redisKey)
+    throw err
+  }
+}
+```
+
+#### `app.ts`
+
+```ts
+import express from 'express'
+import { createPayment } from './controller'
+
+const app = express()
+app.use(express.json())
+
+app.post('/payments', createPayment)
+
+app.listen(3000, () => {
+  console.log('Payment service listening on :3000')
+})
+```
+
+The two most important lines in the entire handler:
+
+> `redis.set(..., 'NX')` in step 2 — atomic acquire, ensuring only one request wins the race.
+>
+> `redis.del(redisKey)` in the `catch` block at step 5 — releases the lock when business logic fails, giving the client a chance to retry. Skip this line and the client will be stuck at `409` until the TTL expires.
+
+---
+
+## 5. Practical Advice
+
+1. **Apply to every critical `POST`**: payment, order, refund, send-email, send-sms, transfer. Any operation where "doing it twice is wrong" needs idempotency.
+2. **Don't start complex.** The `SET NX + TTL + request hash` pattern above covers 90% of use cases. Leases, two-phase commits, and outbox patterns are only needed at the scale of Stripe or AWS.
+3. **Include it in the API contract from day one.** Adding `Idempotency-Key` to an API that already has 1000 clients is painful — you have to migrate gradually, supporting both modes with and without the key. So: on the first day you design a POST endpoint, ask _"does this endpoint need idempotency?"_.
+4. **Document the behavior clearly**: TTL duration, response on key reuse, response when in-progress, allowed key format. Client SDKs will implement retry logic based on what you document.
+5. **Measure with metrics**: retry cache hit rate, 409 rate, 422 rate. A spike in 422 = clients are reusing keys incorrectly. A spike in 409 = there may be a race condition on the client side.
+
+Idempotency is not a "nice to have" feature — it's an **invariant** that every system dealing with financial transactions, orders, or non-reversible side-effects must guarantee. If you want to dive deeper into data consistency in distributed systems, check out the [article on Cache Consistency](/posts/cache-consistency) — it's in the same family as idempotency, both revolving around _"two parties that don't trust each other, how do they synchronize"_.
