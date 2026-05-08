@@ -1,0 +1,337 @@
+---
+title: 'Route 53: "Load Balancer Miễn Phí" Mà Bạn Đã Có Sẵn Trong Tay'
+date: '2026-05-08'
+tags: ['Devops', 'AWS', 'DNS', 'SAA']
+enableComment: true
+---
+
+# Route 53: "Load Balancer Miễn Phí" Mà Bạn Đã Có Sẵn Trong Tay
+
+Bạn đang trả $16/tháng cho một ALB chỉ để phân phối traffic giữa hai môi trường A/B testing? Hay đang cân nhắc dựng thêm một Load Balancer ở region khác cho Disaster Recovery?
+
+Có một tin vui: **bạn đã có sẵn một "Load Balancer" trong tay** — và nhiều khả năng bạn đang trả $0.50/tháng cho nó mà chưa khai thác hết. Đó chính là **Amazon Route 53**.
+
+Trong [bài viết về DNS](/posts/how-dns-works-under-the-hood), chúng ta đã thấy DNS hoạt động như "cuốn danh bạ" — gõ tên miền, trả về IP. Nhưng nếu bước "trả về IP" đó **không cố định**, mà thay đổi tùy theo trọng số, vị trí địa lý, hay tình trạng sức khỏe của server thì sao? Lúc đó, DNS không còn là danh bạ nữa — nó trở thành một **bộ cân bằng tải**.
+
+Route 53 cung cấp **8 routing policy** cho phép bạn biến DNS resolution thành các chiến lược phân phối traffic khác nhau: từ A/B testing, canary release, blue/green deployment cho đến failover đa vùng. Tất cả đều ở tầng DNS — không cần thêm infrastructure, không cần thay đổi code.
+
+---
+
+## 1. Tại sao Route 53 lại là "Load Balancer"?
+
+Hầu hết kỹ sư nghĩ về Load Balancer là ALB hoặc NLB — những dịch vụ hoạt động ở Layer 4/7, ngồi giữa client và server để phân phối request. Nhưng Route 53 hoạt động ở **tầng DNS** — sớm hơn nhiều trong vòng đời request.
+
+![Route 53 vs ALB: Hoạt Động Ở Tầng Nào?](/route53-dns-vs-alb-layer.svg)
+
+Sự khác biệt cốt lõi:
+
+- **Route 53** quyết định **TRƯỚC KHI** client kết nối — "Bạn nên gọi đến IP nào?"
+- **ALB/NLB** quyết định **SAU KHI** client đã kết nối — "Request này nên đi đến backend nào?"
+
+Điều này có nghĩa Route 53 không thể làm được những gì ALB làm (path-based routing, SSL termination, sticky session). Nhưng ngược lại, có những bài toán mà Route 53 giải quyết **đơn giản hơn, rẻ hơn, và ở phạm vi toàn cầu** — điều mà một ALB đơn lẻ không thể.
+
+Mỗi Hosted Zone trên Route 53 đã là một Load Balancer chờ được cấu hình. Bạn chỉ cần chọn đúng **routing policy**.
+
+---
+
+## 2. 8 "Chế Độ" Cân Bằng Tải Của Route 53
+
+| Routing Policy | Cách hoạt động | Khi nào dùng |
+| --- | --- | --- |
+| **Simple** | Trả về 1 (hoặc nhiều) giá trị, không logic | Dev/staging, setup đơn giản |
+| **Weighted** | Chia traffic theo tỷ lệ trọng số | A/B testing, canary, blue/green |
+| **Latency** | Chọn region có độ trễ thấp nhất | App global, tối ưu UX |
+| **Failover** | Primary/Secondary, tự chuyển khi lỗi | Disaster Recovery |
+| **Geolocation** | Routing theo quốc gia/châu lục | Nội dung theo vùng, compliance |
+| **Geoproximity** | Routing theo khoảng cách + bias | Mở rộng/thu hẹp vùng phục vụ |
+| **Multivalue Answer** | Trả về tối đa 8 IP khỏe mạnh | Client-side LB cơ bản |
+| **IP-based** | Routing theo CIDR của client | Phân luồng nội bộ/bên ngoài |
+
+Hãy đi sâu vào từng policy:
+
+### 2.1 Simple Routing — "Mặc định, không cần suy nghĩ"
+
+Đây là chế độ mặc định khi bạn tạo record trên Route 53. Một domain trỏ đến một (hoặc nhiều) IP. Nếu có nhiều IP, Route 53 trả về tất cả theo thứ tự ngẫu nhiên — tương tự DNS round-robin.
+
+**Hạn chế:** Không có health check. Nếu một server chết, Route 53 vẫn vui vẻ trả về IP đó.
+
+**Cấu hình trên AWS Console:**
+
+| Record name | Type | Routing policy | Value | TTL |
+| --- | --- | --- | --- | --- |
+| `app.example.com` | A | Simple | `10.0.1.100`, `10.0.2.100` | 300 |
+
+> **Dùng khi nào?** Môi trường dev/staging, hoặc khi bạn chỉ có một endpoint duy nhất.
+
+### 2.2 Weighted Routing — "Chia bánh theo phần trăm"
+
+Đây là **ngôi sao** của bài viết. Weighted Routing cho phép bạn gán trọng số cho từng record, và Route 53 sẽ phân phối traffic theo tỷ lệ tương ứng.
+
+![Weighted Routing: Chia Traffic Theo Tỷ Lệ](/route53-weighted-routing.svg)
+
+Ví dụ: bạn cần chia traffic cho `api.example.com` giữa Production (80%) và Canary (20%). Bạn tạo **2 record cùng tên** với routing policy = Weighted:
+
+| Record name | Type | Routing policy | Value | Weight | Set ID | TTL | Health check |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `api.example.com` | A | Weighted | `10.0.1.100` | 80 | `production-v1` | 60 | (optional) |
+| `api.example.com` | A | Weighted | `10.0.2.100` | 20 | `canary-v2` | 60 | (optional) |
+
+Kết quả: **80%** DNS query trả về IP của Production, **20%** trả về IP của Canary. Đơn giản vậy thôi.
+
+Công thức tính phần trăm:
+
+```
+% traffic = Weight của record / Tổng tất cả weights
+```
+
+Nếu bạn đặt weight **0** cho một record, Route 53 sẽ ngừng gửi traffic đến đó — cực kỳ hữu ích khi cần "tắt" một endpoint mà không xóa record.
+
+> **Mẹo:** Weight không nhất thiết phải cộng lại thành 100. Route 53 tự tính tỷ lệ. Weight 3 và 7 cho kết quả giống 30 và 70.
+
+### 2.3 Latency-based Routing — "Ai gần thì đến"
+
+Route 53 duy trì một bảng dữ liệu về **độ trễ mạng** giữa các vùng AWS và vị trí của người dùng. Khi nhận DNS query, nó trả về IP ở region có latency thấp nhất.
+
+Khác với Geolocation (routing theo địa lý cứng), Latency-based routing quan tâm đến **tốc độ thực tế**. Một user ở Việt Nam có thể được route đến Tokyo thay vì Singapore nếu đường truyền đến Tokyo nhanh hơn tại thời điểm đó.
+
+| Record name | Type | Routing policy | Value | Region | Set ID | TTL | Health check |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A | Latency | `10.0.1.100` | ap-southeast-1 | `singapore` | 60 | `hc-singapore` |
+| `app.example.com` | A | Latency | `10.0.2.100` | ap-northeast-1 | `tokyo` | 60 | `hc-tokyo` |
+| `app.example.com` | A | Latency | `10.0.3.100` | us-east-1 | `virginia` | 60 | `hc-virginia` |
+
+User ở Việt Nam sẽ tự động được route đến Singapore hoặc Tokyo — tùy region nào có latency thấp hơn tại thời điểm query.
+
+> **Dùng khi nào?** Ứng dụng global cần tối ưu thời gian phản hồi cho user ở nhiều khu vực.
+
+### 2.4 Failover Routing — "Phòng thủ thảm họa"
+
+Failover routing hoạt động theo mô hình **Active-Passive**: bạn chỉ định một Primary và một Secondary record. Route 53 liên tục kiểm tra sức khỏe của Primary qua health check. Khi Primary "ngã", traffic tự động chuyển sang Secondary.
+
+![Failover Routing: Tự Động Chuyển Đổi Khi Sự Cố](/route53-failover-routing.svg)
+
+| Record name | Type | Routing policy | Failover type | Value | Set ID | TTL | Health check |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A | Failover | Primary | `10.0.1.100` | `primary-us-east-1` | 60 | `hc-primary` (bắt buộc) |
+| `app.example.com` | A | Failover | Secondary | `10.0.2.100` | `secondary-eu-west-1` | 60 | `hc-secondary` (khuyến nghị) |
+
+**Cấu hình Health Check cho Primary:**
+
+| Protocol | Endpoint | Port | Path | Request interval | Failure threshold |
+| --- | --- | --- | --- | --- | --- |
+| HTTPS | `10.0.1.100` | 443 | `/health` | 30 seconds | 3 |
+
+Với health check interval 30 giây và threshold 3 lần, Route 53 phát hiện lỗi trong khoảng **60–90 giây**. Kết hợp TTL thấp (60s), hầu hết client sẽ chuyển sang endpoint dự phòng trong **2–3 phút**.
+
+> **Dùng khi nào?** Disaster Recovery, active-passive setup giữa các region.
+
+### 2.5 Geolocation & Geoproximity — "Người Việt xem server Việt"
+
+**Geolocation** routing theo ranh giới địa lý cứng: quốc gia, bang, hoặc châu lục. User ở Việt Nam → server Singapore. User ở Đức → server Frankfurt. Không có ngoại lệ.
+
+| Record name | Type | Routing policy | Location | Value | Set ID | TTL |
+| --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A | Geolocation | Vietnam | `10.0.1.100` (Singapore) | `vietnam-to-sg` | 300 |
+| `app.example.com` | A | Geolocation | Europe | `10.0.2.100` (Frankfurt) | `europe-to-fra` | 300 |
+| `app.example.com` | A | Geolocation | **Default** | `10.0.3.100` (US) | `default-us` | 300 |
+
+> **Quan trọng:** Luôn tạo record **Default** — nếu không, user ở quốc gia chưa được map sẽ nhận response NXDOMAIN (không tìm thấy domain).
+
+**Geoproximity** tinh vi hơn: routing theo khoảng cách vật lý, nhưng có thêm tham số **bias** cho phép "kéo giãn" hoặc "thu hẹp" vùng phục vụ của một resource. Đặt bias dương để mở rộng — hữu ích khi một region đang có dư tải và muốn nhận thêm traffic từ vùng lân cận.
+
+| Record name | Type | Routing policy | Region | Value | Bias | Set ID |
+| --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A | Geoproximity | ap-southeast-1 | `10.0.1.100` | +25 (mở rộng) | `singapore` |
+| `app.example.com` | A | Geoproximity | ap-northeast-1 | `10.0.2.100` | 0 (mặc định) | `tokyo` |
+
+Với bias +25 cho Singapore, vùng phục vụ của Singapore sẽ "kéo giãn" ra — thu hút thêm traffic từ các khu vực lân cận mà bình thường sẽ route đến Tokyo.
+
+> **Dùng khi nào?** Geolocation cho compliance (GDPR, data residency). Geoproximity cho tối ưu tải linh hoạt.
+
+### 2.6 Multivalue Answer — "Round-robin có sức khỏe"
+
+Giống Simple Routing nhưng **có health check**. Route 53 trả về tối đa 8 IP khỏe mạnh cho mỗi query. Client chọn ngẫu nhiên một IP để kết nối.
+
+Khác với Simple Routing ở chỗ: nếu một server chết, Route 53 sẽ loại IP đó khỏi danh sách trả về. Đây là dạng client-side load balancing cơ bản nhất.
+
+Bạn tạo **nhiều record riêng biệt**, mỗi record trỏ đến một IP và gắn health check:
+
+| Record | Value | Set ID | Health check |
+| --- | --- | --- | --- |
+| `app.example.com` | `10.0.1.100` | `server-1` | `hc-server-1` |
+| `app.example.com` | `10.0.1.101` | `server-2` | `hc-server-2` |
+| `app.example.com` | `10.0.1.102` | `server-3` | `hc-server-3` |
+| `app.example.com` | `10.0.1.103` | `server-4` | `hc-server-4` |
+
+Tất cả đều có **Routing policy = Multivalue answer**, **TTL = 60**. Khi `server-2` chết và health check fail, Route 53 tự động loại `10.0.1.101` khỏi response — client chỉ nhận được 3 IP còn lại.
+
+> **Lưu ý:** Multivalue Answer **không phải** thay thế cho ALB/NLB. Nó chỉ phù hợp cho các hệ thống đơn giản cần một lớp health check ở tầng DNS.
+
+### 2.7 IP-based Routing — "Biết khách từ đâu đến"
+
+Routing dựa trên **CIDR block** của địa chỉ IP client. Bạn định nghĩa bảng ánh xạ: dải IP nào → endpoint nào.
+
+**Bước 1:** Tạo CIDR collection và CIDR block trên Route 53:
+
+| CIDR Collection | CIDR Block | Location Name |
+| --- | --- | --- |
+| `my-company` | `10.0.0.0/8` | `internal-network` |
+| `my-company` | `203.0.113.0/24` | `isp-a` |
+| `my-company` | `198.51.100.0/24` | `isp-b` |
+
+**Bước 2:** Tạo record với IP-based routing:
+
+| Record name | Type | Routing policy | CIDR location | Value | Set ID | TTL |
+| --- | --- | --- | --- | --- | --- | --- |
+| `api.example.com` | A | IP-based | `internal-network` | `10.0.1.100` | `internal` | 60 |
+| `api.example.com` | A | IP-based | `isp-a` | `10.0.2.100` | `isp-a` | 60 |
+| `api.example.com` | A | IP-based | Default | `10.0.3.100` | `default` | 60 |
+
+Traffic từ dải IP nội bộ công ty (`10.0.0.0/8`) route đến internal API, ISP-A route đến CDN gần nhất, còn lại route đến default endpoint.
+
+> **Dùng khi nào?** Phân luồng traffic doanh nghiệp, tối ưu theo ISP, hoặc chặn traffic từ dải IP nhất định.
+
+---
+
+## 3. Thực Chiến — 3 Kịch Bản Phổ Biến
+
+### 3.1 A/B Testing với Weighted Routing
+
+Bạn muốn thử nghiệm phiên bản mới của API trên 20% user? Tạo hai weighted record:
+
+| Record name | Type | Routing policy | Value | Weight | Set ID | TTL |
+| --- | --- | --- | --- | --- | --- | --- |
+| `api.example.com` | A | Weighted | `10.0.1.100` | 80 | `production-v1` | 60 |
+| `api.example.com` | A | Weighted | `10.0.2.100` | 20 | `canary-v2` | 60 |
+
+Sau đó bạn dần thay đổi weight theo lộ trình canary:
+
+1. **Khởi đầu:** Weight 95/5 — chỉ 5% traffic đến phiên bản mới
+2. **Quan sát:** Monitor error rate, latency trong 30 phút
+3. **Tăng dần:** 80/20 → 50/50 → 20/80
+4. **Hoàn tất:** 0/100 — chuyển hoàn toàn sang phiên bản mới
+
+> **Quan trọng:** Đặt TTL thấp (60s) để thay đổi weight có hiệu lực nhanh. TTL cao đồng nghĩa client sẽ cache IP cũ lâu hơn.
+
+### 3.2 Blue/Green Deployment
+
+Blue/Green đơn giản hơn canary: hai môi trường, chuyển đổi ngay lập tức.
+
+![Blue/Green + Canary: Lộ Trình Chuyển Đổi](/route53-bluegreen-canary.svg)
+
+**Bước 1:** Cả hai môi trường đều sẵn sàng. Traffic 100% ở Blue.
+
+| Record name | Type | Routing policy | Value | Weight | Set ID | TTL |
+| --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A | Weighted | `10.0.1.50` (Blue) | 100 | `blue` | 60 |
+| `app.example.com` | A | Weighted | `10.0.2.50` (Green) | 0 | `green` | 60 |
+
+**Bước 2:** Flip — chuyển Blue weight về 0, Green weight lên 100.
+
+| Record name | Type | Routing policy | Value | Weight | Set ID | TTL |
+| --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A | Weighted | `10.0.1.50` (Blue) | **0** | `blue` | 60 |
+| `app.example.com` | A | Weighted | `10.0.2.50` (Green) | **100** | `green` | 60 |
+
+**Bước 3:** Nếu có vấn đề, flip ngược lại trong vài giây. Rollback chỉ là thay đổi weight.
+
+> **So sánh:** Blue/Green bằng Route 53 không cần tạo thêm ALB hay Target Group. Chỉ cần thay đổi DNS record — zero infrastructure overhead.
+
+### 3.3 Multi-Region DR với Failover + Latency
+
+Kịch bản nâng cao: kết hợp **hai routing policy** bằng cách sử dụng Alias record.
+
+**Tầng 1 — Latency routing** cho `internal.example.com` (chọn region gần nhất):
+
+| Record name | Type | Routing policy | Value | Region | Set ID | TTL | Health check |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `internal.example.com` | A (Alias) | Latency | ALB us-east-1 | us-east-1 | `us-east` | 60 | `hc-us-east` |
+| `internal.example.com` | A (Alias) | Latency | ALB eu-west-1 | eu-west-1 | `eu-west` | 60 | `hc-eu-west` |
+
+**Tầng 2 — Failover routing** cho `app.example.com` (DR khi cả hai region chính sập):
+
+| Record name | Type | Routing policy | Failover type | Value | Set ID | TTL | Health check |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `app.example.com` | A (Alias) | Failover | Primary | `internal.example.com` | `primary` | 60 | `hc-primary` |
+| `app.example.com` | A (Alias) | Failover | Secondary | ALB ap-southeast-1 | `dr-singapore` | 60 | `hc-dr` |
+
+Khi cả us-east-1 và eu-west-1 đều hoạt động: user được route đến region gần nhất (qua tầng Latency). Khi cả hai "ngã": traffic tự động chuyển sang DR site ở Singapore (qua tầng Failover).
+
+---
+
+## 4. Giới Hạn — Khi Nào Route 53 KHÔNG Phải Load Balancer
+
+Route 53 mạnh mẽ, nhưng **không phải thần dược**. Hiểu rõ giới hạn để tránh dùng sai:
+
+- **DNS Caching / TTL:** Dù bạn đặt TTL = 60s, nhiều DNS resolver cache lâu hơn quy định. Một số ứng dụng (đặc biệt Java với infinite default TTL) cache vĩnh viễn. Thay đổi traffic **không bao giờ tức thì** — luôn tính bằng phút, không phải giây.
+
+- **Không có Sticky Session:** Mỗi DNS query là độc lập. Không có cách nào bảo đảm user X luôn về server Y qua DNS. Nếu cần session affinity, bạn phải dùng ALB.
+
+- **Không đọc được nội dung Request:** Route 53 chỉ biết "ai đang hỏi" (IP của resolver), không biết URL path, header, cookie hay body. Routing theo `/api/v1` vs `/api/v2` là việc của ALB.
+
+- **Cân bằng ở mức Query, không phải Request:** Một client resolve DNS một lần, rồi gửi hàng nghìn request đến cùng IP đó cho đến khi TTL hết. Route 53 không kiểm soát được traffic sau bước DNS resolution.
+
+- **Failover không tức thì:** Health check interval (10–30s) × failure threshold (1–3 lần) + TTL propagation = **vài phút downtime** trong kịch bản failover. So sánh: ALB chuyển traffic trong vài giây.
+
+- **Client behavior không đồng nhất:** Trình duyệt, OS, thư viện HTTP — mỗi nơi cache DNS theo cách khác nhau. Bạn không kiểm soát được hết.
+
+- **Không hỗ trợ dynamic registration:** ALB tự động phát hiện instance mới khi Auto Scaling Group scale out — bạn thêm 10 instance, ALB lập tức phân phối traffic đến cả 10. Route 53 không làm được điều này. Mỗi record phải được tạo hoặc cập nhật **thủ công** (hoặc qua API/CLI). Nếu hệ thống của bạn cần horizontal scaling linh hoạt — thêm/bớt instance liên tục theo tải — Route 53 đơn giản là không phù hợp để đứng một mình. Bạn cần ALB/NLB phía sau để xử lý việc phân phối trong cụm instance.
+
+> **Nguyên tắc:** Nếu bạn cần quyết định dựa trên **nội dung request** → dùng ALB. Nếu chỉ cần quyết định **gửi user đến đâu trước khi kết nối** → Route 53 là đủ.
+
+---
+
+## 5. Route 53 vs ALB vs NLB — "Tam Giác Vàng"
+
+Nếu bạn đã đọc bài [ALB hay NLB](/posts/alb-or-nlb), đây là mảnh ghép còn lại để hoàn thiện bức tranh:
+
+| Tiêu chí | Route 53 | ALB | NLB |
+| --- | --- | --- | --- |
+| **Tầng hoạt động** | DNS (trước kết nối) | Layer 7 (HTTP) | Layer 4 (TCP/UDP) |
+| **Chi phí cơ bản** | ~$0.50/zone/tháng | ~$16/tháng | ~$16/tháng |
+| **Độ chi tiết** | Mỗi DNS query | Mỗi HTTP request | Mỗi TCP connection |
+| **Health check** | Có (tính phí riêng) | Tích hợp sẵn | Tích hợp sẵn |
+| **Sticky session** | Không | Có | Có |
+| **SSL termination** | Không | Có | Có (TLS) |
+| **Path-based routing** | Không | Có | Không |
+| **Weighted traffic** | Có | Có (target group) | Không |
+| **Tốc độ failover** | Phút (TTL) | Giây | Giây |
+| **Phạm vi** | Global | Regional | Regional |
+
+![Chọn Load Balancer Nào?](/route53-alb-nlb-decision-tree.svg)
+
+---
+
+## 6. Kết Hợp Route 53 + ALB — "Combo Hoàn Hảo"
+
+Trong thực tế, Route 53 và ALB/NLB **không loại trừ nhau** — chúng bổ sung cho nhau ở hai tầng khác nhau.
+
+**Mô hình kinh điển:**
+
+- **Route 53 (Tầng Global):** Latency-based hoặc Geolocation routing để đưa user đến region gần nhất
+- **ALB (Tầng Regional):** Path-based routing để phân phối request đến đúng microservice trong region đó
+
+![Kiến Trúc Kết Hợp: Route 53 + ALB](/route53-combo-architecture.svg)
+
+Với kiến trúc này:
+
+- Route 53 xử lý **phân phối global** (user Việt Nam → Singapore, user Mỹ → Virginia)
+- ALB xử lý **phân phối local** (`/api` → API service, `/web` → Web service)
+- Failover routing ở tầng DNS bảo vệ khi cả một region "sập"
+
+Đây là mô hình mà hầu hết hệ thống production quy mô lớn đều sử dụng — và chi phí Route 53 trong combo này gần như **không đáng kể** so với ALB.
+
+---
+
+## Lời kết
+
+Route 53 không phải là thay thế cho ALB hay NLB — nó là **tầng bổ sung** mà nhiều team đang bỏ qua. Với $0.50/tháng cho mỗi hosted zone, bạn có trong tay:
+
+- **A/B testing** chỉ bằng cách thay đổi weight
+- **Blue/Green deployment** không cần thêm infrastructure
+- **Multi-region failover** tự động với health check
+- **Latency-based routing** cho ứng dụng global
+
+"Tam giác vàng" cho load balancing trên AWS: **Route 53** cho steering toàn cầu, **ALB** cho routing thông minh, **NLB** cho tốc độ thuần túy. Hiểu khi nào dùng cái nào — đó mới là kỹ năng thật sự.
+
+**Bạn đang sử dụng Route 53 cho kịch bản nào? Hãy chia sẻ bên dưới!**

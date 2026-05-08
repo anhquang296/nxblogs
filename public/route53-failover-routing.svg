@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 380" font-family="system-ui, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow-green" markerWidth="8" markerHeight="5" refX="8" refY="2.5" orient="auto">
+      <polygon points="0 0, 8 2.5, 0 5" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="8" markerHeight="5" refX="8" refY="2.5" orient="auto">
+      <polygon points="0 0, 8 2.5, 0 5" fill="#dc2626"/>
+    </marker>
+  </defs>
+  <rect width="800" height="380" fill="#f9fafb" rx="8"/>
+  <text x="400" y="32" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Failover Routing: Tự Động Chuyển Đổi Khi Sự Cố</text>
+
+  <line x1="400" y1="50" x2="400" y2="370" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="8 4"/>
+
+  <rect x="55" y="52" width="290" height="32" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="200" y="73" text-anchor="middle" font-size="13" font-weight="bold" fill="#16a34a">Bình thường</text>
+
+  <rect x="455" y="52" width="290" height="32" rx="6" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="600" y="73" text-anchor="middle" font-size="13" font-weight="bold" fill="#dc2626">Khi sự cố xảy ra</text>
+
+  <rect x="120" y="105" width="160" height="55" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+  <text x="200" y="130" text-anchor="middle" font-size="14" font-weight="bold" fill="#1d4ed8">Route 53</text>
+  <text x="200" y="148" text-anchor="middle" font-size="10" fill="#16a34a" font-weight="600">Health Check: OK</text>
+
+  <line x1="200" y1="160" x2="200" y2="200" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <text x="215" y="185" font-size="10" fill="#16a34a" font-weight="600">Active</text>
+
+  <rect x="100" y="205" width="200" height="70" rx="8" fill="#e0e7ff" stroke="#818cf8" stroke-width="2"/>
+  <text x="200" y="233" text-anchor="middle" font-size="14" font-weight="bold" fill="#3730a3">Primary</text>
+  <text x="200" y="253" text-anchor="middle" font-size="12" fill="#3730a3">us-east-1</text>
+  <text x="200" y="270" text-anchor="middle" font-size="10" fill="#16a34a" font-weight="600">Running</text>
+
+  <rect x="100" y="300" width="200" height="55" rx="8" fill="#f9fafb" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="4 2"/>
+  <text x="200" y="325" text-anchor="middle" font-size="13" fill="#9ca3af">Secondary</text>
+  <text x="200" y="345" text-anchor="middle" font-size="10" fill="#9ca3af">eu-west-1 (Standby)</text>
+
+  <rect x="520" y="105" width="160" height="55" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+  <text x="600" y="130" text-anchor="middle" font-size="14" font-weight="bold" fill="#1d4ed8">Route 53</text>
+  <text x="600" y="148" text-anchor="middle" font-size="10" fill="#dc2626" font-weight="600">Health Check: FAIL</text>
+
+  <line x1="600" y1="160" x2="600" y2="195" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+  <rect x="500" y="200" width="200" height="70" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="600" y="228" text-anchor="middle" font-size="14" font-weight="bold" fill="#dc2626">Primary</text>
+  <text x="600" y="248" text-anchor="middle" font-size="12" fill="#dc2626">us-east-1</text>
+  <text x="600" y="265" text-anchor="middle" font-size="10" fill="#dc2626" font-weight="600">Unavailable</text>
+  <circle cx="715" cy="235" r="14" fill="#fee2e2" stroke="#dc2626" stroke-width="2"/>
+  <text x="715" y="240" text-anchor="middle" font-size="16" font-weight="bold" fill="#dc2626">✕</text>
+
+  <path d="M 640 160 Q 700 160 700 210 Q 700 290 640 310" stroke="#16a34a" stroke-width="2" fill="none" marker-end="url(#arrow-green)"/>
+  <text x="720" y="260" font-size="10" fill="#16a34a" font-weight="600">Chuyển</text>
+  <text x="720" y="273" font-size="10" fill="#16a34a" font-weight="600">hướng</text>
+
+  <rect x="500" y="300" width="200" height="60" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="600" y="325" text-anchor="middle" font-size="14" font-weight="bold" fill="#16a34a">Secondary</text>
+  <text x="600" y="348" text-anchor="middle" font-size="12" fill="#16a34a">eu-west-1 (Active)</text>
+  <circle cx="715" cy="330" r="14" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="715" y="335" text-anchor="middle" font-size="14" font-weight="bold" fill="#16a34a">✓</text>
+</svg>
