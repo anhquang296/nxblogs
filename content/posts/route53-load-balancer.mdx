@@ -7,11 +7,17 @@ enableComment: true
 
 # Route 53: "Load Balancer Miễn Phí" Mà Bạn Đã Có Sẵn Trong Tay
 
+> **Khuyến nghị:** Nếu bạn chưa nắm rõ DNS hoạt động như thế nào — resolver, authoritative server, record type, TTL — hãy đọc bài [DNS hoạt động như thế nào dưới lớp vỏ](/posts/how-dns-works-under-the-hood) trước. Bài viết này sẽ dễ hiểu hơn rất nhiều khi bạn đã có nền tảng đó.
+
 Bạn đang trả $16/tháng cho một ALB chỉ để phân phối traffic giữa hai môi trường A/B testing? Hay đang cân nhắc dựng thêm một Load Balancer ở region khác cho Disaster Recovery?
 
 Có một tin vui: **bạn đã có sẵn một "Load Balancer" trong tay** — và nhiều khả năng bạn đang trả $0.50/tháng cho nó mà chưa khai thác hết. Đó chính là **Amazon Route 53**.
 
-Trong [bài viết về DNS](/posts/how-dns-works-under-the-hood), chúng ta đã thấy DNS hoạt động như "cuốn danh bạ" — gõ tên miền, trả về IP. Nhưng nếu bước "trả về IP" đó **không cố định**, mà thay đổi tùy theo trọng số, vị trí địa lý, hay tình trạng sức khỏe của server thì sao? Lúc đó, DNS không còn là danh bạ nữa — nó trở thành một **bộ cân bằng tải**.
+Về bản chất, Route 53 là một **DNS service** — hay chính xác hơn là một **authoritative DNS server** kết hợp **domain registrar**. Nếu bạn từng mua domain trên **Namecheap**, **GoDaddy**, hay dùng DNS của **Cloudflare** — thì Route 53 đóng vai trò tương tự: nơi bạn quản lý domain và cấu hình các bản ghi DNS (A, CNAME, MX, ...). Nó cũng chỉ là một DNS như bao DNS khác: nhận query, tra bảng record, trả về IP.
+
+Nhưng điểm khác biệt lớn: trong khi Namecheap hay GoDaddy chủ yếu trả về IP một cách "cứng nhắc" — record nào thì trả đúng IP đó — thì Route 53 có thể **ra quyết định** dựa trên trọng số, vị trí địa lý, độ trễ mạng, hay tình trạng sức khỏe của server trước khi chọn IP nào để trả về. Cloudflare cũng có một số tính năng tương tự (Load Balancing, geo-steering), nhưng đó là gói trả phí riêng — còn với Route 53, các routing policy này đã **có sẵn** trong chi phí cơ bản.
+
+Lúc đó, DNS không còn là danh bạ nữa — nó trở thành một **bộ cân bằng tải**.
 
 Route 53 cung cấp **8 routing policy** cho phép bạn biến DNS resolution thành các chiến lược phân phối traffic khác nhau: từ A/B testing, canary release, blue/green deployment cho đến failover đa vùng. Tất cả đều ở tầng DNS — không cần thêm infrastructure, không cần thay đổi code.
 
