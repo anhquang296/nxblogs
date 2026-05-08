@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 480" font-family="system-ui, -apple-system, sans-serif">
   <rect width="800" height="480" fill="#f9fafb" rx="8"/>
 
-  <text x="400" y="32" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Bộ đôi cấu trúc dữ liệu — Hash Table + Skip List</text>
-  <text x="400" y="52" text-anchor="middle" font-size="12" fill="#6b7280">Mỗi command được routing đến cấu trúc phù hợp nhất.</text>
+  <text x="400" y="32" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Dual Data Structure — Hash Table + Skip List</text>
+  <text x="400" y="52" text-anchor="middle" font-size="12" fill="#6b7280">Each command is routed to the best-fit structure.</text>
 
   <!-- Table header -->
   <rect x="60" y="80" width="280" height="40" fill="#e0e7ff" stroke="#6366f1"/>
@@ -23,14 +23,14 @@
 
   <!-- Row: ZADD (lookup) -->
   <rect x="60" y="160" width="280" height="40" fill="#ffffff" stroke="#e5e7eb"/>
-  <text x="80" y="185" font-size="13" font-family="ui-monospace, monospace" fill="#1f2937">ZADD (kiểm tra trùng)</text>
+  <text x="80" y="185" font-size="13" font-family="ui-monospace, monospace" fill="#1f2937">ZADD (check duplicates)</text>
   <rect x="340" y="160" width="200" height="40" fill="#dcfce7" stroke="#e5e7eb"/>
   <text x="440" y="185" text-anchor="middle" font-size="13" font-weight="600" fill="#166534">O(1) ✓</text>
   <rect x="540" y="160" width="200" height="40" fill="#ffffff" stroke="#e5e7eb"/>
 
   <!-- Row: ZADD (insert) -->
   <rect x="60" y="200" width="280" height="40" fill="#ffffff" stroke="#e5e7eb"/>
-  <text x="80" y="225" font-size="13" font-family="ui-monospace, monospace" fill="#1f2937">ZADD (chèn mới)</text>
+  <text x="80" y="225" font-size="13" font-family="ui-monospace, monospace" fill="#1f2937">ZADD (insert new)</text>
   <rect x="340" y="200" width="200" height="40" fill="#fef3c7" stroke="#e5e7eb"/>
   <text x="440" y="225" text-anchor="middle" font-size="13" fill="#92400e">O(1)</text>
   <rect x="540" y="200" width="200" height="40" fill="#fef3c7" stroke="#e5e7eb"/>
@@ -67,8 +67,8 @@
 
   <!-- Footer summary -->
   <rect x="60" y="420" width="330" height="40" fill="#dbeafe" rx="6"/>
-  <text x="225" y="445" text-anchor="middle" font-size="12" fill="#1e40af">↑ Point lookup nhanh — Hash Table</text>
+  <text x="225" y="445" text-anchor="middle" font-size="12" fill="#1e40af">↑ Fast point lookup — Hash Table</text>
 
   <rect x="410" y="420" width="330" height="40" fill="#fce7f3" rx="6"/>
-  <text x="575" y="445" text-anchor="middle" font-size="12" fill="#9d174d">↑ Sorted operations nhanh — Skip List</text>
+  <text x="575" y="445" text-anchor="middle" font-size="12" fill="#9d174d">↑ Fast sorted operations — Skip List</text>
 </svg>

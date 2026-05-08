@@ -29,13 +29,13 @@
   <line x1="270" y1="106" x2="450" y2="106" stroke="#c7d2fe"/>
 
   <rect x="270" y="120" width="180" height="32" fill="white" rx="4" stroke="#e5e7eb" stroke-width="1"/>
-  <text x="282" y="141" font-size="12" fill="#374151">1. Ghi vào local</text>
+  <text x="282" y="141" font-size="12" fill="#374151">1. Write locally</text>
 
   <rect x="270" y="162" width="180" height="32" fill="#dcfce7" rx="4" stroke="#86efac" stroke-width="1"/>
-  <text x="282" y="183" font-size="12" font-weight="600" fill="#166534">2. Trả "OK" NGAY</text>
+  <text x="282" y="183" font-size="12" font-weight="600" fill="#166534">2. Return "OK" immediately</text>
 
   <rect x="270" y="240" width="180" height="32" fill="#fef3c7" rx="4" stroke="#fbbf24" stroke-width="1"/>
-  <text x="282" y="261" font-size="11" fill="#92400e">3. Gửi log trong nền</text>
+  <text x="282" y="261" font-size="11" fill="#92400e">3. Send log in background</text>
 
   <!-- Diagonal OK return arrow: from Primary left edge at step 2 (250, 178) to Client right edge top (150, 138) -->
   <line x1="250" y1="178" x2="155" y2="148" stroke="#16a34a" stroke-width="2" marker-end="url(#arrGreen)"/>
@@ -50,9 +50,9 @@
   <rect x="590" y="180" width="180" height="140" fill="#e0e7ff" rx="8" stroke="#818cf8" stroke-width="1.5" opacity="0.85"/>
   <text x="680" y="210" text-anchor="middle" font-size="14" font-weight="bold" fill="#3730a3">Replica</text>
   <line x1="610" y1="220" x2="750" y2="220" stroke="#c7d2fe"/>
-  <text x="680" y="247" text-anchor="middle" font-size="12" fill="#4338ca">Nhận và apply</text>
-  <text x="680" y="285" text-anchor="middle" font-size="11" fill="#6b7280">(sau vài ms → vài giây)</text>
+  <text x="680" y="247" text-anchor="middle" font-size="12" fill="#4338ca">Receive and apply</text>
+  <text x="680" y="285" text-anchor="middle" font-size="11" fill="#6b7280">(after ms → seconds)</text>
 
   <rect x="540" y="328" width="240" height="24" fill="#fef3c7" rx="4" stroke="#fbbf24" stroke-width="1"/>
-  <text x="660" y="345" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">⚠ Có replication lag</text>
+  <text x="660" y="345" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">⚠ Has replication lag</text>
 </svg>

@@ -13,7 +13,7 @@
 
   <rect width="900" height="400" fill="#f9fafb" rx="8"/>
 
-  <text x="450" y="28" text-anchor="middle" font-size="16" font-weight="bold" fill="#111827">Trường <tspan font-family="ui-monospace, monospace" fill="#7c3aed">span</tspan> — đếm số node bị nhảy qua, dùng để tính rank</text>
+  <text x="450" y="28" text-anchor="middle" font-size="16" font-weight="bold" fill="#111827">The <tspan font-family="ui-monospace, monospace" fill="#7c3aed">span</tspan> field — counts skipped nodes, used to calculate rank</text>
 
   <!-- Level labels -->
   <text x="50" y="101" font-size="11" fill="#6b7280" font-weight="600">L3</text>
@@ -102,8 +102,8 @@
 
   <!-- Calculation box -->
   <rect x="60" y="280" width="780" height="100" fill="#ffffff" rx="6" stroke="#e5e7eb"/>
-  <text x="80" y="305" font-size="13" font-weight="700" fill="#111827">ZRANK "leaderboard" "bob" — đếm rank trong O(log N):</text>
-  <text x="80" y="330" font-size="12" fill="#374151">Đường đi qua L1: HEAD <tspan fill="#7c3aed" font-weight="700">─(span=1)→</tspan> alice <tspan fill="#dc2626" font-weight="700">─(span=3)→</tspan> bob</text>
-  <text x="80" y="350" font-size="11" fill="#6b7280" font-style="italic">span=3 nghĩa là pointer ở L1 nhảy qua 3 hops khi đo ở L0 (alice → carol → dave → bob).</text>
-  <text x="80" y="372" font-size="13" font-weight="700" fill="#dc2626">Cộng dồn: rank = 1 + 3 = 4. bob đứng thứ 4 — không cần duyệt từng node ở L0.</text>
+  <text x="80" y="305" font-size="13" font-weight="700" fill="#111827">ZRANK "leaderboard" "bob" — compute rank in O(log N):</text>
+  <text x="80" y="330" font-size="12" fill="#374151">Path through L1: HEAD <tspan fill="#7c3aed" font-weight="700">─(span=1)→</tspan> alice <tspan fill="#dc2626" font-weight="700">─(span=3)→</tspan> bob</text>
+  <text x="80" y="350" font-size="11" fill="#6b7280" font-style="italic">span=3 means the L1 pointer jumps over 3 hops measured at L0 (alice → carol → dave → bob).</text>
+  <text x="80" y="372" font-size="13" font-weight="700" fill="#dc2626">Cumulative sum: rank = 1 + 3 = 4. bob is ranked 4th — no need to traverse every node at L0.</text>
 </svg>

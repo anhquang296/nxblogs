@@ -11,7 +11,7 @@
     </marker>
   </defs>
   <rect width="800" height="350" fill="#f9fafb" rx="8"/>
-  <text x="400" y="35" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Weighted Routing: Chia Traffic Theo Tỷ Lệ</text>
+  <text x="400" y="35" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Weighted Routing: Split Traffic by Ratio</text>
 
   <text x="80" y="75" text-anchor="middle" font-size="12" font-weight="600" fill="#374151">DNS Queries</text>
 
@@ -35,7 +35,7 @@
   <rect x="230" y="120" width="220" height="150" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
   <text x="340" y="175" text-anchor="middle" font-size="18" font-weight="bold" fill="#1d4ed8">Route 53</text>
   <text x="340" y="198" text-anchor="middle" font-size="12" fill="#1e40af">Weighted Routing Policy</text>
-  <text x="340" y="218" text-anchor="middle" font-size="11" fill="#1e40af">Phân phối theo trọng số</text>
+  <text x="340" y="218" text-anchor="middle" font-size="11" fill="#1e40af">Distribute by weight</text>
   <text x="340" y="248" text-anchor="middle" font-size="10" fill="#1e40af">Weight 80 : Weight 20</text>
 
   <line x1="450" y1="165" x2="560" y2="135" stroke="#1d4ed8" stroke-width="3" marker-end="url(#arrow-blue)"/>
@@ -57,5 +57,5 @@
   <text x="665" y="277" text-anchor="middle" font-size="10" fill="#6b7280">New release</text>
 
   <rect x="175" y="305" width="450" height="30" rx="6" fill="#fef3c7" stroke="#fbbf24" stroke-width="1"/>
-  <text x="400" y="325" text-anchor="middle" font-size="12" font-weight="600" fill="#92400e">Weight 80 + Weight 20 = 80% và 20% traffic</text>
+  <text x="400" y="325" text-anchor="middle" font-size="12" font-weight="600" fill="#92400e">Weight 80 + Weight 20 = 80% and 20% traffic</text>
 </svg>

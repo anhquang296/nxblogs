@@ -35,5 +35,5 @@
   <text x="460" y="207" text-anchor="middle" font-size="14" font-weight="bold" fill="#166534">count = 0 → ...</text>
 
   <!-- Bottom note -->
-  <text x="350" y="255" text-anchor="middle" font-size="11" font-style="italic" fill="#6b7280">Sang cửa sổ mới → reset về 0 — đơn giản nhưng có "burst" ở ranh giới</text>
+  <text x="350" y="255" text-anchor="middle" font-size="11" font-style="italic" fill="#6b7280">New window → resets to 0 — simple but allows bursts at boundaries</text>
 </svg>

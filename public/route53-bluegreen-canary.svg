@@ -5,7 +5,7 @@
     </marker>
   </defs>
   <rect width="800" height="320" fill="#f9fafb" rx="8"/>
-  <text x="400" y="32" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Blue/Green + Canary: Lộ Trình Chuyển Đổi</text>
+  <text x="400" y="32" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Blue/Green + Canary: Transition Path</text>
 
   <rect x="55" y="48" width="20" height="14" fill="#1d4ed8" rx="3" stroke="#1e40af" stroke-width="1"/>
   <text x="80" y="59" font-size="11" fill="#374151">Blue (current)</text>
@@ -17,7 +17,7 @@
   <g transform="translate(90, 80)">
     <rect x="0" y="0" width="80" height="130" fill="#1d4ed8" rx="6" stroke="#1e40af" stroke-width="1.5"/>
     <text x="40" y="70" text-anchor="middle" font-size="14" fill="white" font-weight="bold">100%</text>
-    <text x="40" y="155" text-anchor="middle" font-size="13" fill="#374151" font-weight="600">Khởi đầu</text>
+    <text x="40" y="155" text-anchor="middle" font-size="13" fill="#374151" font-weight="600">Start</text>
     <text x="40" y="175" text-anchor="middle" font-size="10" fill="#6b7280">Phase 1</text>
   </g>
 
@@ -39,7 +39,7 @@
     <text x="40" y="38" text-anchor="middle" font-size="14" fill="white" font-weight="bold">50%</text>
     <rect x="0" y="65" width="80" height="65" fill="#16a34a" rx="0 0 6 6" stroke="#15803d" stroke-width="1.5"/>
     <text x="40" y="105" text-anchor="middle" font-size="14" fill="white" font-weight="bold">50%</text>
-    <text x="40" y="155" text-anchor="middle" font-size="13" fill="#374151" font-weight="600">Kiểm tra</text>
+    <text x="40" y="155" text-anchor="middle" font-size="13" fill="#374151" font-weight="600">Verify</text>
     <text x="40" y="175" text-anchor="middle" font-size="10" fill="#6b7280">Phase 3</text>
   </g>
 
@@ -48,10 +48,10 @@
   <g transform="translate(600, 80)">
     <rect x="0" y="0" width="80" height="130" fill="#16a34a" rx="6" stroke="#15803d" stroke-width="1.5"/>
     <text x="40" y="70" text-anchor="middle" font-size="14" fill="white" font-weight="bold">100%</text>
-    <text x="40" y="155" text-anchor="middle" font-size="13" fill="#374151" font-weight="600">Hoàn tất</text>
+    <text x="40" y="155" text-anchor="middle" font-size="13" fill="#374151" font-weight="600">Complete</text>
     <text x="40" y="175" text-anchor="middle" font-size="10" fill="#6b7280">Phase 4</text>
   </g>
 
   <rect x="140" y="285" width="520" height="25" rx="6" fill="#fef3c7" stroke="#fbbf24" stroke-width="1"/>
-  <text x="400" y="303" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">Weighted Routing Policy giúp kiểm soát tỷ lệ traffic giữa hai phiên bản</text>
+  <text x="400" y="303" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">Weighted Routing Policy controls traffic ratio between two versions</text>
 </svg>

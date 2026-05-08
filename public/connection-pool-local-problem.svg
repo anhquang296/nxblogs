@@ -10,7 +10,7 @@
 
   <rect width="900" height="480" fill="#f9fafb" rx="8"/>
 
-  <text x="450" y="32" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Vấn đề: N Instances × Local Pool</text>
+  <text x="450" y="32" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Problem: N Instances × Local Pool</text>
 
   <!-- Instance + Local Pool badges (6 rows) -->
   <!-- Row 1 -->
@@ -70,7 +70,7 @@
 
   <!-- Bottom note -->
   <rect x="40" y="350" width="820" height="100" fill="white" rx="6" stroke="#e5e7eb" stroke-width="1"/>
-  <text x="450" y="378" text-anchor="middle" font-size="13" font-weight="600" fill="#111827">Vấn đề trở nên nghiêm trọng hơn khi:</text>
-  <text x="80" y="404" font-size="12" fill="#374151">• Auto-scaling: 5 → 50 instances → connections tăng từ 100 lên 1000</text>
+  <text x="450" y="378" text-anchor="middle" font-size="13" font-weight="600" fill="#111827">The problem gets worse when:</text>
+  <text x="80" y="404" font-size="12" fill="#374151">• Auto-scaling: 5 → 50 instances → connections grow from 100 to 1000</text>
   <text x="80" y="428" font-size="12" fill="#374151">• Lambda: 1000 concurrent invocations = 1000 connections</text>
 </svg>

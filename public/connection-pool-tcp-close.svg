@@ -35,5 +35,5 @@
 
   <line x1="170" y1="315" x2="530" y2="315" stroke="#e5e7eb" stroke-width="1" stroke-dasharray="6"/>
   <rect x="230" y="340" width="240" height="30" fill="#fef3c7" rx="4" stroke="#fbbf24" stroke-width="1"/>
-  <text x="350" y="360" text-anchor="middle" font-size="12" font-weight="600" fill="#92400e">2 RTT để đóng kết nối</text>
+  <text x="350" y="360" text-anchor="middle" font-size="12" font-weight="600" fill="#92400e">2 RTT to close connection</text>
 </svg>

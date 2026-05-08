@@ -10,7 +10,7 @@
 
   <rect width="900" height="470" fill="#f9fafb" rx="8"/>
 
-  <text x="450" y="28" text-anchor="middle" font-size="16" font-weight="bold" fill="#111827">Tìm score = 2100 — đường đi đỏ qua các forward pointer</text>
+  <text x="450" y="28" text-anchor="middle" font-size="16" font-weight="bold" fill="#111827">Find score = 2100 — red search path through forward pointers</text>
 
   <!-- Level labels -->
   <text x="50" y="101" font-size="11" fill="#6b7280" font-weight="600">L3</text>
@@ -112,12 +112,12 @@
 
   <!-- Step legend -->
   <rect x="60" y="270" width="780" height="180" fill="#ffffff" rx="6" stroke="#e5e7eb"/>
-  <text x="80" y="295" font-size="13" font-weight="600" fill="#111827">Đường đi tìm score = 2100:</text>
+  <text x="80" y="295" font-size="13" font-weight="600" fill="#111827">Search path for score = 2100:</text>
 
-  <text x="80" y="320" font-size="12" fill="#374151"><tspan font-weight="700" fill="#dc2626">①</tspan> Tại HEAD: <tspan font-family="ui-monospace, monospace">forward[3] = NIL</tspan> → drop xuống L2 (vẫn đứng tại HEAD, đọc <tspan font-family="ui-monospace, monospace">forward[2]</tspan>)</text>
-  <text x="80" y="342" font-size="12" fill="#374151"><tspan font-weight="700" fill="#dc2626">②</tspan> Tại HEAD L2: <tspan font-family="ui-monospace, monospace">forward[2] = carol(1800)</tspan>, 1800 &lt; 2100 → di chuyển sang carol</text>
-  <text x="80" y="364" font-size="12" fill="#374151"><tspan font-weight="700" fill="#dc2626">③</tspan> Tại carol L2: <tspan font-family="ui-monospace, monospace">forward[2] = NIL</tspan> → drop xuống L1 (đọc <tspan font-family="ui-monospace, monospace">forward[1]</tspan>)</text>
-  <text x="80" y="386" font-size="12" fill="#374151"><tspan font-weight="700" fill="#dc2626">④</tspan> Tại carol L1: <tspan font-family="ui-monospace, monospace">forward[1] = bob(2300)</tspan>, 2300 ≥ 2100 → drop xuống L0</text>
-  <text x="80" y="408" font-size="12" fill="#374151"><tspan font-weight="700" fill="#dc2626">⑤</tspan> Tại carol L0: <tspan font-family="ui-monospace, monospace">forward[0] = dave(2100)</tspan> → tìm thấy ✓</text>
-  <text x="80" y="436" font-size="11" fill="#6b7280" font-style="italic">Mũi tên dọc trong cùng node = chuyển sang đọc <tspan font-family="ui-monospace, monospace">forward[level-1]</tspan> (không có pointer vật lý "down").</text>
+  <text x="80" y="320" font-size="12" fill="#374151"><tspan font-weight="700" fill="#dc2626">①</tspan> At HEAD: <tspan font-family="ui-monospace, monospace">forward[3] = NIL</tspan> → drop to L2 (stay at HEAD, read <tspan font-family="ui-monospace, monospace">forward[2]</tspan>)</text>
+  <text x="80" y="342" font-size="12" fill="#374151"><tspan font-weight="700" fill="#dc2626">②</tspan> At HEAD L2: <tspan font-family="ui-monospace, monospace">forward[2] = carol(1800)</tspan>, 1800 &lt; 2100 → move to carol</text>
+  <text x="80" y="364" font-size="12" fill="#374151"><tspan font-weight="700" fill="#dc2626">③</tspan> At carol L2: <tspan font-family="ui-monospace, monospace">forward[2] = NIL</tspan> → drop to L1 (read <tspan font-family="ui-monospace, monospace">forward[1]</tspan>)</text>
+  <text x="80" y="386" font-size="12" fill="#374151"><tspan font-weight="700" fill="#dc2626">④</tspan> At carol L1: <tspan font-family="ui-monospace, monospace">forward[1] = bob(2300)</tspan>, 2300 ≥ 2100 → drop to L0</text>
+  <text x="80" y="408" font-size="12" fill="#374151"><tspan font-weight="700" fill="#dc2626">⑤</tspan> At carol L0: <tspan font-family="ui-monospace, monospace">forward[0] = dave(2100)</tspan> → found ✓</text>
+  <text x="80" y="436" font-size="11" fill="#6b7280" font-style="italic">Vertical arrow within same node = switch to reading <tspan font-family="ui-monospace, monospace">forward[level-1]</tspan> (no physical "down" pointer).</text>
 </svg>

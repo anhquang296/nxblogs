@@ -7,7 +7,7 @@
 
   <rect width="800" height="380" fill="#f9fafb" rx="8"/>
 
-  <text x="400" y="32" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Round Robin: Xoay Vòng</text>
+  <text x="400" y="32" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Round Robin</text>
 
   <!-- Requests column on left -->
   <text x="105" y="70" text-anchor="middle" font-size="12" font-weight="600" fill="#374151">Requests</text>
@@ -53,9 +53,9 @@
 
   <!-- Wrap-around note -->
   <rect x="240" y="280" width="180" height="36" fill="#fef3c7" rx="4" stroke="#fbbf24" stroke-width="1"/>
-  <text x="330" y="295" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">↻ Quay vòng lại đầu</text>
-  <text x="330" y="310" text-anchor="middle" font-size="10" fill="#78350f">(dashed = vòng thứ 2)</text>
+  <text x="330" y="295" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">↻ Cycles back to start</text>
+  <text x="330" y="310" text-anchor="middle" font-size="10" fill="#78350f">(dashed = 2nd round)</text>
 
   <!-- Bottom note -->
-  <text x="400" y="350" text-anchor="middle" font-size="11" font-style="italic" fill="#6b7280">Đơn giản — không quan tâm backend bận hay rảnh</text>
+  <text x="400" y="350" text-anchor="middle" font-size="11" font-style="italic" fill="#6b7280">Simple — does not consider backend load</text>
 </svg>

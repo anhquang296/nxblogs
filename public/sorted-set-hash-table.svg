@@ -7,7 +7,7 @@
 
   <rect width="800" height="420" fill="#f9fafb" rx="8"/>
 
-  <text x="400" y="36" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Hash Table — Tra cứu O(1) cho ZSCORE</text>
+  <text x="400" y="36" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Hash Table — O(1) Lookup for ZSCORE</text>
 
   <!-- Hash Table on left -->
   <text x="220" y="75" text-anchor="middle" font-size="13" font-weight="600" fill="#374151">Hash Table (dict)</text>
@@ -58,7 +58,7 @@
   <!-- Step 1 -->
   <rect x="440" y="100" width="320" height="50" fill="#fef3c7" rx="6" stroke="#fbbf24"/>
   <text x="600" y="121" text-anchor="middle" font-size="12" font-weight="600" fill="#92400e">Step 1: hash("alice")</text>
-  <text x="600" y="138" text-anchor="middle" font-size="11" fill="#78350f">Tính hash function trên member name</text>
+  <text x="600" y="138" text-anchor="middle" font-size="11" fill="#78350f">Compute hash function on member name</text>
 
   <!-- Arrow -->
   <line x1="600" y1="155" x2="600" y2="180" stroke="#0891b2" stroke-width="2" marker-end="url(#arrowHash)"/>
@@ -66,18 +66,18 @@
   <!-- Step 2 -->
   <rect x="440" y="185" width="320" height="50" fill="#dbeafe" rx="6" stroke="#60a5fa"/>
   <text x="600" y="206" text-anchor="middle" font-size="12" font-weight="600" fill="#1e40af">Step 2: → bucket 1</text>
-  <text x="600" y="223" text-anchor="middle" font-size="11" fill="#1e3a8a">Hash kết quả ánh xạ tới bucket index</text>
+  <text x="600" y="223" text-anchor="middle" font-size="11" fill="#1e3a8a">Hash maps to bucket index</text>
 
   <!-- Arrow -->
   <line x1="600" y1="240" x2="600" y2="265" stroke="#0891b2" stroke-width="2" marker-end="url(#arrowHash)"/>
 
   <!-- Step 3 -->
   <rect x="440" y="270" width="320" height="50" fill="#dcfce7" rx="6" stroke="#86efac"/>
-  <text x="600" y="291" text-anchor="middle" font-size="12" font-weight="600" fill="#166534">Step 3: trả về 1500 ✓</text>
-  <text x="600" y="308" text-anchor="middle" font-size="11" fill="#14532d">Tổng: O(1) — không duyệt, không so sánh tuần tự</text>
+  <text x="600" y="291" text-anchor="middle" font-size="12" font-weight="600" fill="#166534">Step 3: return 1500 ✓</text>
+  <text x="600" y="308" text-anchor="middle" font-size="11" fill="#14532d">Total: O(1) — no traversal, no sequential comparison</text>
 
   <!-- Connection from hash table to flow -->
   <line x1="365" y1="166" x2="438" y2="125" stroke="#0891b2" stroke-width="1.5" stroke-dasharray="4,3"/>
 
-  <text x="400" y="380" text-anchor="middle" font-size="12" fill="#6b7280" font-style="italic">Hash table = "danh bạ điện thoại" — biết tên, ra kết quả tức thì.</text>
+  <text x="400" y="380" text-anchor="middle" font-size="12" fill="#6b7280" font-style="italic">Hash table = "phone book" — know the name, get the result instantly.</text>
 </svg>

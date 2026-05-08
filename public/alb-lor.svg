@@ -14,13 +14,13 @@
 
   <!-- New incoming request -->
   <rect x="40" y="155" width="130" height="50" fill="#dbeafe" rx="6" stroke="#93c5fd" stroke-width="1.5"/>
-  <text x="105" y="178" text-anchor="middle" font-size="12" font-weight="600" fill="#1e40af">Request mới</text>
-  <text x="105" y="195" text-anchor="middle" font-size="11" fill="#1e40af">đến ALB</text>
+  <text x="105" y="178" text-anchor="middle" font-size="12" font-weight="600" fill="#1e40af">New request</text>
+  <text x="105" y="195" text-anchor="middle" font-size="11" fill="#1e40af">arrives at ALB</text>
 
   <!-- Diagonal arrow to Target B (chosen) -->
   <line x1="170" y1="180" x2="455" y2="180" stroke="#16a34a" stroke-width="2" marker-end="url(#arrGreen)"/>
   <rect x="240" y="155" width="120" height="22" fill="#dcfce7" rx="3" stroke="#86efac" stroke-width="1"/>
-  <text x="300" y="170" text-anchor="middle" font-size="11" font-weight="700" fill="#166534">ALB chọn Target B</text>
+  <text x="300" y="170" text-anchor="middle" font-size="11" font-weight="700" fill="#166534">ALB selects Target B</text>
 
   <!-- Targets with bar charts (in-flight count visualization) -->
   <!-- Target A: 8 requests -->
@@ -41,7 +41,7 @@
 
   <!-- Target B: 3 requests (CHOSEN) -->
   <rect x="460" y="155" width="290" height="60" fill="#dcfce7" rx="6" stroke="#16a34a" stroke-width="2.5"/>
-  <text x="475" y="180" font-size="13" font-weight="bold" fill="#14532d">Target B  ← chọn</text>
+  <text x="475" y="180" font-size="13" font-weight="bold" fill="#14532d">Target B  ← selected</text>
   <text x="475" y="203" font-size="11" font-weight="600" fill="#166534">in-flight: 3 requests</text>
   <g fill="#16a34a">
     <circle cx="610" cy="187" r="6"/>
@@ -62,5 +62,5 @@
   </g>
 
   <!-- Bottom note -->
-  <text x="400" y="330" text-anchor="middle" font-size="11" font-style="italic" fill="#6b7280">ALB chọn target có ít in-flight requests nhất → tự cân bằng theo capacity thực tế</text>
+  <text x="400" y="330" text-anchor="middle" font-size="11" font-style="italic" fill="#6b7280">ALB selects the target with fewest in-flight requests → self-balances by actual capacity</text>
 </svg>

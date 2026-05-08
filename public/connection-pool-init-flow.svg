@@ -11,11 +11,11 @@
   <rect width="850" height="480" fill="#f9fafb" rx="8"/>
 
   <!-- Title -->
-  <text x="425" y="32" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Connection Pool: Khởi tạo &amp; Sử dụng</text>
+  <text x="425" y="32" text-anchor="middle" font-size="17" font-weight="bold" fill="#111827">Connection Pool: Initialize &amp; Use</text>
 
   <!-- Section 1: Pool Init -->
   <rect x="20" y="50" width="810" height="220" fill="#f0fdf4" rx="6" stroke="#86efac" stroke-width="1"/>
-  <text x="425" y="75" text-anchor="middle" font-size="14" font-weight="600" fill="#166534">Pool khởi tạo</text>
+  <text x="425" y="75" text-anchor="middle" font-size="14" font-weight="600" fill="#166534">Pool initialization</text>
 
   <!-- 5 connection setup rows -->
   <rect x="50" y="95" width="160" height="26" fill="#e0e7ff" rx="4" stroke="#818cf8" stroke-width="1"/>
@@ -54,11 +54,11 @@
   <rect x="440" y="125" width="350" height="110" fill="#dcfce7" rx="6" stroke="#16a34a" stroke-width="2"/>
   <text x="615" y="155" text-anchor="middle" font-size="14" font-weight="bold" fill="#14532d">Idle Pool</text>
   <text x="615" y="180" text-anchor="middle" font-size="13" fill="#166534">[ C1, C2, C3, C4, C5 ]</text>
-  <text x="615" y="220" text-anchor="middle" font-size="11" fill="#15803d">Sẵn sàng phục vụ — không cần setup lại</text>
+  <text x="615" y="220" text-anchor="middle" font-size="11" fill="#15803d">Ready to serve — no re-setup needed</text>
 
   <!-- Section 2: Request Flow -->
   <rect x="20" y="285" width="810" height="175" fill="#eff6ff" rx="6" stroke="#93c5fd" stroke-width="1"/>
-  <text x="425" y="310" text-anchor="middle" font-size="14" font-weight="600" fill="#1e40af">Khi có request</text>
+  <text x="425" y="310" text-anchor="middle" font-size="14" font-weight="600" fill="#1e40af">When request arrives</text>
 
   <!-- Request 1 flow -->
   <rect x="50" y="325" width="90" height="30" fill="#dbeafe" rx="4" stroke="#93c5fd" stroke-width="1"/>
@@ -99,7 +99,7 @@
   <text x="530" y="390" text-anchor="middle" font-size="11" fill="#166534">Pool ← C2</text>
 
   <!-- Note -->
-  <text x="690" y="360" text-anchor="middle" font-size="11" font-weight="600" fill="#16a34a">Không có</text>
+  <text x="690" y="360" text-anchor="middle" font-size="11" font-weight="600" fill="#16a34a">No</text>
   <text x="690" y="378" text-anchor="middle" font-size="11" font-weight="600" fill="#16a34a">TCP/TLS/Auth</text>
   <text x="690" y="396" text-anchor="middle" font-size="11" font-weight="600" fill="#16a34a">overhead</text>
 </svg>
