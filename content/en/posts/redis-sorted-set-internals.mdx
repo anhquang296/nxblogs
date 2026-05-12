@@ -26,7 +26,7 @@ If you've read the [Rate Limiting Patterns](/posts/rate-limiting-patterns) artic
 
 Redis **automatically maintains order** by score (ascending). If two members have the same score, they are sorted by lexicographic order of the member name.
 
-![Sorted Set Overview](/sorted-set-overview.svg)
+<ExcalidrawDiagram src="/sorted-set-overview.excalidraw" alt="Sorted Set Overview" />
 
 ### Key commands and their complexity
 
@@ -63,7 +63,7 @@ Think of a hash table like a **phone book**: you know the name of the person you
 
 In a Sorted Set, the hash table handles one very specific task: **mapping `member → score`**.
 
-![Hash Table in Sorted Set](/sorted-set-hash-table.svg)
+<ExcalidrawDiagram src="/sorted-set-hash-table.excalidraw" alt="Hash Table in Sorted Set" />
 
 Thanks to the hash table, three operations become extremely fast:
 
@@ -165,7 +165,7 @@ Redis **doesn't always use** skiplist+hashtable for Sorted Set. When data is sma
 
 **Listpack** is a contiguous memory block, storing member-score pairs **sequentially side by side**:
 
-![Listpack memory layout](/sorted-set-listpack.svg)
+<ExcalidrawDiagram src="/sorted-set-listpack.excalidraw" alt="Listpack memory layout" />
 
 Characteristics:
 - **No pointers**: all data sits contiguously in RAM → **CPU cache-friendly** — when the CPU loads one element, adjacent elements are already in the cache line.
@@ -202,7 +202,7 @@ Listpack saves **3-5x memory** compared to skiplist+hashtable. This is why Redis
 
 ### 4.4. Overview of both modes
 
-![Encoding decision flowchart](/sorted-set-encoding-decision.svg)
+<ExcalidrawDiagram src="/sorted-set-encoding-decision.excalidraw" alt="Encoding decision flowchart" />
 
 ---
 
@@ -210,7 +210,7 @@ Listpack saves **3-5x memory** compared to skiplist+hashtable. This is why Redis
 
 The power of Sorted Set comes from **combining two data structures that compensate for each other's weaknesses**:
 
-![Dual structure routing table](/sorted-set-dual-structure.svg)
+<ExcalidrawDiagram src="/sorted-set-dual-structure.excalidraw" alt="Dual structure routing table" />
 
 - **Hash table alone** gives O(1) lookup but doesn't know ordering → can't do range queries or rank.
 - **Skip list alone** gives O(log N) sorted operations but lookup has to be O(log N) instead of O(1).

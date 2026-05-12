@@ -46,7 +46,7 @@ Client ──► Primary
 
 ### Asynchronous (bất đồng bộ) — "Cứ đi trước, tôi tự đến sau"
 
-![Asynchronous Replication](/rds-async-replication.svg)
+<ExcalidrawDiagram src="/rds-async-replication.excalidraw" alt="Asynchronous Replication" />
 
 Đặc điểm:
 
@@ -80,7 +80,7 @@ Khi bạn bật Multi-AZ, AWS sẽ tạo ra:
 - **1 Primary instance** ở AZ-A — phục vụ toàn bộ read/write traffic.
 - **1 Standby instance** ở AZ-B — là một bản sao **đồng bộ (synchronous replication)** của primary.
 
-![Multi-AZ Synchronous Replication](/rds-multi-az-sync.svg)
+<ExcalidrawDiagram src="/rds-multi-az-sync.excalidraw" alt="Multi-AZ Synchronous Replication" />
 
 Điểm "đặc biệt" và rất hay bị hiểu nhầm:
 
@@ -96,7 +96,7 @@ Khi bạn bật Multi-AZ, AWS sẽ tạo ra:
 
 Đây là điểm **rất hay bị bỏ qua** khi nói về Multi-AZ. Vì replication là **synchronous**, mỗi câu `INSERT/UPDATE/DELETE` đều phải đi thêm 1 round-trip qua AZ khác trước khi primary trả "OK" cho app.
 
-![Write Latency: Single AZ vs Multi-AZ](/rds-write-latency.svg)
+<ExcalidrawDiagram src="/rds-write-latency.excalidraw" alt="Write Latency: Single AZ vs Multi-AZ" />
 
 Cụ thể:
 

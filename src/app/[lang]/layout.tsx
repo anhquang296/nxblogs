@@ -1,6 +1,6 @@
+import { Head } from 'nextra/components'
 import 'nextra-theme-blog/style.css'
 import '@/styles/globals.css'
-
 import CustomFooter from '@/components/custom-footer'
 import CustomHeader from '@/components/custom-header'
 import { BackToTop } from '@/components/back-to-top'
@@ -26,7 +26,13 @@ type Props = {
 export default async function LocaleLayout({ children, params }: Props) {
   const { lang } = await params
   return (
-    <html lang={lang} dir="ltr" suppressHydrationWarning className={bodyFont.className}>
+    <html
+      lang={lang}
+      dir="ltr"
+      suppressHydrationWarning
+      className={bodyFont.className}
+    >
+      <Head backgroundColor={{ dark: '#1a1a1a', light: '#ffffff' }} />
       <body className="min-h-screen">
         <Layout>
           <CustomHeader lang={lang} />

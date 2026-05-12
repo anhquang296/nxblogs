@@ -27,7 +27,7 @@ Route 53 cung cấp **8 routing policy** cho phép bạn biến DNS resolution t
 
 Hầu hết kỹ sư nghĩ về Load Balancer là ALB hoặc NLB — những dịch vụ hoạt động ở Layer 4/7, ngồi giữa client và server để phân phối request. Nhưng Route 53 hoạt động ở **tầng DNS** — sớm hơn nhiều trong vòng đời request.
 
-![Route 53 vs ALB: Hoạt Động Ở Tầng Nào?](/route53-dns-vs-alb-layer.svg)
+<ExcalidrawDiagram src="/route53-dns-vs-alb-layer.excalidraw" alt="Route 53 vs ALB: Hoạt Động Ở Tầng Nào?" />
 
 Sự khác biệt cốt lõi:
 
@@ -73,7 +73,7 @@ Hãy đi sâu vào từng policy:
 
 Đây là **ngôi sao** của bài viết. Weighted Routing cho phép bạn gán trọng số cho từng record, và Route 53 sẽ phân phối traffic theo tỷ lệ tương ứng.
 
-![Weighted Routing: Chia Traffic Theo Tỷ Lệ](/route53-weighted-routing.svg)
+<ExcalidrawDiagram src="/route53-weighted-routing.excalidraw" alt="Weighted Routing: Chia Traffic Theo Tỷ Lệ" />
 
 Ví dụ: bạn cần chia traffic cho `api.example.com` giữa Production (80%) và Canary (20%). Bạn tạo **2 record cùng tên** với routing policy = Weighted:
 
@@ -114,7 +114,7 @@ User ở Việt Nam sẽ tự động được route đến Singapore hoặc Tok
 
 Failover routing hoạt động theo mô hình **Active-Passive**: bạn chỉ định một Primary và một Secondary record. Route 53 liên tục kiểm tra sức khỏe của Primary qua health check. Khi Primary "ngã", traffic tự động chuyển sang Secondary.
 
-![Failover Routing: Tự Động Chuyển Đổi Khi Sự Cố](/route53-failover-routing.svg)
+<ExcalidrawDiagram src="/route53-failover-routing.excalidraw" alt="Failover Routing: Tự Động Chuyển Đổi Khi Sự Cố" />
 
 | Record name | Type | Routing policy | Failover type | Value | Set ID | TTL | Health check |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -223,7 +223,7 @@ Sau đó bạn dần thay đổi weight theo lộ trình canary:
 
 Blue/Green đơn giản hơn canary: hai môi trường, chuyển đổi ngay lập tức.
 
-![Blue/Green + Canary: Lộ Trình Chuyển Đổi](/route53-bluegreen-canary.svg)
+<ExcalidrawDiagram src="/route53-bluegreen-canary.excalidraw" alt="Blue/Green + Canary: Lộ Trình Chuyển Đổi" />
 
 **Bước 1:** Cả hai môi trường đều sẵn sàng. Traffic 100% ở Blue.
 
@@ -304,7 +304,7 @@ Nếu bạn đã đọc bài [ALB hay NLB](/posts/alb-or-nlb), đây là mảnh 
 | **Tốc độ failover** | Phút (TTL) | Giây | Giây |
 | **Phạm vi** | Global | Regional | Regional |
 
-![Chọn Load Balancer Nào?](/route53-alb-nlb-decision-tree.svg)
+<ExcalidrawDiagram src="/route53-alb-nlb-decision-tree.excalidraw" alt="Chọn Load Balancer Nào?" />
 
 ---
 
@@ -317,7 +317,7 @@ Trong thực tế, Route 53 và ALB/NLB **không loại trừ nhau** — chúng 
 - **Route 53 (Tầng Global):** Latency-based hoặc Geolocation routing để đưa user đến region gần nhất
 - **ALB (Tầng Regional):** Path-based routing để phân phối request đến đúng microservice trong region đó
 
-![Kiến Trúc Kết Hợp: Route 53 + ALB](/route53-combo-architecture.svg)
+<ExcalidrawDiagram src="/route53-combo-architecture.excalidraw" alt="Kiến Trúc Kết Hợp: Route 53 + ALB" />
 
 Với kiến trúc này:
 

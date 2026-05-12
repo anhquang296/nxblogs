@@ -216,7 +216,7 @@ In other words: load distribution between nodes is only "even" when you have **t
 
 When a request passes through ALB, there are **2 independent decisions**:
 
-![ALB: Two Decision Layers](/alb-two-decision-layers.svg)
+<ExcalidrawDiagram src="/alb-two-decision-layers.excalidraw" alt="ALB: Two Decision Layers" />
 
 Layer 1 (choosing a node) is **decided by AWS** — you can't configure anything beyond choosing the region and AZs. Layer 2 (choosing a target) is **under your control** via target group settings, which is what the next section covers in detail.
 
@@ -236,7 +236,7 @@ This is the **default** algorithm for ALB and the easiest to understand.
 
 Targets are arranged in a circle. The first request goes to target #1, the next to #2, then #3... After completing the circle, it loops back to #1.
 
-![Round Robin](/alb-round-robin.svg)
+<ExcalidrawDiagram src="/alb-round-robin.excalidraw" alt="Round Robin" />
 
 **Advantages:**
 
@@ -257,7 +257,7 @@ This algorithm is smarter: ALB **counts the number of in-flight requests** (sent
 
 **How it works:**
 
-![Least Outstanding Requests (LOR)](/alb-lor.svg)
+<ExcalidrawDiagram src="/alb-lor.excalidraw" alt="Least Outstanding Requests (LOR)" />
 
 ALB maintains a counter for each target: incremented when a request is sent, decremented when a response is received.
 
@@ -293,7 +293,7 @@ This is the truly interesting part. ALB continuously **monitors targets** and de
 
 When an anomaly is detected, ALB **automatically reduces the target's weight** (sends less traffic) **without waiting for the health check to fail**. This is a form of **automatic circuit breaker** at the load balancer level.
 
-![Weighted Random + Anomaly Mitigation](/alb-weighted-random.svg)
+<ExcalidrawDiagram src="/alb-weighted-random.excalidraw" alt="Weighted Random + Anomaly Mitigation" />
 
 **Advantages:**
 

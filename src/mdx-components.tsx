@@ -4,6 +4,7 @@ import { Posts } from '@/components/posts'
 import { Tags } from '@/components/tags'
 import { Avatar } from '@/components/avatar'
 import { RedisSortedSetSimulator } from '@/components/redis-sorted-set-simulator'
+import { ExcalidrawDiagram } from '@/components/excalidraw-diagram'
 
 const blogComponents = getBlogMDXComponents({
   h1: ({ children }) => <h1 className="custom-h1">{children}</h1>,
@@ -29,5 +30,6 @@ export function useMDXComponents() {
     Tags: Tags,
     Avatar: Avatar,
     RedisSortedSetSimulator: RedisSortedSetSimulator,
+    ExcalidrawDiagram: ExcalidrawDiagram,
   }
 }

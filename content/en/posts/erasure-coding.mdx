@@ -31,7 +31,7 @@ Imagine writing a letter, tearing it into **4 pieces**, then creating **2 magic 
 
 This configuration is called **4+2** (4 data + 2 parity), and it's one of the most common setups in practice.
 
-![Erasure Coding Overview](/erasure-coding-overview.svg)
+<ExcalidrawDiagram src="/erasure-coding-overview.excalidraw" alt="Erasure Coding Overview" />
 
 Quick comparison with replication:
 
@@ -121,7 +121,7 @@ You compute parity by adding them all up:
 
 Now you store these 5 values (d1, d2, d3, d4, p) on 5 different servers.
 
-![Simple Parity](/erasure-coding-simple-parity.svg)
+<ExcalidrawDiagram src="/erasure-coding-simple-parity.excalidraw" alt="Simple Parity" />
 
 **When d3 is lost** (the server holding d3 dies), you recover it with subtraction:
 
@@ -158,7 +158,7 @@ Reed-Solomon applies this property as follows:
 
 4. When any m values are lost, the remaining **k values** are still enough to **uniquely determine** the degree k-1 polynomial → recover all coefficients → recover the original data.
 
-![Reed-Solomon Polynomial](/erasure-coding-reed-solomon.svg)
+<ExcalidrawDiagram src="/erasure-coding-reed-solomon.excalidraw" alt="Reed-Solomon Polynomial" />
 
 This is the power of Reed-Solomon: it **mathematically guarantees** that any k out of k+m parts are sufficient for recovery, regardless of which specific combination is lost.
 
@@ -180,7 +180,7 @@ The encoding matrix has a special structure:
 - The **top k rows** form an **identity matrix** (1s on the diagonal, 0s elsewhere). This ensures the first k elements of the output are the original data (unchanged).
 - The **bottom m rows** contain the parity coefficients, typically constructed from a **Vandermonde matrix** (a matrix where each row consists of powers of a distinct value).
 
-![Encoding Matrix](/erasure-coding-encoding-matrix.svg)
+<ExcalidrawDiagram src="/erasure-coding-encoding-matrix.excalidraw" alt="Encoding Matrix" />
 
 Example with a 4+2 configuration:
 
@@ -228,7 +228,7 @@ When shards are lost (dead disk, crashed server), the recovery process works as 
 
 Result: **d2** is recovered (along with all original data).
 
-![Decoding Process](/erasure-coding-decoding.svg)
+<ExcalidrawDiagram src="/erasure-coding-decoding.excalidraw" alt="Decoding Process" />
 
 Computationally: inverting a k×k matrix has complexity **O(k³)**, but k in practice is typically small (4-20), so this cost is acceptable.
 
@@ -256,7 +256,7 @@ Major storage systems use erasure coding with various configurations, depending 
 | Implementation complexity | Simple | Complex |
 | Best suited for | Hot data, low-latency needs | Cold/warm data, cost optimization |
 
-![Replication vs Erasure Coding](/erasure-coding-replication-vs-ec.svg)
+<ExcalidrawDiagram src="/erasure-coding-replication-vs-ec.excalidraw" alt="Replication vs Erasure Coding" />
 
 In summary: replication wins on **speed and simplicity**, erasure coding wins on **cost and durability**. This is why most real-world systems use **both**: replication for hot data (frequently accessed), erasure coding for cold/warm data (infrequently accessed).
 

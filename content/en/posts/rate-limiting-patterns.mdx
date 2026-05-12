@@ -68,7 +68,7 @@ Every rate limiter in existence is a variant of one of these 5 algorithms. This 
 
 **How it works.** Divide the time axis into fixed windows (e.g., each minute). Count the number of requests falling into the current window. If it exceeds the limit → reject. New window → reset to 0.
 
-![Fixed Window Counter](/rate-limiting-fixed-window.svg)
+<ExcalidrawDiagram src="/rate-limiting-fixed-window.excalidraw" alt="Fixed Window Counter" />
 
 **Code:**
 
@@ -184,7 +184,7 @@ A few more lines than fixed window, the math isn't hard but easy to get wrong (e
 
 **How it works.** Each user has a "bucket" containing N tokens (capacity = `C`). The bucket is continuously refilled at a rate of `r` tokens/second, never exceeding `C`. Each request costs 1 token (or more). No tokens left → reject.
 
-![Token Bucket](/rate-limiting-token-bucket.svg)
+<ExcalidrawDiagram src="/rate-limiting-token-bucket.excalidraw" alt="Token Bucket" />
 
 ```ts
 async function tokenBucket(userId: string, capacity: number, refillPerSec: number) {
@@ -231,7 +231,7 @@ The code isn't long, but must be atomic (Lua script), refill math must be precis
 
 **How it works.** Incoming requests **queue up FIFO** in a bucket. A consumer drains requests at a fixed rate of `r`/second and processes them. Queue full → reject. Unlike token bucket: leaky bucket doesn't let bursts through — output is always smooth at exactly rate `r`.
 
-![Leaky Bucket](/rate-limiting-leaky-bucket.svg)
+<ExcalidrawDiagram src="/rate-limiting-leaky-bucket.excalidraw" alt="Leaky Bucket" />
 
 ```ts
 async function leakyBucketEnqueue(userId: string, maxQueue: number) {
