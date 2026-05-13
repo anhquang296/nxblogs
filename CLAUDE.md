@@ -68,6 +68,19 @@
 - All text content inside diagrams must be written in English
 - Never generate raw SVG files or ASCII art for diagrams
 
+## AWS Architecture Diagram Style
+
+When creating AWS architecture diagrams, follow the official AWS reference architecture style:
+
+- **Icon + label only**: Use AWS icons with a text label below (e.g., "Amazon S3", "AWS Lambda"). Never wrap individual services in colored rectangle boxes
+- **Grouping containers**: Use dashed or solid border rectangles (no fill or very light fill) to group related services (e.g., "Customer's AWS Account", "VPC", "Authentication"). Add a group label at the top-left
+- **Numbered step circles**: Use small filled dark circles (#1e1e1e) with white text numbers to indicate flow order. Place them near the arrow or service they describe
+- **Arrows**: Use simple solid dark arrows (#1e1e1e) to connect services. Keep arrows straight (horizontal/vertical) where possible; use angled arrows only when necessary
+- **Layout**: Arrange services in a clean grid. Flow generally goes left-to-right or top-to-bottom
+- **No colored backgrounds on services**: The diagram background is white; only grouping containers may have a subtle border
+- **Service naming**: Use official AWS service names (e.g., "Amazon DynamoDB" not "DynamoDB", "AWS Lambda" not "Lambda")
+- **AWS icon library**: Icons are available at `.claude/skills/excalidraw-diagram-generator/libraries/aws-architecture-icons/`. Use the `add-icon-to-diagram.py` script with `--label` for service names
+
 # Git Conventions
 
 - Conventional commits: `feat:`, `fix:`, `refactor:`
