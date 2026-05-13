@@ -138,4 +138,44 @@
     .x\:container {
         @apply !max-w-[700px];
     }
+
+    .nextra-code {
+        border-radius: 12px !important;
+        overflow: hidden !important;
+    }
+
+    .nextra-code::before {
+        content: '';
+        display: block;
+        height: 46px;
+        background-color: #272c34;
+        background-image:
+            radial-gradient(circle 6px at center, #FF5F56 6px, transparent 0),
+            radial-gradient(circle 6px at center, #FFBD2E 6px, transparent 0),
+            radial-gradient(circle 6px at center, #27C93F 6px, transparent 0);
+        background-size: 12px 12px;
+        background-position: 20px center, 40px center, 60px center;
+        background-repeat: no-repeat;
+    }
+
+    .nextra-code pre {
+        background: #272c34 !important;
+        color: #e0e0e0 !important;
+        border-radius: 0 !important;
+        --tw-ring-shadow: 0 0 #0000 !important;
+        --tw-ring-color: transparent !important;
+        box-shadow: none !important;
+    }
+
+    .nextra-code span {
+        color: var(--shiki-dark) !important;
+        background-color: var(--shiki-dark-bg) !important;
+    }
+
+    .nextra-code > div:first-child:not(pre) {
+        background: #2d2d2d !important;
+        color: #a0a0a0 !important;
+        border: none !important;
+        border-radius: 0 !important;
+    }
 }
