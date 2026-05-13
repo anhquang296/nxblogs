@@ -1,0 +1,184 @@
+---
+title: 'AWS Global Accelerator — Your Private Highway on the AWS Backbone'
+date: '2026-05-13'
+tags: ['AWS', 'Devops', 'SAA']
+enableComment: true
+---
+
+# AWS Global Accelerator — Your Private Highway on the AWS Backbone
+
+> You have a SaaS application deployed in `ap-southeast-1` (Singapore). Users in Europe and North America start complaining about high latency and frequent WebSocket disconnects. Your team decides to put CloudFront in front of the ALB — "it has Edge Locations everywhere, it should be faster." And yes, latency does improve. But then new problems appear: client IPs are gone (your rate limiter keeps blocking the wrong users), WebSocket connections drop after 10 minutes of idle, and every time you debug, you have to dig through an extra CloudFront layer between client and ALB.
+>
+> You used a CDN as a network proxy — and it came with side effects you never signed up for.
+
+There's an AWS service designed exactly for this problem: **AWS Global Accelerator**.
+
+---
+
+## 1. What is Global Accelerator?
+
+**AWS Global Accelerator** is a networking service that accelerates traffic from users to your application. Instead of letting traffic travel through the unpredictable public internet, Global Accelerator routes traffic into **AWS's private network** from the nearest point to the user.
+
+The core power of Global Accelerator comes from three components:
+
+### 1.1. AWS Backbone Network
+
+**AWS Backbone Network** is AWS's private internal network, connecting all Regions and Edge Locations. This network is completely separate from the public internet — built and operated by AWS with dedicated fiber optic cables.
+
+When traffic travels on the backbone:
+
+- **Faster** — optimized routing, no need to hop through multiple intermediate ISPs (Internet Service Providers)
+- **More stable** — unaffected by congestion on the public internet
+- **More consistent** — latency varies less between requests
+
+This is core strength number one: **a private highway, not shared with the public internet**.
+
+### 1.2. Edge Locations
+
+AWS has over **100 Edge Locations** (points of presence) spread across the globe. When a user sends a request, traffic is received at the nearest Edge Location, then enters the backbone network.
+
+This means: most of the traffic's journey happens on AWS's "private highway" rather than wandering through the public internet. A user in Frankfurt only needs to travel a short distance on the public internet to the Frankfurt Edge Location, then the entire journey from Frankfurt to Singapore travels on the backbone.
+
+This is core strength number two: **minimizing the distance traveled on the public internet**.
+
+### 1.3. Anycast IP
+
+Normally, each IP address is **Unicast** — meaning one IP is bound to a single server at a specific location. When you connect to that IP, traffic always goes to that exact server, regardless of where you are.
+
+**Anycast** is the opposite: the same IP is advertised from **multiple locations worldwide** simultaneously. When a client connects to this IP, internet routing automatically sends traffic to the nearest point — completely automatic, no complex DNS routing needed.
+
+Global Accelerator gives you **2 static Anycast IPs**, advertised from all Edge Locations. No matter where users are, they always connect to the nearest Edge simply by accessing the same IP.
+
+This is core strength number three: **one IP, automatically routed to the nearest point, no DNS dependency**.
+
+### Putting it all together
+
+These three strengths work together to create the traffic flow:
+
+1. Client connects to **Anycast IP** → automatically reaches the nearest **Edge Location**
+2. Traffic enters **AWS Backbone Network** — the private highway
+3. Traffic arrives at your **endpoint** (ALB, NLB, EC2, Elastic IP) in the target Region
+
+<ExcalidrawDiagram src="/global-accelerator-how-it-works.excalidraw" alt="AWS Global Accelerator - How it works" />
+
+---
+
+## 2. What problems does Global Accelerator solve?
+
+### 2.1. Public internet routing is unpredictable
+
+When traffic travels through the public internet, it must hop through many intermediate nodes — from one ISP to another, through peering points (traffic exchange points between networks). Each hop can add latency, and the route can change at any time.
+
+Result: variable latency — sometimes fast, sometimes slow — especially for users far from the deployment Region. Global Accelerator eliminates this by routing traffic into the backbone from the nearest Edge.
+
+### 2.2. Static IP — no DNS propagation dependency
+
+When you change the backend endpoint (e.g., switch from one ALB to another, or failover to a different Region), Global Accelerator's 2 Anycast IPs **don't change**. Clients still connect to the same IP.
+
+Compare with DNS-based failover (e.g., Route 53): when you change a DNS record, you must wait for the TTL (Time to Live — DNS cache duration) to expire. During that time, some clients still connect to the old endpoint. With Global Accelerator, the switch is instant because the IP never changes.
+
+### 2.3. Instant health-based failover
+
+Global Accelerator continuously health-checks endpoints. When it detects an unhealthy endpoint, traffic is automatically shifted to a healthy one **within seconds**.
+
+Much faster than DNS failover (which depends on TTL, typically 60-300 seconds). For applications requiring high availability, seconds versus minutes is a significant difference.
+
+### 2.4. Multi-Region with traffic weights
+
+Global Accelerator lets you distribute traffic across multiple Regions by ratio (weight). For example: 70% traffic to `ap-southeast-1`, 30% to `us-east-1`. You can adjust weights anytime — useful for:
+
+- **Active-active**: running the application in multiple Regions simultaneously
+- **Gradual migration**: slowly shifting traffic from old Region to new Region
+- **Blue-green deployment**: switching traffic between two versions by adjusting weights
+
+---
+
+## 3. Real-world use cases
+
+### Gaming and real-time applications
+
+Global Accelerator supports both **TCP and UDP**. For online games, every millisecond of latency matters. Routing traffic through the backbone instead of the public internet reduces latency and jitter (latency variation — inconsistency in time between packets).
+
+### Financial / trading platforms
+
+For trading platforms, **consistent latency** matters more than absolute low latency. You don't want requests taking 50ms one moment and 500ms the next. The backbone network ensures stable latency because the route doesn't change based on public internet conditions.
+
+### Multi-Region failover
+
+You have ALBs in `ap-southeast-1` and `us-east-1`. When Singapore has an outage, Global Accelerator automatically shifts traffic to US within seconds. Clients don't need to change IPs, no need to wait for DNS propagation.
+
+### IoT and long-lived connections
+
+IoT devices often maintain long-lived TCP connections. Global Accelerator doesn't interfere with connections — no parsing, no timeout, no modification. Traffic goes straight to the endpoint.
+
+### Blue-green deployment
+
+You're running v1 on ALB-A and want to switch to v2 on ALB-B. Instead of changing DNS (which requires propagation time), you add ALB-B to Global Accelerator with 10% weight, observe, then gradually increase to 100%. If there's an issue, switch weight back to 0% immediately.
+
+---
+
+## 4. Don't confuse CloudFront with Global Accelerator
+
+This is where many people get confused: both use AWS Edge Locations, but they are **fundamentally different**.
+
+### 4.1. Different by nature
+
+**CloudFront** is a **CDN** (Content Delivery Network). Its job is to **cache and deliver content** closer to users. It operates at **Layer 7** (application layer) — reading HTTP requests, processing headers, caching responses.
+
+**Global Accelerator** is a **network accelerator**. Its job is to **carry traffic to the origin faster** via AWS backbone, **without touching the request**. It operates at **Layer 3/4** (network/transport layer) — only concerned with transporting packets, not their contents.
+
+When you put CloudFront in front of an ALB for a dynamic API that doesn't need caching, you're **using a CDN as a network proxy**. It works, but you inherit the entire CDN processing pipeline whether you need it or not — and with it come the side effects.
+
+### 4.2. Side effects of using CloudFront as a network proxy
+
+**Cache layer always runs** — Even when you set `CachingDisabled`, CloudFront still evaluates cache policy on every request. This is a mandatory step in the CDN pipeline. Global Accelerator has no cache layer — traffic flows straight through.
+
+**Client IP gets changed** — CloudFront terminates the TCP connection from the client and creates a new one to the origin. Result: ALB sees CloudFront's IP, not the real client IP. Your application must read the `X-Forwarded-For` header to get the original IP. If you have rate-limiting or geo-blocking logic based on IP, everything needs adjustment. Global Accelerator **preserves the client IP** — traffic reaching ALB still carries the user's real IP.
+
+**Request/response gets parsed** — CloudFront reads HTTP headers, may modify or strip some headers, and enforces size limits on headers and body. If your application relies on custom headers or sends large payloads, you need to check carefully. Global Accelerator doesn't read, parse, or modify anything.
+
+**WebSocket idle timeout of 10 minutes** — CloudFront automatically disconnects WebSocket connections with no activity for 10 minutes. For real-time applications using WebSocket (e.g., Soketi, Socket.io), this is a serious problem as long-lived connections can be dropped unexpectedly. Global Accelerator imposes no idle timeout on connections.
+
+**Harder to debug** — An extra HTTP processing layer between client and ALB means when issues arise, you must distinguish: is it CloudFront's fault or ALB's? Cache policy or origin? Global Accelerator is transparent — traffic flows straight through, fewer variables when debugging.
+
+### 4.3. Comparison table
+
+| Criteria | CloudFront | Global Accelerator |
+|---|---|---|
+| **Primary purpose** | CDN — cache and deliver content | Optimize network path |
+| **Operates at layer** | Layer 7 (HTTP/HTTPS) | Layer 3/4 (TCP/UDP) |
+| **Cache** | Yes (always evaluates even with CachingDisabled) | None |
+| **Client IP** | Changed — must read X-Forwarded-For | Preserved |
+| **Request modification** | Parses headers, may modify/strip | No interference |
+| **WebSocket** | Idle timeout 10 minutes | No timeout by GA |
+| **Static IP** | No (uses DNS CNAME) | 2 static Anycast IPs |
+| **Supported protocols** | HTTP, HTTPS | TCP, UDP |
+| **Fixed cost** | $0 (pay per request + bandwidth) | ~$18/month |
+
+### 4.4. Choose the right tool
+
+**Use CloudFront when:**
+- Content is cacheable: static assets (JS, CSS, images), API responses that rarely change
+- You need edge-side logic: Lambda@Edge, CloudFront Functions
+- Your goal is to **bring content closer to users**
+
+**Use Global Accelerator when:**
+- Dynamic API, traffic that doesn't need caching
+- You need to preserve client IP
+- Long-lived connections: WebSocket, gRPC streaming
+- You need static IPs for whitelist or DNS-less integration
+- Your goal is to **bring traffic to the origin faster**
+
+**Both services can be used together**: CloudFront for static assets + Global Accelerator for API/WebSocket traffic. This is a common architecture when your application has both static and dynamic content.
+
+<ExcalidrawDiagram src="/cloudfront-vs-global-accelerator-path.excalidraw" alt="CloudFront vs Global Accelerator - Traffic path comparison" />
+
+---
+
+## 5. Conclusion
+
+**Global Accelerator** is the right tool when you need to **bring traffic to the origin faster** without interfering with the request. It's transparent, preserves client IP, no caching, no parsing, no timeout.
+
+**CloudFront** is the right tool when you need to **bring content closer to users** — caching static assets, running edge-side logic.
+
+The two services serve different purposes. Don't use a CDN as a network proxy when there's a specialized tool for the job. **Use the right tool for the right job.**

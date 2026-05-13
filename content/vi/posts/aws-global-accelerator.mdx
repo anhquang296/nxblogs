@@ -1,0 +1,184 @@
+---
+title: 'AWS Global Accelerator — Đường cao tốc riêng trên backbone AWS cho ứng dụng của bạn'
+date: '2026-05-13'
+tags: ['AWS', 'Devops', 'SAA']
+enableComment: true
+---
+
+# AWS Global Accelerator — Đường cao tốc riêng trên backbone AWS cho ứng dụng của bạn
+
+> Bạn có một ứng dụng SaaS deploy tại `ap-southeast-1` (Singapore). Người dùng ở Châu Âu và Bắc Mỹ bắt đầu phàn nàn về độ trễ cao và kết nối WebSocket hay bị ngắt. Team bạn quyết định đặt CloudFront phía trước ALB — "có Edge Location khắp nơi mà, chắc sẽ nhanh hơn". Và đúng thật, latency có giảm. Nhưng rồi những vấn đề mới xuất hiện: client IP biến mất (rate limiter liên tục block nhầm), WebSocket tự động ngắt sau 10 phút idle, và mỗi lần debug bạn phải "soi" thêm một lớp CloudFront giữa client và ALB.
+>
+> Bạn đã dùng một CDN làm network proxy — và nó đi kèm những tác dụng phụ mà bạn không hề muốn.
+
+Có một dịch vụ AWS được thiết kế chính xác cho bài toán này: **AWS Global Accelerator**.
+
+---
+
+## 1. Global Accelerator là gì?
+
+**AWS Global Accelerator** là dịch vụ networking giúp tăng tốc traffic từ người dùng đến ứng dụng của bạn. Thay vì để traffic đi qua internet công cộng với đường đi không thể đoán trước, Global Accelerator đưa traffic vào **mạng nội bộ của AWS** ngay từ điểm gần người dùng nhất.
+
+Sức mạnh cốt lõi của Global Accelerator đến từ ba thành phần:
+
+### 1.1. AWS Backbone Network
+
+**AWS Backbone Network** là mạng riêng nội bộ của AWS, kết nối tất cả các Region và Edge Location với nhau. Mạng này hoàn toàn tách biệt khỏi internet công cộng — được AWS xây dựng và vận hành riêng với cáp quang chuyên dụng.
+
+Khi traffic đi trên backbone:
+
+- **Nhanh hơn** — đường đi được tối ưu, không phải nhảy qua nhiều ISP (Internet Service Provider — nhà cung cấp dịch vụ internet) trung gian
+- **Ổn định hơn** — không bị ảnh hưởng bởi tắc nghẽn trên internet công cộng
+- **Nhất quán hơn** — latency ít biến động giữa các lần request
+
+Đây là sức mạnh cốt lõi số một: **đường truyền riêng, không chia sẻ với internet công cộng**.
+
+### 1.2. Edge Locations
+
+AWS có hơn **100 Edge Location** (điểm hiện diện — point of presence) trải khắp thế giới. Khi người dùng gửi request, traffic sẽ được tiếp nhận tại Edge Location gần nhất, rồi từ đó đi vào backbone network.
+
+Điều này có nghĩa: phần lớn hành trình của traffic diễn ra trên "đường cao tốc riêng" của AWS, thay vì lang thang trên internet công cộng. Người dùng ở Frankfurt chỉ cần đi một đoạn ngắn trên internet công cộng đến Edge Location tại Frankfurt, sau đó toàn bộ hành trình từ Frankfurt đến Singapore đều đi trên backbone.
+
+Đây là sức mạnh cốt lõi số hai: **rút ngắn quãng đường đi trên internet công cộng xuống mức tối thiểu**.
+
+### 1.3. Anycast IP
+
+Thông thường, mỗi địa chỉ IP là **Unicast** — nghĩa là một IP gắn với một server duy nhất tại một vị trí cụ thể. Khi bạn kết nối đến IP đó, traffic luôn đi đến đúng server đó, bất kể bạn ở đâu.
+
+**Anycast** thì ngược lại: cùng một IP được quảng bá (advertise) từ **nhiều điểm trên thế giới** cùng lúc. Khi client kết nối đến IP này, hệ thống routing của internet tự động đưa traffic đến điểm gần nhất — hoàn toàn tự động, không cần DNS routing phức tạp.
+
+Global Accelerator cấp cho bạn **2 static Anycast IP**, được quảng bá từ tất cả Edge Location. Bất kể người dùng ở đâu, họ luôn kết nối đến Edge gần nhất chỉ bằng cách truy cập cùng một IP.
+
+Đây là sức mạnh cốt lõi số ba: **một IP duy nhất, tự động đến điểm gần nhất, không phụ thuộc DNS**.
+
+### Kết hợp lại
+
+Ba sức mạnh này hoạt động cùng nhau tạo thành luồng xử lý:
+
+1. Client kết nối đến **Anycast IP** → tự động đến **Edge Location** gần nhất
+2. Traffic đi vào **AWS Backbone Network** — đường cao tốc riêng
+3. Traffic đến **endpoint** của bạn (ALB, NLB, EC2, Elastic IP) tại Region đích
+
+<ExcalidrawDiagram src="/global-accelerator-how-it-works.excalidraw" alt="AWS Global Accelerator - How it works" />
+
+---
+
+## 2. Global Accelerator giải quyết vấn đề gì?
+
+### 2.1. Internet công cộng không thể đoán trước
+
+Khi traffic đi qua internet công cộng, nó phải nhảy qua nhiều hop — từ ISP này sang ISP khác, qua các peering point (điểm trao đổi traffic giữa các mạng). Mỗi hop đều có thể gây thêm latency, và đường đi có thể thay đổi bất cứ lúc nào.
+
+Kết quả: latency biến động, có lúc nhanh có lúc chậm, đặc biệt với người dùng ở xa Region deploy. Global Accelerator loại bỏ vấn đề này bằng cách đưa traffic vào backbone ngay từ Edge gần nhất.
+
+### 2.2. Static IP — không phụ thuộc DNS propagation
+
+Khi bạn thay đổi endpoint phía sau (ví dụ: chuyển từ ALB này sang ALB khác, hoặc failover sang Region khác), 2 Anycast IP của Global Accelerator **không thay đổi**. Client vẫn kết nối đến cùng IP.
+
+So sánh với DNS-based failover (ví dụ Route 53): khi bạn đổi record DNS, phải đợi TTL (Time to Live — thời gian cache DNS) hết hạn. Trong khoảng thời gian đó, một số client vẫn kết nối đến endpoint cũ. Với Global Accelerator, việc chuyển đổi là tức thì vì IP không đổi.
+
+### 2.3. Health-based failover tức thì
+
+Global Accelerator liên tục health-check các endpoint. Khi phát hiện endpoint không healthy, traffic được tự động chuyển sang endpoint healthy khác **trong vài giây**.
+
+Nhanh hơn rất nhiều so với DNS failover (phụ thuộc vào TTL, thường từ 60-300 giây). Với các ứng dụng yêu cầu high availability (tính sẵn sàng cao), vài giây so với vài phút là khác biệt lớn.
+
+### 2.4. Multi-Region với traffic weights
+
+Global Accelerator cho phép bạn phân phối traffic giữa nhiều Region theo tỷ lệ (weight). Ví dụ: 70% traffic đến `ap-southeast-1`, 30% đến `us-east-1`. Bạn có thể điều chỉnh weight bất cứ lúc nào — hữu ích cho:
+
+- **Active-active**: chạy ứng dụng ở nhiều Region cùng lúc
+- **Gradual migration**: dần dần chuyển traffic từ Region cũ sang Region mới
+- **Blue-green deployment**: chuyển traffic giữa hai phiên bản bằng cách điều chỉnh weight
+
+---
+
+## 3. Các use case thực tế
+
+### Gaming và ứng dụng real-time
+
+Global Accelerator hỗ trợ cả **TCP và UDP**. Với game online, mỗi millisecond latency đều quan trọng. Đưa traffic vào backbone thay vì internet công cộng giúp giảm latency và giảm jitter (biến động độ trễ — sự không nhất quán về thời gian giữa các packet).
+
+### Nền tảng tài chính / giao dịch
+
+Với trading platform, **latency nhất quán** quan trọng hơn latency thấp tuyệt đối. Bạn không muốn request lúc mất 50ms lúc mất 500ms. Backbone network đảm bảo latency ổn định vì đường đi không thay đổi theo tình trạng internet công cộng.
+
+### Multi-Region failover
+
+Bạn có ALB ở `ap-southeast-1` và `us-east-1`. Khi Singapore gặp sự cố, Global Accelerator tự động chuyển traffic sang US trong vài giây. Client không cần đổi IP, không cần đợi DNS propagation.
+
+### IoT và long-lived connections
+
+Các thiết bị IoT thường duy trì kết nối TCP lâu dài. Global Accelerator không can thiệp vào connection — không parse, không timeout, không modify. Traffic đi thẳng đến endpoint.
+
+### Blue-green deployment
+
+Bạn đang chạy v1 trên ALB-A và muốn chuyển sang v2 trên ALB-B. Thay vì đổi DNS (phải đợi propagation), bạn thêm ALB-B vào Global Accelerator với weight 10%, quan sát, rồi dần tăng lên 100%. Nếu có vấn đề, chuyển weight về 0% ngay lập tức.
+
+---
+
+## 4. Đừng nhầm lẫn CloudFront với Global Accelerator
+
+Đây là điểm nhiều người hay nhầm: cả hai đều sử dụng Edge Location của AWS, nhưng **bản chất hoàn toàn khác nhau**.
+
+### 4.1. Bản chất khác nhau
+
+**CloudFront** là **CDN** (Content Delivery Network — mạng phân phối nội dung). Nhiệm vụ của nó là **cache và phân phối nội dung** gần người dùng hơn. Nó hoạt động ở **Layer 7** (tầng ứng dụng) — đọc HTTP request, xử lý headers, cache response.
+
+**Global Accelerator** là **network accelerator**. Nhiệm vụ của nó là **mang traffic đến origin nhanh hơn** qua AWS backbone, **không can thiệp vào request**. Nó hoạt động ở **Layer 3/4** (tầng mạng/vận chuyển) — chỉ lo vận chuyển packet, không quan tâm nội dung bên trong.
+
+Khi bạn đặt CloudFront phía trước ALB cho một dynamic API không cần cache, bạn đang **dùng CDN làm network proxy**. Nó hoạt động được, nhưng bạn sẽ gánh toàn bộ pipeline xử lý của CDN dù không cần — và đi kèm đó là các tác dụng phụ.
+
+### 4.2. Tác dụng phụ khi dùng CloudFront làm network proxy
+
+**Cache layer luôn chạy** — Kể cả khi bạn set `CachingDisabled`, CloudFront vẫn phải evaluate cache policy mỗi request. Đây là một bước xử lý bắt buộc trong pipeline của CDN. Global Accelerator không có cache layer — traffic đi thẳng.
+
+**Client IP bị thay đổi** — CloudFront terminate kết nối TCP từ client và tạo kết nối mới đến origin. Kết quả: ALB nhận thấy IP của CloudFront, không phải IP thật của client. Ứng dụng phải đọc header `X-Forwarded-For` để lấy IP gốc. Nếu bạn có logic rate-limiting hoặc geo-blocking dựa trên IP, tất cả đều phải điều chỉnh. Global Accelerator **giữ nguyên client IP** — traffic đến ALB vẫn mang IP thật của người dùng.
+
+**Request/response bị parse** — CloudFront đọc HTTP headers, có thể modify hoặc strip một số headers, áp dụng size limits cho headers và body. Nếu ứng dụng của bạn dựa vào custom headers hoặc gửi payload lớn, bạn cần kiểm tra kỹ. Global Accelerator không đọc, không parse, không modify bất kỳ thứ gì.
+
+**WebSocket idle timeout 10 phút** — CloudFront tự động ngắt kết nối WebSocket nếu không có hoạt động trong 10 phút. Với các ứng dụng real-time sử dụng WebSocket (ví dụ Soketi, Socket.io), đây là vấn đề nghiêm trọng vì long-lived connection có thể bị drop bất ngờ. Global Accelerator không áp đặt idle timeout lên connection.
+
+**Debug khó hơn** — Thêm một lớp HTTP processing giữa client và ALB nghĩa là khi có vấn đề, bạn phải phân biệt: lỗi do CloudFront hay do ALB? Do cache policy hay do origin? Global Accelerator transparent — traffic đi thẳng, ít biến số hơn khi debug.
+
+### 4.3. Bảng so sánh
+
+| Tiêu chí | CloudFront | Global Accelerator |
+|---|---|---|
+| **Mục đích chính** | CDN — cache và phân phối nội dung | Tối ưu đường truyền mạng |
+| **Hoạt động ở tầng** | Layer 7 (HTTP/HTTPS) | Layer 3/4 (TCP/UDP) |
+| **Cache** | Có (luôn evaluate dù set CachingDisabled) | Không có |
+| **Client IP** | Bị thay đổi — cần đọc X-Forwarded-For | Giữ nguyên |
+| **Request modification** | Parse headers, có thể modify/strip | Không can thiệp |
+| **WebSocket** | Idle timeout 10 phút | Không timeout bởi GA |
+| **Static IP** | Không (dùng DNS CNAME) | 2 Anycast IP tĩnh |
+| **Protocol hỗ trợ** | HTTP, HTTPS | TCP, UDP |
+| **Chi phí cố định** | $0 (trả theo request + bandwidth) | ~$18/tháng |
+
+### 4.4. Chọn đúng công cụ
+
+**Dùng CloudFront khi:**
+- Nội dung có thể cache: static assets (JS, CSS, images), API responses ít thay đổi
+- Cần xử lý logic ở edge: Lambda@Edge, CloudFront Functions
+- Mục tiêu là **đưa nội dung gần người dùng hơn**
+
+**Dùng Global Accelerator khi:**
+- Dynamic API, traffic không cần cache
+- Cần giữ nguyên client IP
+- Long-lived connections: WebSocket, gRPC streaming
+- Cần static IP cho whitelist hoặc DNS-less integration
+- Mục tiêu là **đưa traffic về origin nhanh hơn**
+
+**Hai dịch vụ có thể dùng song song**: CloudFront cho static assets + Global Accelerator cho API/WebSocket traffic. Đây là kiến trúc phổ biến khi ứng dụng có cả nội dung tĩnh và dynamic.
+
+<ExcalidrawDiagram src="/cloudfront-vs-global-accelerator-path.excalidraw" alt="CloudFront vs Global Accelerator - Traffic path comparison" />
+
+---
+
+## 5. Kết luận
+
+**Global Accelerator** là đúng tool khi bạn cần **mang traffic về origin nhanh hơn** mà không can thiệp vào request. Nó transparent, giữ nguyên client IP, không cache, không parse, không timeout.
+
+**CloudFront** là đúng tool khi bạn cần **đưa nội dung gần người dùng hơn** — cache static assets, xử lý logic ở edge.
+
+Hai dịch vụ phục vụ mục đích khác nhau. Đừng dùng CDN làm network proxy khi có tool chuyên biệt cho việc đó. **Dùng đúng tool cho đúng công việc.**
