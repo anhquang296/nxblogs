@@ -93,6 +93,8 @@ Mỗi tab trình duyệt có một event loop riêng. Mỗi vòng lặp:
 4. **Render** — browser tính Style → Layout → Paint → Composite (mỗi frame ~16.67ms cho 60fps)
 5. Chạy các idle callback nếu có thời gian, `requestIdleCallback` là API chạy khi browser rảnh (giữa các frame), thường dùng cho analytics hoặc prefetch không quan trọng.
 
+<BrowserEventLoopVisualizer />
+
 ### 2.2 Node.js Event Loop (libuv)
 
 <ExcalidrawDiagram src="/nodejs-event-loop.excalidraw" alt="Node.js Event Loop Architecture (libuv)" />

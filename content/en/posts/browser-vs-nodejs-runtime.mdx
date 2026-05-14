@@ -90,6 +90,8 @@ Each browser tab has its own event loop. Each iteration:
 4. **Render** — the browser calculates Style → Layout → Paint → Composite (each frame ~16.67ms for 60fps)
 5. Run idle callbacks if there's time left, `requestIdleCallback` runs when the browser is idle (between frames), typically used for analytics or non-critical prefetching.
 
+<BrowserEventLoopVisualizer />
+
 ### 2.2 Node.js Event Loop (libuv)
 
 <ExcalidrawDiagram src="/nodejs-event-loop.excalidraw" alt="Node.js Event Loop Architecture (libuv)" />
