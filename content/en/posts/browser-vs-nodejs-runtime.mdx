@@ -1,0 +1,235 @@
+---
+title: 'Javascript Runtime: Browser vs Node.js — Same Language, Different Worlds'
+date: '2026-05-14'
+tags: ['Javascript', 'System Design', 'Runtime']
+enableComment: true
+---
+
+# Javascript Runtime: Browser vs Node.js — Same Language, Different Worlds
+
+> You write `setTimeout(() => console.log('hello'), 0)` — it works fine in Chrome, but gives a different order when you test it in Node.js. You use `fetch()` as usual, but before Node.js 18, it didn't exist. You `import fs from 'fs'` on the server — the browser throws an error immediately.
+
+If it's all Javascript, why does the same code behave differently depending on the environment?
+
+The answer lies in the **runtime** — the execution environment surrounding the Javascript engine. Javascript is like the **shared DNA** of two twins, but one grew up in a **glass apartment** (browser — sandboxed, visual, user-facing) while the other grew up on a **farm** (Node.js — full system access, no restrictions). They speak the same language, but their environments shaped them into fundamentally different beings.
+
+This article dissects 3 core aspects: from the **Javascript engine** to the **event loop** and **APIs** — so you clearly understand what's the same, what's different, and most importantly **why** it's different.
+
+<ExcalidrawDiagram
+  src="/browser-vs-nodejs-architecture.excalidraw"
+  alt="Browser Runtime vs Node.js Runtime Architecture"
+/>
+
+---
+
+## 1. Javascript Engine — The Shared DNA
+
+Before discussing runtimes, let's clarify one thing: the **Javascript engine** and the **runtime** are two different things.
+
+The **engine** does one job: take Javascript source code → transform it into machine code → execute it. The engine knows nothing about the DOM, file system, or network. It only understands ECMAScript — syntax, data types, functions, classes, Promises, etc.
+
+The **runtime** is everything **surrounding** the engine: the APIs the engine can call (DOM, `fetch`, `fs`...), the event loop, task queues, etc. The runtime determines what Javascript **can do** beyond pure computation.
+
+### 1.1 The Compilation Pipeline
+
+Regardless of the engine — V8, SpiderMonkey, or JavaScriptCore — they all go through the same pipeline:
+
+<ExcalidrawDiagram src="/browser-vs-nodejs-engine-pipeline.excalidraw" alt="Javascript Engine Compilation Pipeline" />
+
+1. **Lexer/Tokenizer**: Breaks source code into tokens (keywords, variables, operators)
+2. **Parser**: Builds an AST (Abstract Syntax Tree — a tree data structure describing the program's logic)
+3. **Bytecode Interpreter**: Executes bytecode immediately — fast startup, but not optimized
+4. **JIT Compiler**: When it detects "hot" code (executed many times), JIT (Just-In-Time) compiles it directly into highly optimized machine code
+
+### 1.2 V8 — The Shared Heart of Chrome and Node.js
+
+V8 is the engine developed by Google, used in both Chrome and Node.js. V8's two tiers:
+
+- **Ignition**: interpreter — executes bytecode immediately, fast startup
+- **TurboFan**: optimizing JIT compiler — when a function runs enough times, TurboFan compiles it into highly optimized machine code
+
+The key point: **Node.js embeds the exact same V8 binary that Chrome uses**. When you run `node script.js`, the V8 inside Node.js executes Javascript in the exact same way Chrome does. Every difference comes from the **runtime**, not the engine.
+
+### 1.3 Other Engines
+
+- **SpiderMonkey** (Firefox): 3 tiers — Baseline Interpreter → Baseline JIT → Warp (optimizing JIT). SpiderMonkey has more intermediate tiers than V8, trading warm-up time for optimization levels
+- **JavaScriptCore** (Safari): 4 tiers — LLInt → Baseline JIT → DFG → FTL. The most aggressive engine with 4 optimization tiers, consuming more compilation resources but achieving higher peak performance
+
+### 1.4 Why the Engine Alone Is Not the Runtime
+
+```js
+function fibonacci(n) {
+  if (n <= 1) return n
+  return fibonacci(n - 1) + fibonacci(n - 2)
+}
+
+console.log(fibonacci(10)) // 55 — identical across all runtimes
+```
+
+The `fibonacci` function uses only the pure engine (computation, recursion). It produces the same result on Chrome, Node.js, Firefox, Safari, Deno, Bun — everywhere. But when you call `document.getElementById()` or `fs.readFile()`, you're calling into **runtime APIs** — and this is where the two worlds diverge.
+
+---
+
+## 2. Event Loop — Same Concept, Different Machinery
+
+Both browser and Node.js run Javascript on a **single thread**. No multithreading for Javascript code. So how do they handle thousands of concurrent requests without blocking?
+
+The answer: the **event loop** — a continuous loop that checks: "is there work to do?" → execute → check again.
+
+Think of the event loop as **a single chef in a kitchen**. The chef can only chop one ingredient at a time, but while the soup simmers (I/O waiting), they move on to the next task. Both browser and Node.js have "one chef", but the kitchen layouts are different.
+
+### 2.1 Browser Event Loop
+
+<ExcalidrawDiagram src="/browser-event-loop.excalidraw" alt="Browser Event Loop Architecture" />
+
+Each browser tab has its own event loop. Each iteration:
+
+1. Pick ONE macrotask from the queue (setTimeout, setInterval, I/O callbacks, UI events like click/scroll)
+2. Drain ALL microtasks sequentially, including any microtasks spawned during the process, until the queue is empty — every Promise `.then()`, `queueMicrotask()`, `MutationObserver`
+3. **requestAnimationFrame** callbacks — run before the browser renders the next frame
+4. **Render** — the browser calculates Style → Layout → Paint → Composite (each frame ~16.67ms for 60fps)
+5. Run idle callbacks if there's time left, `requestIdleCallback` runs when the browser is idle (between frames), typically used for analytics or non-critical prefetching.
+
+### 2.2 Node.js Event Loop (libuv)
+
+<ExcalidrawDiagram src="/nodejs-event-loop.excalidraw" alt="Node.js Event Loop Architecture (libuv)" />
+
+Node.js uses a C library called **libuv** to manage the event loop. Instead of a simple loop, libuv divides it into **6 phases** running sequentially:
+
+1. **Timers**: Execute expired `setTimeout` and `setInterval` callbacks
+2. **Pending Callbacks**: Process deferred I/O callbacks from the previous cycle (e.g., TCP errors)
+3. **Idle/Prepare**: Used internally by libuv
+4. **Poll**: The most important phase — retrieves new I/O events from the OS and executes callbacks. The event loop spends most of its time here, waiting for I/O to complete
+5. **Check**: Execute `setImmediate()` callbacks
+6. **Close Callbacks**: Handle connection close events (`socket.on('close')`)
+
+**Between each phase**, Node.js drains two queues in order:
+1. `process.nextTick()` queue (runs first)
+2. Microtask queue (Promise `.then()`, `queueMicrotask()`)
+
+### 2.3 Subtle Differences That Cause Bugs
+
+**`process.nextTick` runs before Promises:**
+
+```js
+process.nextTick(() => console.log('nextTick'))
+Promise.resolve().then(() => console.log('promise'))
+queueMicrotask(() => console.log('queueMicrotask'))
+// Node.js output:
+// nextTick
+// promise
+// queueMicrotask
+```
+
+`process.nextTick` isn't a microtask — it has its own queue that always drains before the microtask queue. This is a Node.js-specific quirk that doesn't exist in browsers.
+
+**`setTimeout` vs `setImmediate` — non-deterministic order:**
+
+```js
+setTimeout(() => console.log('timeout'), 0)
+setImmediate(() => console.log('immediate'))
+// Output: could be "timeout" first OR "immediate" first — NON-DETERMINISTIC
+```
+
+Why? Because `setTimeout(fn, 0)` actually has a minimum delay of ~1ms. If the event loop starts a new cycle before the timer expires, `setImmediate` (Check phase) runs first. If the timer has already expired when entering the Timers phase, `setTimeout` runs first.
+
+But **inside an I/O callback**, the order is always deterministic:
+
+```js
+const fs = require('fs')
+fs.readFile(__filename, () => {
+  setTimeout(() => console.log('timeout'), 0)
+  setImmediate(() => console.log('immediate'))
+  // Always: "immediate" before "timeout"
+  // Because after I/O callback (Poll phase), Check phase runs before Timers in the next cycle
+})
+```
+
+**Danger: `process.nextTick` starvation**
+
+```js
+function recursiveNextTick() {
+  process.nextTick(recursiveNextTick)
+}
+recursiveNextTick()
+// DANGER: I/O callbacks will NEVER be processed
+// because nextTick queue drains BEFORE every phase
+```
+
+If you call `process.nextTick` recursively, the event loop gets "stuck" — it never advances to the next phase, I/O starves. This is why Node.js docs recommend using `setImmediate()` over `process.nextTick()` in most cases.
+
+---
+
+## 3. APIs and Global Objects — Where the Worlds Diverge
+
+The engine provides ECMAScript built-ins: `Array`, `Promise`, `Map`, `Set`, `JSON`, `Math`... All identical across every runtime. But **everything else** comes from the runtime.
+
+If the engine is the language, then APIs are the **tools in each sibling's workshop**. The browser sibling has paintbrushes and windows (DOM, Canvas, fetch). The Node.js sibling has hammers and drills (fs, net, child_process).
+
+### 3.1 Browser Globals
+
+- **`window`** (or `self`, `globalThis`): The global object containing everything
+- **`document`** + DOM API: The bridge to the UI — `querySelector`, `createElement`, `addEventListener`
+- **`navigator`**: Browser info, geolocation, clipboard, permissions
+- **`fetch`**: HTTP client
+- **Web Storage**: `localStorage`, `sessionStorage`, `IndexedDB`
+- **Graphics**: Canvas 2D, WebGL, WebGPU
+- **Real-time**: WebRTC, WebSocket
+- **Offline**: Service Workers, Cache API
+- **`performance`**: Precise timing measurements
+
+### 3.2 Node.js Globals
+
+- **`global`** / **`globalThis`**: The global object
+- **`process`**: Process info — `argv` (command-line arguments), `env` (environment variables), `exit()`, `stdin`/`stdout`/`stderr`, `memoryUsage()`, `cpuUsage()`
+- **`Buffer`**: Binary data handling. Before `TypedArray` was standardized, `Buffer` was Node.js's only way to work with binary data
+- **`__dirname`**, **`__filename`**: Current file path (CommonJS only)
+- **Core modules**: `fs` (file system), `path` (paths), `os` (operating system), `net` (TCP sockets), `http`/`https` (HTTP server/client), `crypto` (encryption), `stream` (streaming data), `child_process` (spawn child processes), `cluster` (multi-process), `worker_threads` (multi-thread), `zlib` (compression)
+
+### 3.3 The Convergence
+
+The two worlds are gradually **converging**. Many APIs that were browser-only now exist in Node.js:
+
+| API | Browser | Node.js |
+|-----|---------|---------|
+| `fetch` | Since the beginning | v18+ (stable) |
+| `crypto.subtle` (Web Crypto) | Since the beginning | v15+ |
+| `structuredClone` | Since the beginning | v17+ |
+| `AbortController` | Since the beginning | v15+ |
+| `URL` / `URLSearchParams` | Since the beginning | v10+ |
+| `TextEncoder` / `TextDecoder` | Since the beginning | v11+ |
+| `ReadableStream` / `WritableStream` | Since the beginning | v16+ (Web Streams API) |
+| `Blob` | Since the beginning | v18+ |
+| `performance.now()` | Since the beginning | v8+ (`perf_hooks`) |
+| `globalThis` | ES2020 | ES2020 |
+
+**WinterCG** (Web-interoperable Runtimes Community Group) is the effort to standardize a minimal shared API set across all runtimes: Node.js, Deno, Bun, Cloudflare Workers. The goal: write once, run everywhere — at least for the parts unrelated to DOM or file system.
+
+```js
+// This code runs on BOTH browser AND Node.js 18+
+const response = await fetch('https://api.example.com/data')
+const data = await response.json()
+
+// Browser only — Node.js has no DOM
+document.getElementById('app').textContent = JSON.stringify(data)
+
+// Node.js only — browsers have no file system
+import { writeFile } from 'node:fs/promises'
+await writeFile('data.json', JSON.stringify(data))
+```
+
+---
+
+## Summary
+
+| Aspect | Browser | Node.js |
+|--------|---------|---------|
+| **Engine** | V8 (Chrome), SpiderMonkey (Firefox), JSC (Safari) | V8 |
+| **Event Loop** | Macrotask → microtask → rAF → render | 6 phases (libuv) + microtask between each phase |
+| **Global** | `window`, `document` | `global`, `process`, `Buffer` |
+
+The two "siblings" have grown up, each becoming an expert in their domain. The browser handles UI, animation, and user interaction. Node.js handles servers, CLI tools, build tools, and real-time backends.
+
+The intersection grows larger every day: **SSR/SSG** (Next.js, Nuxt) runs the same code on both server and browser. **Edge runtimes** (Cloudflare Workers, Vercel Edge) are a third environment — not fully browser, not fully Node.js, but a subset of both.
+
+Understanding what's engine (shared), what's runtime (different), and **why** they differ — that's the foundation for writing Javascript correctly for each environment, instead of debugging "same code, different results" bugs without understanding the cause.

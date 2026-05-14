@@ -1,0 +1,239 @@
+---
+title: 'Javascript Runtime: Browser vs Node.js — cùng ngôn ngữ, khác thế giới'
+date: '2026-05-14'
+tags: ['Javascript', 'System Design', 'Runtime']
+enableComment: true
+---
+
+# Javascript Runtime: Browser vs Node.js — cùng ngôn ngữ, khác thế giới
+
+> Bạn viết `setTimeout(() => console.log('hello'), 0)` — code chạy đúng trên Chrome, nhưng lại cho thứ tự khác khi bạn test trên Node.js. Bạn dùng `fetch()` quen thuộc, nhưng ở Node.js trước version 18, nó không tồn tại. Bạn `import fs from 'fs'` ở server — browser trả lại lỗi ngay lập tức.
+
+Nếu đều là Javascript, tại sao cùng một đoạn code lại chạy khác nhau tuỳ môi trường?
+
+Câu trả lời nằm ở **runtime** — môi trường thực thi bao quanh Javascript engine. Javascript giống như **DNA chung** của hai anh em sinh đôi, nhưng một người lớn lên trong **căn hộ kính** (browser — sandbox, visual, giao tiếp với user) còn người kia lớn lên ở **nông trại** (Node.js — full quyền truy cập hệ thống, không giới hạn). Cả hai nói cùng ngôn ngữ, nhưng môi trường đã nhào nặn họ thành hai con người khác biệt.
+
+Bài viết này sẽ mổ xẻ 3 khía cạnh cốt lõi: từ **Javascript engine** đến **event loop** và **APIs** — để bạn hiểu rõ ràng đâu là giống, đâu là khác, và quan trọng nhất là **tại sao** lại khác.
+
+<ExcalidrawDiagram
+  src="/browser-vs-nodejs-architecture.excalidraw"
+  alt="Browser Runtime vs Node.js Runtime Architecture"
+/>
+
+---
+
+## 1. Javascript Engine — DNA chung
+
+Trước khi nói về runtime, hãy hiểu rõ một điều: **Javascript engine** và **runtime** là hai thứ khác nhau.
+
+**Engine** (động cơ) chỉ làm một việc: nhận Javascript code, biến dịch thành machine code và thực thi. Engine không biết gì về DOM, file system, hay network. Nó chỉ hiểu ECMAScript — bản đặc tả của ngôn ngữ, nó khai báo cú pháp nào là hợp lệ, kiểu dữ liệu nào được cho phép, ...
+
+**Runtime** (môi trường thực thi) là tất cả những gì **bao quanh** engine: các API mà engine có thể gọi (DOM, `fetch`, `fs`...), event loop, task queue, v.v. Runtime quyết định Javascript có thể **làm gì** ngoài việc tính toán thuần tuý.
+
+### 1.1 Pipeline biên dịch
+
+Dù engine nào — V8, SpiderMonkey, hay JavaScriptCore — tất cả đều đi qua pipeline giống nhau:
+
+<ExcalidrawDiagram src="/browser-vs-nodejs-engine-pipeline.excalidraw" alt="Javascript Engine Compilation Pipeline" />
+
+1. **Lexer/Tokenizer**: Tách source code thành các token (từ khoá, biến, toán tử)
+2. **Parser**: Xây dựng AST (Abstract Syntax Tree — cây cú pháp trừu tượng, là cấu trúc dữ liệu dạng cây mô tả logic của chương trình)
+3. **Bytecode Interpreter**: Thực thi bytecode ngay — startup nhanh, nhưng chưa tối ưu
+4. **JIT Compiler**: Khi phát hiện code "hot" (chạy nhiều lần), JIT (Just-In-Time — biên dịch ngay tại thời điểm chạy) biên dịch trực tiếp thành machine code tối ưu
+
+### 1.2 V8 — Trái tim chung của Chrome và Node.js
+
+V8 là engine do Google phát triển, dùng trong cả Chrome và Node.js. Hai tầng của V8:
+
+- **Ignition**: interpreter — thực thi bytecode ngay, startup nhanh
+- **TurboFan**: optimizing JIT compiler — khi một function chạy đủ nhiều lần, TurboFan biên dịch nó thành machine code được tối ưu hoá cao
+
+Điều quan trọng: **Node.js nhúng đúng binary V8 mà Chrome dùng**. Khi bạn chạy `node script.js`, V8 bên trong Node.js thực thi Javascript theo cách y hệt như khi Chrome chạy Javascript trên trang web. Mọi khác biệt đến từ **runtime**, không phải engine.
+
+### 1.3 Các engine khác
+
+- **SpiderMonkey** (Firefox): 3 tầng — Baseline Interpreter → Baseline JIT → Warp (optimizing JIT). SpiderMonkey có nhiều tầng trung gian hơn V8, trade-off giữa thời gian warm-up và mức tối ưu
+- **JavaScriptCore** (Safari): 4 tầng — LLInt → Baseline JIT → DFG → FTL. Là engine "hung hãn" nhất với 4 tầng tối ưu hoá, tiêu tốn nhiều tài nguyên biên dịch hơn nhưng đạt peak performance cao
+
+### 1.4 Tại sao engine chưa phải là runtime
+
+```js
+function fibonacci(n) {
+  if (n <= 1) {
+    return n
+  }
+
+  return fibonacci(n - 1) + fibonacci(n - 2)
+}
+
+console.log(fibonacci(10))
+```
+
+Hàm `fibonacci` chỉ dùng engine thuần (tính toán, đệ quy). Nó cho kết quả giống nhau trên Chrome, Node.js, Firefox, Safari, Deno, Bun — bất kỳ đâu. Nhưng khi bạn gọi `document.getElementById()` hay `fs.readFile()`, bạn đang gọi vào **runtime API** — và đây là nơi hai thế giới rẽ nhánh.
+
+---
+
+## 2. Event Loop — Cùng concept, khác cơ chế
+
+Cả browser và Node.js đều chạy Javascript trên **một thread duy nhất**. Không có multithreading cho Javascript code. Vậy làm sao chúng xử lý hàng ngàn request song song mà không block?
+
+Câu trả lời: **event loop** — một vòng lặp liên tục kiểm tra: "có việc gì cần làm không?" → thực thi → kiểm tra tiếp.
+
+Hình dung event loop như **một đầu bếp trong bếp**. Đầu bếp chỉ có thể thái một món tại một thời điểm, nhưng trong khi nồi canh đang sôi (I/O đang chờ), anh ta chuyển sang món khác. Cả browser và Node.js đều có "một đầu bếp", nhưng cách bố trí trong bếp khác nhau.
+
+### 2.1 Browser Event Loop
+
+<ExcalidrawDiagram src="/browser-event-loop.excalidraw" alt="Browser Event Loop Architecture" />
+
+Mỗi tab trình duyệt có một event loop riêng. Mỗi vòng lặp:
+
+1. Chạy 1 macrotask từ queue (setTimeout, setInterval, I/O callback, UI events như click/scroll)
+2. Chạy tuần tự toàn bộ microtask từ queue, kể cả các microtask sinh ra trong quá trình này cũng được thực thi đến khi queue rỗng — mọi Promise `.then()`, `queueMicrotask()`, `MutationObserver`
+3. **requestAnimationFrame** callbacks — chạy trước khi browser render frame tiếp theo
+4. **Render** — browser tính Style → Layout → Paint → Composite (mỗi frame ~16.67ms cho 60fps)
+5. Chạy các idle callback nếu có thời gian, `requestIdleCallback` là API chạy khi browser rảnh (giữa các frame), thường dùng cho analytics hoặc prefetch không quan trọng.
+
+### 2.2 Node.js Event Loop (libuv)
+
+<ExcalidrawDiagram src="/nodejs-event-loop.excalidraw" alt="Node.js Event Loop Architecture (libuv)" />
+
+Node.js dùng thư viện C có tên **libuv** để quản lý event loop. Thay vì một vòng đơn giản, libuv chia thành **6 phase** chạy tuần tự:
+
+1. **Timers**: Thực thi callbacks từ `setTimeout` và `setInterval` đã hết hạn
+2. **Pending Callbacks**: Xử lý I/O callbacks bị hoãn từ vòng trước (ví dụ: lỗi TCP)
+3. **Idle/Prepare**: Dùng nội bộ bởi libuv
+4. **Poll**: Phase quan trọng nhất — lấy I/O events mới từ OS và thực thi callbacks. Event loop dành phần lớn thời gian ở đây, chờ I/O hoàn thành
+5. **Check**: Thực thi callbacks từ `setImmediate()`
+6. **Close Callbacks**: Xử lý events đóng kết nối (`socket.on('close')`)
+
+**Giữa mỗi phase**, Node.js drain hai queue theo thứ tự:
+
+1. `process.nextTick()` queue (chạy trước)
+2. Microtask queue (Promise `.then()`, `queueMicrotask()`)
+
+### 2.3 Những khác biệt tinh tế dễ gây bug
+
+**`process.nextTick` chạy trước Promise:**
+
+```js
+process.nextTick(() => console.log('nextTick'))
+Promise.resolve().then(() => console.log('promise'))
+queueMicrotask(() => console.log('queueMicrotask'))
+// Node.js output:
+// nextTick
+// promise
+// queueMicrotask
+```
+
+`process.nextTick` không phải microtask — nó có queue riêng, luôn chạy trước microtask queue. Đây là quirk (đặc điểm riêng) của Node.js, không tồn tại trên browser.
+
+**`setTimeout` vs `setImmediate` — thứ tự không xác định:**
+
+```js
+setTimeout(() => console.log('timeout'), 0)
+setImmediate(() => console.log('immediate'))
+// Output: có thể "timeout" trước HOẶC "immediate" trước — KHÔNG XÁC ĐỊNH
+```
+
+Tại sao? Vì `setTimeout(fn, 0)` thực tế có delay tối thiểu ~1ms. Nếu event loop bắt đầu vòng mới trước khi timer hết hạn, `setImmediate` (phase Check) chạy trước. Nếu timer đã hết hạn khi vào phase Timers, `setTimeout` chạy trước.
+
+Nhưng **bên trong I/O callback**, thứ tự luôn xác định:
+
+```js
+const fs = require('fs')
+fs.readFile(__filename, () => {
+  setTimeout(() => console.log('timeout'), 0)
+  setImmediate(() => console.log('immediate'))
+  // Luôn: "immediate" trước "timeout"
+  // Vì sau I/O callback (phase Poll), phase Check chạy trước phase Timers của vòng tiếp
+})
+```
+
+**Nguy hiểm: `process.nextTick` starvation**
+
+```js
+function recursiveNextTick() {
+  process.nextTick(recursiveNextTick)
+}
+recursiveNextTick()
+// NGUY HIỂM: I/O callbacks KHÔNG BAO GIỜ được xử lý
+// vì nextTick queue drain TRƯỚC mọi phase
+```
+
+Nếu bạn gọi `process.nextTick` đệ quy, event loop bị "kẹt" — không bao giờ tiến sang phase tiếp theo, I/O bị đói (starve). Đây là lý do Node.js docs khuyến khích dùng `setImmediate()` thay vì `process.nextTick()` trong hầu hết trường hợp.
+
+---
+
+## 3. APIs và Global Objects — Nơi hai thế giới rẽ nhánh
+
+Engine cung cấp các built-in của ECMAScript: `Array`, `Promise`, `Map`, `Set`, `JSON`, `Math`... Tất cả đều giống nhau trên mọi runtime. Nhưng **mọi thứ khác** đến từ runtime.
+
+Nếu engine là ngôn ngữ, thì API là **bộ công cụ** trong xưởng của mỗi người. Browser có cọ vẽ và cửa kính (DOM, Canvas, fetch). Node.js có búa và khoan (fs, net, child_process).
+
+### 3.1 Browser Globals
+
+- **`window`** (hay `self`, `globalThis`): Global object chứa mọi thứ
+- **`document`** + DOM API: Cầu nối đến giao diện — `querySelector`, `createElement`, `addEventListener`
+- **`navigator`**: Thông tin trình duyệt, geolocation, clipboard, permissions
+- **`fetch`**: HTTP client
+- **Web Storage**: `localStorage`, `sessionStorage`, `IndexedDB`
+- **Đồ hoạ**: Canvas 2D, WebGL, WebGPU
+- **Real-time**: WebRTC, WebSocket
+- **Offline**: Service Workers, Cache API
+- **`performance`**: Đo timing chính xác
+
+### 3.2 Node.js Globals
+
+- **`global`** / **`globalThis`**: Global object
+- **`process`**: Thông tin process — `argv` (tham số dòng lệnh), `env` (biến môi trường), `exit()`, `stdin`/`stdout`/`stderr`, `memoryUsage()`, `cpuUsage()`
+- **`Buffer`**: Xử lý dữ liệu nhị phân (binary). Trước khi `TypedArray` chuẩn hoá, `Buffer` là cách duy nhất Node.js làm việc với binary data
+- **`__dirname`**, **`__filename`**: Đường dẫn file hiện tại (chỉ có trong CommonJS)
+- **Core modules**: `fs` (file system), `path` (đường dẫn), `os` (hệ điều hành), `net` (TCP sockets), `http`/`https` (HTTP server/client), `crypto` (mã hoá), `stream` (xử lý dữ liệu streaming), `child_process` (chạy process con), `cluster` (multi-process), `worker_threads` (multi-thread), `zlib` (nén/giải nén)
+
+### 3.3 Sự hội tụ
+
+Hai thế giới đang dần **hội tụ**. Nhiều API từng chỉ có ở browser giờ đã có trong Node.js:
+
+| API                                 | Browser | Node.js                |
+| ----------------------------------- | ------- | ---------------------- |
+| `fetch`                             | Từ đầu  | v18+ (stable)          |
+| `crypto.subtle` (Web Crypto)        | Từ đầu  | v15+                   |
+| `structuredClone`                   | Từ đầu  | v17+                   |
+| `AbortController`                   | Từ đầu  | v15+                   |
+| `URL` / `URLSearchParams`           | Từ đầu  | v10+                   |
+| `TextEncoder` / `TextDecoder`       | Từ đầu  | v11+                   |
+| `ReadableStream` / `WritableStream` | Từ đầu  | v16+ (Web Streams API) |
+| `Blob`                              | Từ đầu  | v18+                   |
+| `performance.now()`                 | Từ đầu  | v8+ (`perf_hooks`)     |
+| `globalThis`                        | ES2020  | ES2020                 |
+
+**WinterCG** (Web-interoperable Runtimes Community Group) là nỗ lực chuẩn hoá một tập API tối thiểu chung cho tất cả runtime: Node.js, Deno, Bun, Cloudflare Workers. Mục tiêu: viết một lần, chạy mọi nơi — ít nhất là cho phần không liên quan đến DOM hay file system.
+
+```js
+// Code này chạy trên CẢ browser VÀ Node.js 18+
+const response = await fetch('https://api.example.com/data')
+const data = await response.json()
+
+// Browser only — Node.js không có DOM
+document.getElementById('app').textContent = JSON.stringify(data)
+
+// Node.js only — browser không có file system
+import { writeFile } from 'node:fs/promises'
+await writeFile('data.json', JSON.stringify(data))
+```
+
+---
+
+## Tổng kết
+
+| Khía cạnh       | Browser                                           | Node.js                                    |
+| --------------- | ------------------------------------------------- | ------------------------------------------ |
+| **Engine**      | V8 (Chrome), SpiderMonkey (Firefox), JSC (Safari) | V8                                         |
+| **Event Loop**  | Macrotask → microtask → rAF → render              | 6 phase (libuv) + microtask giữa mỗi phase |
+| **Global**      | `window`, `document`                              | `global`, `process`, `Buffer`              |
+
+Hai "anh em" đã lớn lên, mỗi người trở thành chuyên gia trong lĩnh vực của mình. Browser xử lý giao diện, animation, tương tác user. Node.js xử lý server, CLI, build tools, real-time backend.
+
+Điểm giao nhau ngày càng nhiều: **SSR/SSG** (Next.js, Nuxt) chạy cùng code trên cả server và browser. **Edge runtimes** (Cloudflare Workers, Vercel Edge) là môi trường thứ ba — không hoàn toàn browser, không hoàn toàn Node.js, mà là tập con của cả hai.
+
+Hiểu rõ đâu là engine (giống nhau), đâu là runtime (khác nhau), và **tại sao** chúng khác — đó là nền tảng để bạn viết Javascript đúng cho từng môi trường, thay vì debug những bug "cùng code nhưng khác kết quả" mà không hiểu nguyên nhân.
