@@ -109,6 +109,10 @@ Node.js uses a C library called **libuv** to manage the event loop. Instead of a
 1. `process.nextTick()` queue (runs first)
 2. Microtask queue (Promise `.then()`, `queueMicrotask()`)
 
+In other words, the event loop repeats: **Timers → Pending → Idle/Prepare → Poll → Check → Close**. Between each phase transition, Node.js **fully drains** the nextTick queue first, then fully drains the microtask queue. This "inter-phase drain" mechanism is why `process.nextTick` always runs before Promises — and also why it can cause starvation if used carelessly.
+
+<NodejsEventLoopVisualizer />
+
 ### 2.3 Subtle Differences That Cause Bugs
 
 **`process.nextTick` runs before Promises:**

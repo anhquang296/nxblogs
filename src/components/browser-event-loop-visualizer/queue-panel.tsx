@@ -8,6 +8,8 @@ const QUEUE_COLORS: Record<string, { bg: string; border: string; dot: string }> 
   raf: { bg: 'bg-green-500/10', border: 'border-green-500/30', dot: 'bg-green-500' },
   callstack: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', dot: 'bg-amber-500' },
   webapi: { bg: 'bg-cyan-500/10', border: 'border-cyan-500/30', dot: 'bg-cyan-500' },
+  nexttick: { bg: 'bg-red-500/10', border: 'border-red-500/30', dot: 'bg-red-500' },
+  check: { bg: 'bg-indigo-500/10', border: 'border-indigo-500/30', dot: 'bg-indigo-500' },
 }
 
 export function QueuePanel({

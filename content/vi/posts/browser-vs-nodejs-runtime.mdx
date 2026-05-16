@@ -113,6 +113,10 @@ Node.js dùng thư viện C có tên **libuv** để quản lý event loop. Thay
 1. `process.nextTick()` queue (chạy trước)
 2. Microtask queue (Promise `.then()`, `queueMicrotask()`)
 
+Nói cách khác, event loop lặp lại vòng: **Timers → Pending → Idle/Prepare → Poll → Check → Close**. Giữa mỗi lần chuyển phase, Node.js **drain hoàn toàn** nextTick queue trước, sau đó drain hoàn toàn microtask queue. Chính cơ chế "drain giữa phase" này khiến `process.nextTick` luôn chạy trước Promise — và cũng là lý do nó có thể gây starvation nếu dùng không cẩn thận.
+
+<NodejsEventLoopVisualizer />
+
 ### 2.3 Những khác biệt tinh tế dễ gây bug
 
 **`process.nextTick` chạy trước Promise:**
