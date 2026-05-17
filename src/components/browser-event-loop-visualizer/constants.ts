@@ -22,11 +22,11 @@ export const PHASE_ARCS: {
   sublabelY: number
   textAnchor: 'inherit' | 'start' | 'middle' | 'end'
 }[] = [
-  { id: 'macrotask', dashArray: '248 757', dashOffset: '251', label: 'Macrotask', sublabel: 'setTimeout / click / fetch', labelX: 380, labelY: 25, sublabelX: 380, sublabelY: 45, textAnchor: 'middle' },
-  { id: 'microtask', dashArray: '198 807', dashOffset: '1005', label: 'Microtasks', sublabel: 'Promise / queueMicrotask', labelX: 450, labelY: 310, sublabelX: 450, sublabelY: 330, textAnchor: 'start' },
-  { id: 'raf', dashArray: '148 857', dashOffset: '804', label: 'rAF', sublabel: 'requestAnimationFrame', labelX: 240, labelY: 500, sublabelX: 240, sublabelY: 520, textAnchor: 'middle' },
-  { id: 'render', dashArray: '218 787', dashOffset: '653', label: 'Render', sublabel: 'Style → Layout → Paint', labelX: 50, labelY: 310, sublabelX: 50, sublabelY: 330, textAnchor: 'end' },
-  { id: 'idle', dashArray: '178 827', dashOffset: '432', label: 'Idle', sublabel: 'requestIdleCallback', labelX: 100, labelY: 25, sublabelX: 100, sublabelY: 45, textAnchor: 'middle' },
+  { id: 'macrotask', dashArray: '248 757', dashOffset: '251', label: 'Macrotask', sublabel: 'setTimeout / click / fetch', labelX: 470, labelY: 90, sublabelX: 470, sublabelY: 110, textAnchor: 'middle' },
+  { id: 'microtask', dashArray: '198 807', dashOffset: '1005', label: 'Microtasks', sublabel: 'Promise / queueMicrotask', labelX: 450, labelY: 350, sublabelX: 420, sublabelY: 370, textAnchor: 'start' },
+  { id: 'raf', dashArray: '148 857', dashOffset: '804', label: 'rAF', sublabel: 'requestAnimationFrame', labelX: 200, labelY: 470, sublabelX: 200, sublabelY: 490, textAnchor: 'middle' },
+  { id: 'render', dashArray: '218 787', dashOffset: '653', label: 'Render', sublabel: 'Style → Layout → Paint', labelX: 10, labelY: 310, sublabelX: 40, sublabelY: 330, textAnchor: 'end' },
+  { id: 'idle', dashArray: '178 827', dashOffset: '432', label: 'Idle', sublabel: 'requestIdleCallback', labelX: 100, labelY: 30, sublabelX: 100, sublabelY: 50, textAnchor: 'middle' },
 ]
 
 export const QUEUE_COLORS: Record<string, string> = {
