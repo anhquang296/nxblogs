@@ -1,9 +1,9 @@
-import type { MetadataRoute } from 'next'
 import { Folder, MdxFile, Meta, MetaJsonFile, PageMapItem } from 'nextra'
 import { getPageMap } from 'nextra/page-map'
 
 export const dynamic = 'force-static'
 
+const BASE_URL = 'https://stopjustcoding.com'
 const LOCALES = ['en', 'vi']
 
 interface SitemapEntry {
@@ -63,17 +63,14 @@ const parsePageMapItems = (items: PageMapItem[]): SitemapEntry[] => {
   const metaFile = items.find((item) => isMetaJsonFile(item))
   const metaData = (metaFile as MetaJsonFile | undefined)?.data ?? {}
 
-  const sitemapEntries: SitemapEntry[] = items
+  return items
     .filter((item) => !isMetaJsonFile(item))
     .flatMap((pageMapEntry) => toSitemapEntry(pageMapEntry, metaData))
-
-  return sitemapEntries
 }
 
-export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl = 'https://stopjustcoding.com'
-  const defaultLocale = 'en'
+const escapeXml = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
+export async function GET() {
   const routeTimestamps = new Map<string, string>()
 
   for (const locale of LOCALES) {
@@ -91,13 +88,50 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }
   }
 
-  return Array.from(routeTimestamps.entries()).map(([route, lastModified]) => ({
-    url: `${baseUrl}/${defaultLocale}${route}`,
-    lastModified,
-    changeFrequency: 'weekly' as const,
-    priority: route === '/' ? 1 : 0.8,
-    alternates: {
-      languages: Object.fromEntries(LOCALES.map((locale) => [locale, `${baseUrl}/${locale}${route}`])),
+  const TOOL_ROUTES = ['/tools/browser-event-loop-visualizer', '/tools/nodejs-event-loop-visualizer']
+
+  const localizedUrls = Array.from(routeTimestamps.entries())
+    .filter(([route]) => !route.startsWith('/tools'))
+    .flatMap(([route, lastModified]) => {
+      const alternates = LOCALES.map(
+        (locale) =>
+          `    <xhtml:link rel="alternate" hreflang="${locale}" href="${escapeXml(`${BASE_URL}/${locale}${route}`)}" />`
+      ).join('\n')
+
+      return LOCALES.map(
+        (locale) => `  <url>
+    <loc>${escapeXml(`${BASE_URL}/${locale}${route}`)}</loc>
+${alternates}
+    <lastmod>${lastModified}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>${route === '/' ? '1.0' : '0.8'}</priority>
+  </url>`
+      )
+    })
+    .join('\n')
+
+  const toolUrls = TOOL_ROUTES.map(
+    (route) => `  <url>
+    <loc>${escapeXml(`${BASE_URL}${route}`)}</loc>
+    <lastmod>${new Date().toISOString()}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>`
+  ).join('\n')
+
+  const urls = [localizedUrls, toolUrls].filter(Boolean).join('\n')
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="/sitemap.xsl"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+${urls}
+</urlset>`
+
+  return new Response(xml, {
+    headers: {
+      'Content-Type': 'application/xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600, s-maxage=86400',
     },
-  }))
+  })
 }
