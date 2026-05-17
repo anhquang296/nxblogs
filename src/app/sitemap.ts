@@ -71,7 +71,7 @@ const parsePageMapItems = (items: PageMapItem[]): SitemapEntry[] => {
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://yoursite.com'
+  const baseUrl = 'https://stopjustcoding.com'
 
   const allRoutes = new Set<string>()
   const latestModified = new Map<string, string>()
@@ -92,10 +92,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }
   }
 
-  return Array.from(allRoutes).map((route) => ({
-    url: `${baseUrl}${route}`,
-    lastModified: latestModified.get(route)!,
-    changeFrequency: 'weekly' as const,
-    priority: route === '/' ? 1 : 0.8,
-  }))
+  return Array.from(allRoutes).map((route) => {
+    const pathWithoutLocale = route.replace(/^\/(en|vi)/, '')
+
+    return {
+      url: `${baseUrl}${route}`,
+      lastModified: latestModified.get(route)!,
+      changeFrequency: 'weekly' as const,
+      priority: route === '/' ? 1 : 0.8,
+      alternates: {
+        languages: {
+          en: `${baseUrl}/en${pathWithoutLocale}`,
+          vi: `${baseUrl}/vi${pathWithoutLocale}`,
+        },
+      },
+    }
+  })
 }

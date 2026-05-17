@@ -25,7 +25,23 @@ export const generateStaticParams = generateStaticParamsFor('mdxPath', 'lang')
 export async function generateMetadata(props: PageProps): Promise<Metadata> {
   const params = await props.params
   const { metadata } = await importPage(params.mdxPath, params.lang)
-  return metadata
+  const path = params.mdxPath ? `/${params.mdxPath.join('/')}` : ''
+
+  return {
+    ...metadata,
+    alternates: {
+      canonical: `/${params.lang}${path}`,
+      languages: {
+        en: `/en${path}`,
+        vi: `/vi${path}`,
+      },
+    },
+    openGraph: {
+      title: (metadata.title as string) || undefined,
+      description: (metadata.description as string) || undefined,
+      type: 'article',
+    },
+  }
 }
 
 const Wrapper = getMDXComponents().wrapper

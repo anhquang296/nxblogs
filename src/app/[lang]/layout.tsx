@@ -11,7 +11,19 @@ import { Inter } from 'next/font/google'
 import type { ReactNode } from 'react'
 
 export const metadata: Metadata = {
-  title: 'Nextra Blog',
+  metadataBase: new URL('https://stopjustcoding.com'),
+  title: {
+    default: 'Stop Just Coding',
+    template: '%s | Stop Just Coding',
+  },
+  description: 'Technical blog covering AWS, DevOps, cloud architecture, and software engineering.',
+  openGraph: {
+    type: 'website',
+    siteName: 'Stop Just Coding',
+  },
+  twitter: {
+    card: 'summary_large_image',
+  },
 }
 
 const bodyFont = Inter({
