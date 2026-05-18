@@ -1,0 +1,425 @@
+---
+title: 'Apache Kafka: Deep Dive kiến trúc Event Streaming Platform xử lý hàng triệu events/giây'
+date: '2026-05-19'
+tags: ['Backend', 'System Design', 'Kafka']
+description: 'Deep dive kiến trúc Apache Kafka — broker internals, partition storage, consumer groups, replication, ZooKeeper sang KRaft, và tại sao Kafka nhanh: zero-copy, sequential I/O, batching.'
+enableComment: true
+---
+
+# Apache Kafka: Deep Dive kiến trúc Event Streaming Platform xử lý hàng triệu events/giây
+
+Bạn đang xây một hệ thống microservices. Service **Order** vừa tạo xong một đơn hàng, và bây giờ cần thông báo cho **Inventory** trừ kho, **Payment** thu tiền, **Notification** gửi email cho khách, **Analytics** ghi nhận sự kiện.
+
+Cách đơn giản nhất? Gọi HTTP trực tiếp từ Order đến từng service. Nhưng rồi chuyện xảy ra: Notification service đang deploy nên không phản hồi — Order service retry 3 lần, timeout, rồi trả lỗi 500 cho user. Khách hàng thấy "Đặt hàng thất bại" nhưng thực tế Inventory đã trừ kho, Payment đã thu tiền. Bạn vừa tạo ra một **inconsistency** mà phải mất hàng giờ để debug và reconcile.
+
+Vấn đề cốt lõi ở đây là **tight coupling** — Order service phải biết sự tồn tại và endpoint của từng downstream service, phải chờ từng service phản hồi, và nếu bất kỳ service nào chết thì cả chuỗi đổ theo. Thêm một service mới? Sửa code Order service. Service downstream chậm? Order service cũng chậm theo.
+
+Đây chính là bài toán mà **Apache Kafka** giải quyết. Thay vì gọi trực tiếp, Order service chỉ cần "ném" một event `order_created` vào Kafka. Các service downstream tự quyết định khi nào đọc và xử lý event đó. Order service không cần biết ai đang lắng nghe, không cần chờ ai phản hồi. Notification service đang deploy? Không sao — event vẫn nằm trong Kafka, khi nào Notification sống lại thì xử lý tiếp.
+
+Bài viết này sẽ đi sâu vào kiến trúc bên trong của Kafka — từ cách dữ liệu được lưu trữ trên disk, cách partition tạo nên sức mạnh song song hoá, cơ chế replication đảm bảo dữ liệu không mất, cho đến lý do vì sao Kafka có thể xử lý hàng triệu events mỗi giây.
+
+<ExcalidrawDiagram src="/kafka-architecture-overview.excalidraw" alt="Kafka Architecture Overview — Producers, Brokers, Partitions, Consumer Groups, KRaft" />
+
+---
+
+## 1. Kafka là gì?
+
+**Apache Kafka** là một **distributed event streaming platform** — nền tảng xử lý luồng sự kiện phân tán. Nói đơn giản, Kafka là một hệ thống trung gian cho phép các ứng dụng **gửi** (publish) và **nhận** (subscribe) các sự kiện theo thời gian thực, đồng thời **lưu trữ** những sự kiện đó một cách bền vững.
+
+Kafka được LinkedIn phát triển từ 2011 để giải quyết bài toán xử lý hàng tỷ events mỗi ngày — activity tracking, metrics, logs — khi mà các message queue truyền thống không còn đáp ứng được lượng traffic khổng lồ. Hiện tại LinkedIn xử lý hơn **7 nghìn tỷ messages mỗi ngày** qua Kafka.
+
+### Smart Consumer — Pull-based model
+
+Điểm khác biệt lớn nhất giữa Kafka và các message broker truyền thống như RabbitMQ nằm ở **"Who manages the routing and the state of the data"**.
+
+Với **RabbitMQ** (push-based model), **server sẽ làm việc đó**, broker nhận message từ producer, rồi chủ động đẩy message đến consumer mà nó chọn. Broker phải theo dõi trạng thái từng consumer, biết ai đang rảnh, ai đang bận, để phân phối message hợp lý. Điều này đặt toàn bộ "trí thông minh" lên phía server — vì thế gọi là **smart broker, dumb consumer**.
+
+Kafka đi ngược lại hoàn toàn: **consumer quyết định**. Kafka broker chỉ lưu trữ dữ liệu và phục vụ khi được hỏi. Consumer chủ động kéo (pull) dữ liệu từ broker khi sẵn sàng xử lý, tự quản lý vị trí đang đọc đến đâu. Đây là **smart consumer, dumb broker** — và chính sự đơn giản ở phía broker này cho phép Kafka scale đến mức cực lớn.
+
+| Tiêu chí | RabbitMQ | Kafka |
+|----------|----------|-------|
+| Delivery model | Push — server đẩy message đến consumer | Pull — consumer chủ động kéo message |
+| "Trí thông minh" | Smart broker, dumb consumer | Smart consumer, dumb broker |
+| Message sau khi consume | Bị xoá khỏi queue | Vẫn được lưu trữ (theo thời gian hoặc dung lượng) |
+| Ordering | Theo queue | Theo partition |
+| Primary use case | Task queue, request-reply | Event streaming, log aggregation |
+| Throughput | ~50K messages/giây | ~1M+ messages/giây |
+
+---
+
+## 2. Data flow tổng quan
+
+Trước khi đi sâu vào từng thành phần, hãy nhìn bức tranh toàn cảnh về cách dữ liệu di chuyển bên trong Kafka:
+
+<ExcalidrawDiagram src="/kafka-data-flow-overview.excalidraw" alt="Kafka Data Flow Overview" />
+
+Bốn khái niệm cốt lõi cần nắm:
+
+- **Producer** — ứng dụng gửi dữ liệu vào Kafka. Ví dụ: Order service gửi event `order_created`.
+- **Topic** — kênh logic để phân loại dữ liệu, giống như tên bảng trong database. Ví dụ: topic `orders`, topic `payments`.
+- **Partition** — mỗi topic sẽ được chia thành nhiều partition. Đây là đơn vị cho phép Kafka parallelism — mỗi partition là một **log file** tuần tự, chỉ cho phép ghi thêm vào cuối (append-only).
+- **Consumer Group** — một nhóm consumer phối hợp để xử lý dữ liệu từ topic. Mỗi partition trong topic chỉ được gán cho một consumer trong group. Nhưng 1 consumer có thể consume từ nhiều partition.
+
+Mỗi message khi được gửi đều kèm **partition key**, producer dùng chính partition key này đễ xác định message nên đi vào partition nào bằng công thức `hash(partition_key) % num_partitions`. Các message có cùng key sẽ luôn đi vào cùng một partition — đây là nền tảng của ordering guarantee mà chúng ta sẽ nói ở phần sau.
+
+Câu hỏi ở đây là, làm sao producer có thể nắm rõ Kafka cluster có bao nhiêu partition để thực hiện routing cho message ?
+
+```ts
+import { Kafka, CompressionTypes } from 'kafkajs';
+
+const kafka = new Kafka({
+  clientId: 'my-app',
+  brokers: ['broker1:9092', 'broker2:9092'],
+});
+
+const producer = kafka.producer({
+  idempotent: true,
+  maxInFlightRequests: 5,
+});
+
+await producer.connect();
+```
+
+Ví dụ khi khởi tạo producer, chỉ cần khai báo vài broker server trong Kafka cluster, producer sẽ khám cluster metadata trong quá trình bootstrap (cluster có bao nhiêu cluster, topic, partition). Khi đã có đầy đủ metadata, producer có thể tự tính toán được partition cho message.
+
+---
+
+## 3. Broker — Trái tim của Kafka Cluster
+
+### 3.1. Broker là gì?
+
+**Broker** là một server (hay process) trong Kafka cluster chịu trách nhiệm **nhận, lưu trữ, và phục vụ dữ liệu**. Mỗi broker là một instance chạy độc lập, có ID riêng, và host một số partition của các topic khác nhau.
+
+Một **Kafka cluster** bao gồm nhiều broker hoạt động cùng nhau — thường là **3 đến 5 broker**. Tại sao lại là số lẻ? Vì Kafka cần **bầu chọn controller** (giải thích ở phần 3.3), và với số lẻ, hệ thống dễ đạt được **quorum** (đa số) hơn. Ví dụ với 3 broker, chỉ cần 2/3 đồng ý là đủ quorum. Với 4 broker, bạn vẫn cần 3/4 đồng ý — thêm 1 broker nhưng khả năng chịu lỗi không tăng.
+
+### 3.2. Storage internals — Kafka lưu dữ liệu như thế nào?
+
+Khi message đến broker, nó được ghi xuống disk theo cấu trúc thư mục rất rõ ràng. Mỗi partition trên mỗi broker là một thư mục riêng:
+
+```
+/var/kafka-logs/
+├── orders-0/                    # Topic "orders", Partition 0
+│   ├── 00000000000000000000.log
+│   ├── 00000000000000000000.index
+│   └── 00000000000000000000.timeindex
+├── orders-1/                    # Topic "orders", Partition 1
+│   ├── 00000000000000000000.log
+│   ├── 00000000000000000000.index
+│   └── 00000000000000000000.timeindex
+└── payments-0/                  # Topic "payments", Partition 0
+    ├── 00000000000000000000.log
+    ├── 00000000000000000000.index
+    └── 00000000000000000000.timeindex
+```
+
+Tên file chính là **base offset** — offset của message đầu tiên trong segment đó. Khi segment đạt giới hạn kích thước (mặc định 1GB) hoặc thời gian, Kafka tạo segment mới:
+
+```
+/var/kafka-logs/orders-0/
+├── 00000000000000000000.log        # Segment 1: offset 0 → 15,234
+├── 00000000000000000000.index
+├── 00000000000000000000.timeindex
+├── 00000000000000015235.log        # Segment 2: offset 15,235 → ...
+├── 00000000000000015235.index
+└── 00000000000000015235.timeindex
+```
+
+Mỗi segment bao gồm ba file:
+
+| File | Chức năng | Cách hoạt động |
+|------|-----------|----------------|
+| `.log` | Lưu trữ dữ liệu message thực tế | Append-only — message mới luôn ghi vào cuối. Không bao giờ sửa hoặc xoá message ở giữa. |
+| `.index` | Ánh xạ **offset → vị trí byte** trong file `.log` | Sparse index — không lưu mọi offset, chỉ lưu mỗi N offset một entry. Khi cần tìm offset X, Kafka binary search trong `.index` để tìm entry gần nhất, rồi scan forward trong `.log`. |
+| `.timeindex` | Ánh xạ **timestamp → offset** | Cho phép consumer tìm message theo thời gian thay vì offset. Ví dụ: "đọc từ 14:00 hôm nay" → tìm offset tương ứng → đọc từ đó. |
+
+<ExcalidrawDiagram src="/kafka-broker-storage.excalidraw" alt="Kafka Broker Storage Structure" />
+
+Thiết kế này mang lại hai lợi ích lớn:
+
+1. **Ghi cực nhanh** — vì chỉ append vào cuối file, không cần random seek. Đây là **sequential I/O**, và chúng ta sẽ nói thêm ở phần "Tại sao Kafka nhanh".
+2. **Đọc hiệu quả** — sparse index giúp tìm bất kỳ message nào chỉ bằng binary search + short scan, thay vì duyệt toàn bộ log file.
+
+### 3.3. Controller — Bộ não điều phối cluster
+
+Trong mỗi cluster, **một broker** được bầu chọn làm **controller** — đóng vai trò như bộ não điều phối toàn bộ cluster. Controller chịu trách nhiệm:
+
+- **Heartbeat monitoring** — theo dõi trạng thái của từng broker. Nếu một broker ngừng gửi heartbeat (mặc định sau 10 giây), controller đánh dấu nó là "dead".
+- **Leader election** — khi broker chết và mang theo leader replica của một partition, controller chọn follower mới lên làm leader (chi tiết ở phần Replication).
+- **Cluster metadata management** — duy trì bản đồ: topic nào có bao nhiêu partition, partition nào nằm trên broker nào, ai là leader, ai là follower.
+- **Topic management** — xử lý các tác vụ quản trị như tạo, xoá, thay đổi cấu hình topic.
+- **Partition rebalance** — khi thêm broker mới vào cluster hoặc broker bị loại, controller phân phối lại partition để cân bằng tải.
+
+### 3.4. Từ ZooKeeper đến KRaft — Hành trình loại bỏ dependency bên ngoài
+
+Trong kiến trúc ban đầu, Kafka sử dụng **Apache ZooKeeper** — một dịch vụ phân tán bên ngoài — để làm hai việc:
+
+1. **Metadata store** — lưu trữ toàn bộ metadata của cluster: danh sách broker, topic, partition assignment, cấu hình.
+2. **Controller election** — bầu chọn controller từ danh sách các broker thông qua cơ chế **ephemeral node** của ZooKeeper.
+
+Vấn đề là ZooKeeper là một **hệ thống hoàn toàn riêng biệt** mà bạn phải triển khai, giám sát, và bảo trì song song với Kafka cluster. Một ZooKeeper ensemble thường cần 3-5 node riêng, có kiến trúc và cách vận hành khác hẳn Kafka. Đội vận hành phải hiểu hai hệ thống thay vì một. Ngoài ra, ZooKeeper trở thành **điểm nghẽn** khi cluster lớn lên — metadata updates phải đi qua ZooKeeper, và ZooKeeper không được thiết kế cho khối lượng metadata của các cluster hàng ngàn partition.
+
+<ExcalidrawDiagram src="/kafka-zookeeper-vs-kraft.excalidraw" alt="ZooKeeper vs KRaft Architecture" />
+
+Từ phiên bản 3.3+, Kafka giới thiệu **KRaft** (Kafka Raft) — một giao thức đồng thuận được tích hợp trực tiếp vào Kafka, loại bỏ hoàn toàn sự phụ thuộc vào ZooKeeper:
+
+- **Controller election** giờ dùng **Raft consensus protocol** — một thuật toán đồng thuận phân tán (distributed consensus algorithm) được thiết kế để đảm bảo một nhóm node luôn thống nhất về ai là leader, kể cả khi có node bị lỗi — thay vì ZooKeeper's ephemeral node.
+- **Metadata** được lưu trong một **internal topic** đặc biệt: `__cluster_metadata`. Mỗi thay đổi metadata là một event trong topic này, được replicate giống như bất kỳ topic nào khác.
+- **Kiến trúc đơn giản hơn** — chỉ cần quản lý Kafka cluster, không cần ZooKeeper ensemble riêng.
+
+ZooKeeper chính thức bị **deprecated** từ Kafka 3.5 và sẽ bị loại bỏ hoàn toàn trong các phiên bản tương lai. KRaft là tương lai.
+
+---
+
+## 4. Partition — Sức mạnh cốt lõi của Kafka
+
+### 4.1. Partition là gì và tại sao quan trọng?
+
+Nếu Kafka có một "siêu năng lực" thì đó chính là **partition**. Partition là cơ chế cho phép Kafka **song song hoá** việc đọc và ghi dữ liệu, và đây là lý do cốt lõi Kafka có thể scale đến hàng triệu messages mỗi giây.
+
+Hãy tưởng tượng một topic như một **đường cao tốc**. Nếu chỉ có **1 làn** (1 partition), tất cả xe (messages) phải xếp hàng — tốc độ bị giới hạn bởi capacity của 1 làn. Nhưng nếu bạn mở **4 làn** (4 partitions), 4 luồng xe có thể chạy song song — throughput tăng gần gấp 4 lần.
+
+Mỗi partition là một **ordered, immutable, append-only log**. Messages được gán một **offset** tăng dần (0, 1, 2, 3, ...) — giống như số thứ tự trong một quyển sổ. Offset này không bao giờ bị reuse hay thay đổi.
+
+### 4.2. Consumer Group — Phối hợp xử lý song song
+
+**Consumer Group** là một nhóm các consumer cùng đăng ký (subscribe) một topic và **phối hợp với nhau** để xử lý dữ liệu. Kafka tự động phân chia partition cho các consumer trong group — mỗi consumer nhận một tập partition riêng.
+
+Ví dụ: topic `orders` có 4 partitions, consumer group `order-processing` có 4 consumers:
+
+```
+Topic: orders (4 partitions)
+
+Consumer Group: order-processing
+├── Consumer 1 ← Partition 0
+├── Consumer 2 ← Partition 1
+├── Consumer 3 ← Partition 2
+└── Consumer 4 ← Partition 3
+```
+
+Mỗi consumer xử lý song song — throughput tổng = 4× throughput của 1 consumer.
+
+Nhưng nếu bạn có **6 consumers** cho **4 partitions** thì sao? 2 consumer sẽ **nhàn rỗi** — không được gán partition nào. Vì thế, số consumer trong group không nên vượt quá số partition.
+
+### 4.3. Quy tắc vàng: 1 partition — 1 consumer trong 1 group
+
+Đây là ràng buộc quan trọng nhất để hiểu Kafka: **trong cùng một consumer group, mỗi partition chỉ được gán cho đúng 1 consumer**.
+
+Tại sao? Vì mục đích của một group là các consumer trong đó xử lý **cùng một loại công việc**. Nếu 2 consumer trong cùng group cùng đọc 1 partition, sẽ xảy ra:
+
+- **Duplicate processing** — cùng một message bị xử lý 2 lần.
+- **Thứ tự sai lệch** — consumer A xử lý message 5 trước message 3, trong khi consumer B xử lý message 3 trước message 5. Không ai đảm bảo thứ tự đúng nữa.
+
+### 4.4. Một consumer phải xử lý mọi event type trong partition
+
+Điều này dẫn đến một hệ quả quan trọng: vì consumer consume theo **partition** chứ không phải theo key hay event type, nên **tất cả event types** trong partition đó đều phải được consumer xử lý.
+
+Ví dụ: partition 0 chứa cả `order_created`, `order_updated`, và `order_cancelled` (vì chúng có cùng partition key `order_id`). Consumer được gán partition 0 phải biết xử lý **cả 3 loại event** này. Bạn không thể nói "consumer này chỉ xử lý `order_created`" — Kafka không route theo event type ở mức partition.
+
+### 4.5. Cross-group consumption — Cùng event, nhiều mục đích
+
+Quy tắc "1 partition — 1 consumer" chỉ áp dụng **trong cùng một group**. Giữa các group khác nhau, cùng một event hoàn toàn có thể được xử lý bởi nhiều nơi.
+
+<ExcalidrawDiagram src="/kafka-partition-consumer-groups.excalidraw" alt="Kafka Partition and Consumer Groups" />
+
+Ví dụ với event `order_created`:
+
+```
+Topic: orders (3 partitions)
+
+Consumer Group: booking-service (3 consumers)
+├── Consumer 1 ← Partition 0    → Tạo đơn hàng, cập nhật kho
+├── Consumer 2 ← Partition 1    → Tạo đơn hàng, cập nhật kho
+└── Consumer 3 ← Partition 2    → Tạo đơn hàng, cập nhật kho
+
+Consumer Group: delivery-service (2 consumers)
+├── Consumer 1 ← Partition 0, 1 → Thông báo shipper có đơn mới
+└── Consumer 2 ← Partition 2    → Thông báo shipper có đơn mới
+
+Consumer Group: analytics-service (1 consumer)
+└── Consumer 1 ← Partition 0, 1, 2 → Ghi nhận metrics, dashboard
+```
+
+Ba group hoàn toàn **độc lập**: mỗi group có offset riêng, tốc độ xử lý riêng, logic riêng. Booking service xử lý chậm không ảnh hưởng đến delivery service. Đây chính là sức mạnh của mô hình **pub/sub** trong Kafka — producer publish một lần, nhiều consumer group subscribe và xử lý theo cách riêng của mình.
+
+---
+
+## 5. Replication — High Availability
+
+### 5.1. Leader và Follower Replica
+
+Nếu mỗi partition chỉ tồn tại trên **1 broker** duy nhất, khi broker đó chết, dữ liệu của partition sẽ **mất vĩnh viễn**. Để giải quyết, Kafka **nhân bản** (replicate) mỗi partition thành nhiều bản sao gọi là **replica**, rải rác trên các broker khác nhau.
+
+Mỗi partition có:
+- **1 Leader replica** — nhận toàn bộ read/write requests từ producer và consumer.
+- **N Follower replicas** — liên tục pull dữ liệu mới từ leader để đồng bộ. Follower không phục vụ client requests (trừ một số cấu hình đặc biệt).
+
+**Replication factor** quyết định tổng số replica. Ví dụ `replication.factor=3` nghĩa là mỗi partition có 1 leader + 2 followers, phân bổ trên 3 broker khác nhau:
+
+```
+Broker 1              Broker 2              Broker 3
+├── orders-0 (L)      ├── orders-0 (F)      ├── orders-0 (F)
+├── orders-1 (F)      ├── orders-1 (L)      ├── orders-1 (F)
+└── orders-2 (F)      └── orders-2 (F)      └── orders-2 (L)
+
+(L) = Leader, (F) = Follower
+```
+
+Nếu **Broker 2 chết**, cluster chỉ mất leader của `orders-1`. Controller nhanh chóng bầu follower trên Broker 1 hoặc Broker 3 lên làm leader mới — dữ liệu **không mất**, service **không gián đoạn** (chỉ có vài giây latency spike trong quá trình chuyển giao).
+
+### 5.2. In-Sync Replicas (ISR) — Cơ chế đồng bộ giữa các replica
+
+Không phải mọi follower đều đáng tin cậy ở mọi thời điểm. Một follower có thể bị lag vì network chậm, disk bottleneck, hoặc đang restart. Kafka theo dõi danh sách **ISR (In-Sync Replicas)** — tập hợp các replica (bao gồm leader) đã đồng bộ dữ liệu đến gần nhất.
+
+Một follower bị loại khỏi ISR khi nó **lag quá xa** so với leader (cấu hình bởi `replica.lag.time.max.ms`, mặc định 30 giây). Khi follower bắt kịp, nó được thêm lại vào ISR.
+
+ISR quan trọng vì nó quyết định **mức độ an toàn** của dữ liệu thông qua cờ `acks` của producer:
+
+<ExcalidrawDiagram src="/kafka-replication.excalidraw" alt="Kafka Replication and ISR" />
+
+| `acks` | Hành vi | Độ bền dữ liệu | Latency |
+|--------|---------|-----------------|---------|
+| `0` | Producer gửi xong là quên — không chờ broker xác nhận | Thấp nhất — message có thể mất nếu broker chết trước khi ghi | Thấp nhất |
+| `1` | Chờ **leader** xác nhận đã ghi | Trung bình — mất nếu leader chết trước khi follower kịp đồng bộ | Trung bình |
+| `all` | Chờ **tất cả ISR replicas** xác nhận đã ghi | Cao nhất — chỉ mất khi toàn bộ ISR cùng chết đồng thời | Cao nhất |
+
+Trong production, `acks=all` kết hợp với `min.insync.replicas=2` là cấu hình phổ biến. Điều này đảm bảo: mỗi message phải được ghi trên **ít nhất 2 replica** trước khi producer nhận được xác nhận thành công. Nếu chỉ còn 1 replica sống, broker sẽ từ chối write để bảo vệ tính toàn vẹn dữ liệu.
+
+### 5.3. Leader election khi broker chết
+
+Khi controller phát hiện broker chết (qua heartbeat timeout):
+
+1. Controller xác định các partition mà broker đó đang giữ **leader role**.
+2. Với mỗi partition, controller chọn **một follower từ danh sách ISR** để promote lên làm leader mới.
+3. Controller cập nhật metadata và thông báo cho tất cả broker khác.
+4. Producer và consumer nhận metadata mới, chuyển sang giao tiếp với leader mới.
+
+Toàn bộ quá trình này diễn ra trong **vài giây**. Nếu ISR rỗng (tất cả follower đều lag), Kafka có 2 lựa chọn tuỳ cấu hình `unclean.leader.election.enable`:
+- `false` (mặc định): partition **offline** cho đến khi có ISR member sống lại — **ưu tiên consistency**.
+- `true`: cho phép follower ngoài ISR lên làm leader — **ưu tiên availability** nhưng có thể mất dữ liệu.
+
+---
+
+## 6. Offset — Bộ nhớ của Consumer
+
+### 6.1. Offset là gì?
+
+Mỗi message trong partition được gán một **offset** — số nguyên tăng dần, bắt đầu từ 0. Offset chính là "vị trí đọc" của consumer trong partition log, giống như bookmark đánh dấu trang bạn đang đọc trong sách.
+
+```
+Partition 0:
+┌────┬────┬────┬────┬────┬────┬────┬────┐
+│  0 │  1 │  2 │  3 │  4 │  5 │  6 │  7 │  ← Offset
+└────┴────┴────┴────┴────┴────┴────┴────┘
+                          ↑
+                    Consumer đã xử lý đến offset 4
+                    → Committed offset = 4
+                    → Lần poll tiếp theo sẽ đọc từ offset 5
+```
+
+### 6.2. Offset storage — Từ ZooKeeper đến `__consumer_offsets`
+
+Trước đây, offset được lưu trên **ZooKeeper**. Nhưng với hàng ngàn consumer groups và hàng chục ngàn partitions, lượng read/write offset vào ZooKeeper trở nên quá lớn, gây bottleneck.
+
+Giải pháp: Kafka chuyển offset storage vào một **internal topic** đặc biệt: `__consumer_offsets`. Mỗi khi consumer commit offset, nó gửi một message vào topic này với key là `(group_id, topic, partition)` và value là offset number. Topic `__consumer_offsets` được replicate và compacted như bất kỳ topic nào khác — nghĩa là Kafka "dùng chính mình" để lưu trữ metadata.
+
+### 6.3. Consumer tự quản lý offset
+
+Consumer quyết định **khi nào** commit offset, và đây là lựa chọn thiết kế quan trọng:
+
+- **Auto-commit** (`enable.auto.commit=true`): Kafka tự động commit offset theo interval (mặc định 5 giây). Đơn giản nhưng rủi ro: nếu consumer crash sau khi auto-commit nhưng trước khi xử lý xong message → message bị "mất" (không được xử lý lại).
+- **Manual commit**: Consumer commit sau khi xử lý xong. An toàn hơn nhưng nếu crash sau xử lý nhưng trước commit → message bị xử lý lại (duplicate). Đây là **at-least-once delivery** — chiến lược phổ biến nhất trong production.
+
+Khi consumer chết và restart (hoặc khi có rebalance trong group), Kafka tra cứu `__consumer_offsets` để biết offset cuối cùng đã commit, rồi bắt đầu đọc từ vị trí tiếp theo. Consumer không cần nhớ gì — Kafka nhớ hộ.
+
+Consumer cũng hoàn toàn linh hoạt trong cách query dữ liệu: nó có thể lưu offset riêng ở memory, database, hoặc bất kỳ đâu phù hợp với use case — miễn là offset được commit lại Kafka để cluster biết vị trí cuối cùng khi cần recovery.
+
+---
+
+## 7. Tại sao Kafka nhanh?
+
+Đến đây bạn đã hiểu kiến trúc Kafka — broker, partition, replication, consumer group. Nhưng câu hỏi lớn vẫn còn: **tại sao Kafka có thể xử lý hàng triệu messages mỗi giây** trong khi các hệ thống khác chật vật với vài chục ngàn?
+
+Câu trả lời nằm ở ba kỹ thuật tối ưu hoá ở tầng rất thấp (low-level) mà Kafka khai thác triệt để.
+
+### 7.1. Sequential I/O — Khi disk nhanh gần bằng network
+
+Ấn tượng phổ biến: "disk chậm, RAM nhanh". Đúng — nhưng chỉ đúng với **random I/O** (đọc/ghi ngẫu nhiên). Với **sequential I/O** (đọc/ghi tuần tự), disk hiện đại có throughput cực kỳ ấn tượng:
+
+| Thao tác | Throughput (ước tính) |
+|----------|----------------------|
+| Random disk read/write | ~100-200 IOPS → vài MB/s |
+| Sequential disk read/write (SSD) | 500-3,000 MB/s |
+| Network (10GbE) | ~1,200 MB/s |
+| RAM random access | ~10,000-50,000 MB/s |
+
+Sequential disk I/O trên SSD có thể **nhanh hơn cả network**. Và Kafka được thiết kế từ đầu để tận dụng điều này:
+
+- Message được **append-only** vào cuối partition log — không bao giờ random seek.
+- Consumer đọc **tuần tự** từ offset → tận dụng tối đa **OS page cache** (hệ điều hành tự cache dữ liệu đọc tuần tự vào RAM).
+- Kafka **không quản lý cache riêng** ở tầng application — thay vào đó tin tưởng OS page cache. Điều này có nghĩa Kafka sử dụng **toàn bộ RAM còn trống** của máy làm cache, mà không cần quản lý hay invalidation logic.
+
+Database truyền thống phải random seek đến đúng row, đọc index, nhảy đến data page — mỗi thao tác là một disk seek tốn ~10ms trên HDD. Kafka chỉ cần append và read forward — zero seek overhead.
+
+### 7.2. Zero-copy — Loại bỏ overhead copy dữ liệu
+
+Khi consumer request dữ liệu, Kafka cần đọc từ disk và gửi qua network. Trong cách thông thường, dữ liệu phải đi qua **4 lần copy** và **2 lần context switch** (chuyển đổi giữa kernel mode và user mode):
+
+```
+[Truyền thống — 4 copies]
+Disk → Kernel Buffer (copy 1) → User Buffer (copy 2)
+→ Socket Buffer (copy 3) → NIC Buffer (copy 4)
+    ↑ context switch          ↑ context switch
+```
+
+Kafka sử dụng **`sendfile()` system call** (trên Linux) để loại bỏ hoàn toàn bước copy qua user space:
+
+```
+[Zero-copy — 2 copies]
+Disk → Kernel Buffer (copy 1) → NIC Buffer (copy 2)
+              ↓
+    Dữ liệu KHÔNG BAO GIỜ đi qua application
+```
+
+<ExcalidrawDiagram src="/kafka-zero-copy.excalidraw" alt="Traditional vs Zero-copy Data Transfer" />
+
+Kết quả: **giảm ~60% CPU usage** cho data transfer. Đây là lý do Kafka broker có thể phục vụ hàng GB dữ liệu mỗi giây mà CPU vẫn nhàn rỗi — vì nó gần như không "chạm" vào dữ liệu. Kafka không serialize/deserialize message ở tầng broker — nó nhận bytes từ producer và gửi nguyên bytes đó cho consumer. Broker coi message là **opaque bytes** (dữ liệu mờ — broker không hiểu nội dung bên trong), chỉ lưu và chuyển tiếp.
+
+Đây là điều mà message broker như RabbitMQ không làm được, vì RabbitMQ dùng smart broker, dữ liệu cần được serialize tại broker để định tuyến dữ liệu đến consumer.
+
+### 7.3. Batching và Compression — Gom và nén
+
+Thay vì gửi từng message riêng lẻ, Kafka **gom nhiều messages thành một batch** trước khi gửi qua network:
+
+- **Producer-side batching**: producer tích luỹ messages trong bộ nhớ (theo `batch.size` hoặc `linger.ms`), rồi gửi cả batch trong 1 request. Một network round trip phục vụ hàng trăm đến hàng ngàn messages, amortize chi phí TCP/TLS handshake.
+- **Compression tại batch level**: toàn bộ batch được nén bằng codec (Snappy, LZ4, Zstd) trước khi gửi. Broker **lưu batch ở dạng nén** trên disk — không decompress. Consumer nhận batch nén, decompress một lần duy nhất.
+
+| Codec | Tốc độ nén | Tỉ lệ nén | Khi nào dùng |
+|-------|-----------|-----------|--------------|
+| Snappy | Rất nhanh | Trung bình (~2x) | Ưu tiên latency thấp |
+| LZ4 | Nhanh | Trung bình (~2.5x) | Balance tốt giữa tốc độ và tỉ lệ nén |
+| Zstd | Trung bình | Cao (~3-4x) | Ưu tiên tiết kiệm bandwidth/storage |
+
+Kết hợp cả ba kỹ thuật:
+
+| Kỹ thuật | Loại bỏ | Impact |
+|----------|---------|--------|
+| Sequential I/O | Random disk seeks | Throughput ghi/đọc tăng 100x+ so với random |
+| Zero-copy | User-space copies + context switches | Giảm ~60% CPU cho data transfer |
+| Batching | Per-message network overhead | Amortize chi phí TCP/TLS cho hàng ngàn messages |
+| Compression | Bandwidth tiêu thụ | Giảm 2-4x dữ liệu truyền qua network |
+
+Không có "magic" nào ở đây — Kafka nhanh vì nó **loại bỏ overhead ở mọi tầng**: disk access dùng sequential I/O, data transfer dùng zero-copy, network dùng batching, bandwidth dùng compression. Mỗi kỹ thuật đơn lẻ không mới, nhưng kết hợp lại thì tạo nên throughput vượt trội.
+
+---
+
+## Tổng kết
+
+Kafka không phải là một message queue đơn thuần — nó là một **distributed commit log** được thiết kế cho throughput lớn và durability cao. Sức mạnh của Kafka đến từ sự kết hợp giữa:
+
+- **Partition** — đơn vị song song hoá, cho phép scale throughput tuyến tính bằng cách thêm partition và consumer.
+- **Consumer Group** — cơ chế phân phối công việc tự động, cho phép nhiều hệ thống độc lập tiêu thụ cùng một dòng dữ liệu.
+- **Replication** — đảm bảo dữ liệu sống sót qua failure thông qua leader-follower model với ISR.
+- **Storage design** — append-only log + sparse index + segment rotation, tận dụng triệt để sequential I/O.
+- **Zero-copy + Batching + Compression** — ba kỹ thuật low-level loại bỏ overhead ở mọi tầng.
+
+Khi bạn nhìn vào hệ thống của LinkedIn xử lý **7 nghìn tỷ messages mỗi ngày**, hay Uber quản lý hàng triệu chuyến xe real-time qua Kafka — bạn hiểu đây không phải là kết quả của một feature đơn lẻ nào, mà là kết quả của rất nhiều quyết định thiết kế đúng đắn ở mọi tầng kiến trúc.

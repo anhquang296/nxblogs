@@ -1,0 +1,425 @@
+---
+title: 'Apache Kafka: Deep Dive into the Event Streaming Platform That Handles Millions of Events per Second'
+date: '2026-05-19'
+tags: ['Backend', 'System Design', 'Kafka']
+description: 'Deep dive into Apache Kafka architecture — broker internals, partition storage, consumer groups, replication, ZooKeeper to KRaft migration, and why Kafka is fast: zero-copy, sequential I/O, batching.'
+enableComment: true
+---
+
+# Apache Kafka: Deep Dive into the Event Streaming Platform That Handles Millions of Events per Second
+
+You're building a microservices system. The **Order** service just created a new order, and now it needs to notify **Inventory** to deduct stock, **Payment** to charge the customer, **Notification** to send a confirmation email, and **Analytics** to record the event.
+
+The simplest approach? Call each service directly via HTTP from the Order service. But then things go wrong: the Notification service is being deployed and isn't responding — the Order service retries 3 times, times out, and returns a 500 error to the user. The customer sees "Order failed," but in reality, Inventory already deducted stock and Payment already charged them. You've just created an **inconsistency** that takes hours to debug and reconcile.
+
+The core issue here is **tight coupling** — the Order service has to know the existence and endpoint of every downstream service, wait for each one to respond, and if any service goes down, the entire chain collapses. Adding a new service? Modify the Order service code. A downstream service is slow? The Order service slows down too.
+
+This is exactly the problem that **Apache Kafka** solves. Instead of calling services directly, the Order service simply "throws" an `order_created` event into Kafka. Downstream services decide on their own when to read and process that event. The Order service doesn't need to know who's listening or wait for anyone to respond. Notification service is being deployed? No problem — the event stays in Kafka, and when Notification comes back up, it picks up right where it left off.
+
+This post will dive deep into Kafka's internal architecture — from how data is stored on disk, how partitions enable parallelism, how replication ensures data isn't lost, to why Kafka can process millions of events per second.
+
+<ExcalidrawDiagram src="/kafka-architecture-overview.excalidraw" alt="Kafka Architecture Overview — Producers, Brokers, Partitions, Consumer Groups, KRaft" />
+
+---
+
+## 1. What is Kafka?
+
+**Apache Kafka** is a **distributed event streaming platform** — a system for processing event streams in a distributed fashion. In simple terms, Kafka is a middleware that allows applications to **publish** and **subscribe** to events in real time, while also **storing** those events durably.
+
+Kafka was developed at LinkedIn starting in 2011 to solve the challenge of processing billions of events per day — activity tracking, metrics, logs — when traditional message queues couldn't keep up. Today, LinkedIn processes over **7 trillion messages per day** through Kafka.
+
+### Smart Consumer — Pull-based Model
+
+The biggest difference between Kafka and traditional message brokers like RabbitMQ lies in **"Who manages the routing and the state of the data"**.
+
+With **RabbitMQ** (push-based model), the **server decides**: the broker receives a message from the producer, then actively pushes it to the consumer it chooses. The broker must track each consumer's state — who's free, who's busy — to distribute messages appropriately. This puts all the "intelligence" on the server side — hence the term **smart broker, dumb consumer**.
+
+Kafka takes the completely opposite approach: the **consumer decides**. The Kafka broker simply stores data and serves it when asked. Consumers actively pull data from the broker when they're ready to process, managing their own read positions. This is the **smart consumer, dumb broker** model — and it's precisely this simplicity on the broker side that allows Kafka to scale to massive levels.
+
+| Criteria | RabbitMQ | Kafka |
+|----------|----------|-------|
+| Delivery model | Push — server pushes messages to consumers | Pull — consumers actively pull messages |
+| "Intelligence" | Smart broker, dumb consumer | Smart consumer, dumb broker |
+| Message after consumption | Deleted from queue | Still stored (based on time or size retention) |
+| Ordering | Per queue | Per partition |
+| Primary use case | Task queue, request-reply | Event streaming, log aggregation |
+| Throughput | ~50K messages/sec | ~1M+ messages/sec |
+
+---
+
+## 2. Data Flow Overview
+
+Before diving into each component, let's look at the big picture of how data flows through Kafka:
+
+<ExcalidrawDiagram src="/kafka-data-flow-overview.excalidraw" alt="Kafka Data Flow Overview" />
+
+Four core concepts to understand:
+
+- **Producer** — the application that sends data to Kafka. For example: the Order service sends an `order_created` event.
+- **Topic** — a logical channel for categorizing data, similar to a table name in a database. For example: topic `orders`, topic `payments`.
+- **Partition** — each topic is split into multiple partitions. This is Kafka's unit of parallelism — each partition is a sequential **log file** that only allows appending to the end (append-only).
+- **Consumer Group** — a group of consumers that coordinate to process data from a topic. Each partition in the topic is assigned to only one consumer within the group. However, a single consumer can consume from multiple partitions.
+
+When a producer sends a message, Kafka uses the **partition key** (specified by the producer) to determine which partition the message goes to. Specifically, Kafka hashes the partition key and takes the modulo with the number of partitions: `hash(key) % num_partitions`. Messages with the same key always go to the same partition — this is the foundation of the ordering guarantee we'll discuss later.
+
+The question here is: how does the producer know how many partitions the Kafka cluster has in order to route messages?
+
+```ts
+import { Kafka, CompressionTypes } from 'kafkajs';
+
+const kafka = new Kafka({
+  clientId: 'my-app',
+  brokers: ['broker1:9092', 'broker2:9092'],
+});
+
+const producer = kafka.producer({
+  idempotent: true,
+  maxInFlightRequests: 5,
+});
+
+await producer.connect();
+```
+
+When initializing a producer, you only need to declare a few broker addresses in the Kafka cluster. The producer will discover the cluster metadata during the bootstrap process (how many brokers, topics, and partitions the cluster has). Once it has the full metadata, the producer can compute the target partition for each message on its own.
+
+---
+
+## 3. Broker — The Heart of the Kafka Cluster
+
+### 3.1. What is a Broker?
+
+A **broker** is a server (or process) in the Kafka cluster responsible for **receiving, storing, and serving data**. Each broker is an independently running instance with its own ID, hosting a subset of partitions from various topics.
+
+A **Kafka cluster** consists of multiple brokers working together — typically **3 to 5 brokers**. Why an odd number? Because Kafka needs to **elect a controller** (explained in section 3.3), and with an odd number, the system can more easily reach **quorum** (majority). For example, with 3 brokers, only 2 out of 3 need to agree for quorum. With 4 brokers, you still need 3 out of 4 to agree — adding 1 broker but gaining no additional fault tolerance.
+
+### 3.2. Storage Internals — How Does Kafka Store Data?
+
+When a message arrives at a broker, it's written to disk following a very clear directory structure. Each partition on each broker has its own directory:
+
+```
+/var/kafka-logs/
+├── orders-0/                    # Topic "orders", Partition 0
+│   ├── 00000000000000000000.log
+│   ├── 00000000000000000000.index
+│   └── 00000000000000000000.timeindex
+├── orders-1/                    # Topic "orders", Partition 1
+│   ├── 00000000000000000000.log
+│   ├── 00000000000000000000.index
+│   └── 00000000000000000000.timeindex
+└── payments-0/                  # Topic "payments", Partition 0
+    ├── 00000000000000000000.log
+    ├── 00000000000000000000.index
+    └── 00000000000000000000.timeindex
+```
+
+The file name is the **base offset** — the offset of the first message in that segment. When a segment reaches its size limit (default 1GB) or time limit, Kafka creates a new segment:
+
+```
+/var/kafka-logs/orders-0/
+├── 00000000000000000000.log        # Segment 1: offset 0 → 15,234
+├── 00000000000000000000.index
+├── 00000000000000000000.timeindex
+├── 00000000000000015235.log        # Segment 2: offset 15,235 → ...
+├── 00000000000000015235.index
+└── 00000000000000015235.timeindex
+```
+
+Each segment consists of three files:
+
+| File | Purpose | How it works |
+|------|---------|--------------|
+| `.log` | Stores the actual message data | Append-only — new messages are always written to the end. Messages in the middle are never modified or deleted. |
+| `.index` | Maps **offset to byte position** in the `.log` file | Sparse index — doesn't store every offset, only saves an entry every N offsets. When looking for offset X, Kafka binary searches the `.index` to find the nearest entry, then scans forward in the `.log`. |
+| `.timeindex` | Maps **timestamp to offset** | Allows consumers to find messages by time instead of offset. For example: "read from 2:00 PM today" translates to finding the corresponding offset, then reading from there. |
+
+<ExcalidrawDiagram src="/kafka-broker-storage.excalidraw" alt="Kafka Broker Storage Structure" />
+
+This design provides two major benefits:
+
+1. **Extremely fast writes** — because it only appends to the end of a file, no random seeks needed. This is **sequential I/O**, and we'll discuss it more in the "Why is Kafka fast" section.
+2. **Efficient reads** — the sparse index enables finding any message with just a binary search + short scan, instead of scanning the entire log file.
+
+### 3.3. Controller — The Brain That Orchestrates the Cluster
+
+Within each cluster, **one broker** is elected as the **controller** — serving as the brain that orchestrates the entire cluster. The controller is responsible for:
+
+- **Heartbeat monitoring** — tracking the status of each broker. If a broker stops sending heartbeats (default after 10 seconds), the controller marks it as "dead."
+- **Leader election** — when a broker dies and takes the leader replica of a partition with it, the controller promotes a new follower to leader (details in the Replication section).
+- **Cluster metadata management** — maintaining the map of which topic has how many partitions, which partition lives on which broker, who is leader, and who is follower.
+- **Topic management** — handling administrative operations like creating, deleting, and modifying topic configurations.
+- **Partition rebalance** — when a new broker joins the cluster or a broker is removed, the controller redistributes partitions to balance the load.
+
+### 3.4. From ZooKeeper to KRaft — The Journey to Remove an External Dependency
+
+In the original architecture, Kafka used **Apache ZooKeeper** — an external distributed service — for two things:
+
+1. **Metadata store** — storing all cluster metadata: broker list, topics, partition assignments, configurations.
+2. **Controller election** — electing the controller from the list of brokers through ZooKeeper's **ephemeral node** mechanism.
+
+The problem was that ZooKeeper is a **completely separate system** that you had to deploy, monitor, and maintain alongside the Kafka cluster. A ZooKeeper ensemble typically requires 3-5 dedicated nodes, with a completely different architecture and operational model from Kafka. Operations teams had to understand two systems instead of one. Additionally, ZooKeeper became a **bottleneck** as clusters grew — metadata updates had to go through ZooKeeper, and ZooKeeper wasn't designed for the metadata volume of clusters with thousands of partitions.
+
+<ExcalidrawDiagram src="/kafka-zookeeper-vs-kraft.excalidraw" alt="ZooKeeper vs KRaft Architecture" />
+
+Starting with version 3.3+, Kafka introduced **KRaft** (Kafka Raft) — a consensus protocol integrated directly into Kafka, completely eliminating the dependency on ZooKeeper:
+
+- **Controller election** now uses the **Raft consensus protocol** — a distributed consensus algorithm designed to ensure a group of nodes always agrees on who is the leader, even when nodes fail — instead of ZooKeeper's ephemeral nodes.
+- **Metadata** is stored in a special **internal topic**: `__cluster_metadata`. Each metadata change is an event in this topic, replicated just like any other topic.
+- **Simpler architecture** — you only need to manage the Kafka cluster, no separate ZooKeeper ensemble required.
+
+ZooKeeper was officially **deprecated** starting with Kafka 3.5 and will be fully removed in future versions. KRaft is the future.
+
+---
+
+## 4. Partition — Kafka's Core Superpower
+
+### 4.1. What is a Partition and Why Does it Matter?
+
+If Kafka has one "superpower," it's **partitions**. Partitions are the mechanism that allows Kafka to **parallelize** reads and writes, and this is the core reason Kafka can scale to millions of messages per second.
+
+Think of a topic as a **highway**. If there's only **1 lane** (1 partition), all vehicles (messages) have to queue up — throughput is limited by the capacity of a single lane. But if you open **4 lanes** (4 partitions), 4 streams of traffic can flow in parallel — throughput increases nearly 4x.
+
+Each partition is an **ordered, immutable, append-only log**. Messages are assigned a monotonically increasing **offset** (0, 1, 2, 3, ...) — like a sequence number in a ledger. This offset is never reused or changed.
+
+### 4.2. Consumer Group — Coordinating Parallel Processing
+
+A **Consumer Group** is a set of consumers that subscribe to a topic and **coordinate with each other** to process data. Kafka automatically distributes partitions among consumers in the group — each consumer receives its own set of partitions.
+
+For example: topic `orders` has 4 partitions, consumer group `order-processing` has 4 consumers:
+
+```
+Topic: orders (4 partitions)
+
+Consumer Group: order-processing
+├── Consumer 1 ← Partition 0
+├── Consumer 2 ← Partition 1
+├── Consumer 3 ← Partition 2
+└── Consumer 4 ← Partition 3
+```
+
+Each consumer processes in parallel — total throughput = 4x the throughput of a single consumer.
+
+But what if you have **6 consumers** for **4 partitions**? 2 consumers will be **idle** — not assigned to any partition. That's why the number of consumers in a group should not exceed the number of partitions.
+
+### 4.3. The Golden Rule: 1 Partition — 1 Consumer per Group
+
+This is the most important constraint to understand in Kafka: **within the same consumer group, each partition is assigned to exactly 1 consumer**.
+
+Why? Because the purpose of a group is for its consumers to handle **the same type of work**. If 2 consumers in the same group both read from 1 partition, you'd get:
+
+- **Duplicate processing** — the same message gets processed twice.
+- **Broken ordering** — consumer A processes message 5 before message 3, while consumer B processes message 3 before message 5. No one can guarantee correct ordering anymore.
+
+### 4.4. A Consumer Must Handle All Event Types in Its Partition
+
+This leads to an important consequence: since consumers consume by **partition** rather than by key or event type, **all event types** in that partition must be handled by the assigned consumer.
+
+For example: partition 0 contains `order_created`, `order_updated`, and `order_cancelled` events (because they share the same partition key `order_id`). The consumer assigned to partition 0 must know how to handle **all 3 event types**. You can't say "this consumer only handles `order_created`" — Kafka doesn't route by event type at the partition level.
+
+### 4.5. Cross-group Consumption — Same Event, Multiple Purposes
+
+The "1 partition — 1 consumer" rule only applies **within the same group**. Across different groups, the same event can be processed by multiple places.
+
+<ExcalidrawDiagram src="/kafka-partition-consumer-groups.excalidraw" alt="Kafka Partition and Consumer Groups" />
+
+For example with the `order_created` event:
+
+```
+Topic: orders (3 partitions)
+
+Consumer Group: booking-service (3 consumers)
+├── Consumer 1 ← Partition 0    → Create order, update inventory
+├── Consumer 2 ← Partition 1    → Create order, update inventory
+└── Consumer 3 ← Partition 2    → Create order, update inventory
+
+Consumer Group: delivery-service (2 consumers)
+├── Consumer 1 ← Partition 0, 1 → Notify shipper of new order
+└── Consumer 2 ← Partition 2    → Notify shipper of new order
+
+Consumer Group: analytics-service (1 consumer)
+└── Consumer 1 ← Partition 0, 1, 2 → Record metrics, update dashboard
+```
+
+The three groups are completely **independent**: each group has its own offsets, processing speed, and logic. The booking service processing slowly doesn't affect the delivery service. This is the power of the **pub/sub** model in Kafka — the producer publishes once, and multiple consumer groups subscribe and process in their own way.
+
+---
+
+## 5. Replication — High Availability
+
+### 5.1. Leader and Follower Replicas
+
+If each partition existed on only **1 broker**, when that broker dies, the partition's data would be **permanently lost**. To solve this, Kafka **replicates** each partition into multiple copies called **replicas**, spread across different brokers.
+
+Each partition has:
+- **1 Leader replica** — handles all read/write requests from producers and consumers.
+- **N Follower replicas** — continuously pull new data from the leader to stay in sync. Followers don't serve client requests (except in certain special configurations).
+
+The **replication factor** determines the total number of replicas. For example, `replication.factor=3` means each partition has 1 leader + 2 followers, distributed across 3 different brokers:
+
+```
+Broker 1              Broker 2              Broker 3
+├── orders-0 (L)      ├── orders-0 (F)      ├── orders-0 (F)
+├── orders-1 (F)      ├── orders-1 (L)      ├── orders-1 (F)
+└── orders-2 (F)      └── orders-2 (F)      └── orders-2 (L)
+
+(L) = Leader, (F) = Follower
+```
+
+If **Broker 2 goes down**, the cluster only loses the leader for `orders-1`. The controller quickly promotes a follower on Broker 1 or Broker 3 to become the new leader — **no data is lost**, and the service **isn't interrupted** (just a few seconds of latency spike during the handover).
+
+### 5.2. In-Sync Replicas (ISR) — The Synchronization Mechanism Between Replicas
+
+Not all followers are reliable at all times. A follower might lag due to slow network, disk bottleneck, or being in the middle of a restart. Kafka maintains a list called **ISR (In-Sync Replicas)** — the set of replicas (including the leader) that have synced data up to the most recent point.
+
+A follower is removed from the ISR when it **falls too far behind** the leader (configured by `replica.lag.time.max.ms`, default 30 seconds). When the follower catches up, it's added back to the ISR.
+
+ISR matters because it determines the **level of data safety** through the producer's `acks` flag:
+
+<ExcalidrawDiagram src="/kafka-replication.excalidraw" alt="Kafka Replication and ISR" />
+
+| `acks` | Behavior | Data durability | Latency |
+|--------|----------|-----------------|---------|
+| `0` | Producer fires and forgets — doesn't wait for broker acknowledgment | Lowest — message can be lost if broker dies before writing | Lowest |
+| `1` | Waits for **leader** to confirm the write | Medium — lost if leader dies before followers sync | Medium |
+| `all` | Waits for **all ISR replicas** to confirm the write | Highest — only lost if all ISR members die simultaneously | Highest |
+
+In production, `acks=all` combined with `min.insync.replicas=2` is the common configuration. This ensures that each message must be written to **at least 2 replicas** before the producer receives a success acknowledgment. If only 1 replica is alive, the broker rejects writes to protect data integrity.
+
+### 5.3. Leader Election When a Broker Dies
+
+When the controller detects a broker failure (via heartbeat timeout):
+
+1. The controller identifies which partitions that broker was holding the **leader role** for.
+2. For each partition, the controller selects **a follower from the ISR list** to promote as the new leader.
+3. The controller updates metadata and notifies all other brokers.
+4. Producers and consumers receive the new metadata and switch to communicating with the new leader.
+
+This entire process happens within **a few seconds**. If the ISR is empty (all followers are lagging), Kafka has 2 options depending on the `unclean.leader.election.enable` configuration:
+- `false` (default): the partition goes **offline** until an ISR member comes back — **prioritizing consistency**.
+- `true`: allows a follower outside the ISR to become leader — **prioritizing availability** but with potential data loss.
+
+---
+
+## 6. Offset — The Consumer's Memory
+
+### 6.1. What is an Offset?
+
+Each message in a partition is assigned an **offset** — a monotonically increasing integer starting from 0. The offset is essentially the consumer's "read position" in the partition log, like a bookmark marking the page you're reading in a book.
+
+```
+Partition 0:
+┌────┬────┬────┬────┬────┬────┬────┬────┐
+│  0 │  1 │  2 │  3 │  4 │  5 │  6 │  7 │  ← Offset
+└────┴────┴────┴────┴────┴────┴────┴────┘
+                          ↑
+                    Consumer has processed up to offset 4
+                    → Committed offset = 4
+                    → Next poll will read from offset 5
+```
+
+### 6.2. Offset Storage — From ZooKeeper to `__consumer_offsets`
+
+Previously, offsets were stored in **ZooKeeper**. But with thousands of consumer groups and tens of thousands of partitions, the volume of offset reads/writes to ZooKeeper became overwhelming, creating a bottleneck.
+
+The solution: Kafka moved offset storage into a special **internal topic**: `__consumer_offsets`. Every time a consumer commits an offset, it sends a message to this topic with the key `(group_id, topic, partition)` and the value being the offset number. The `__consumer_offsets` topic is replicated and compacted like any other topic — meaning Kafka "uses itself" to store its own metadata.
+
+### 6.3. Consumers Manage Their Own Offsets
+
+Consumers decide **when** to commit offsets, and this is a critical design choice:
+
+- **Auto-commit** (`enable.auto.commit=true`): Kafka automatically commits offsets at intervals (default 5 seconds). Simple but risky: if the consumer crashes after auto-commit but before finishing message processing, the message is "lost" (won't be reprocessed).
+- **Manual commit**: The consumer commits after processing is complete. Safer, but if it crashes after processing but before committing, the message gets processed again (duplicate). This is **at-least-once delivery** — the most common strategy in production.
+
+When a consumer dies and restarts (or when a rebalance occurs in the group), Kafka looks up `__consumer_offsets` to find the last committed offset, then starts reading from the next position. The consumer doesn't need to remember anything — Kafka remembers for it.
+
+Consumers are also completely flexible in how they query data: they can store offsets separately in memory, a database, or anywhere that fits their use case — as long as the offset is committed back to Kafka so the cluster knows the last position for recovery purposes.
+
+---
+
+## 7. Why is Kafka Fast?
+
+By now you understand Kafka's architecture — brokers, partitions, replication, consumer groups. But the big question remains: **why can Kafka process millions of messages per second** while other systems struggle with tens of thousands?
+
+The answer lies in three low-level optimization techniques that Kafka exploits to the fullest.
+
+### 7.1. Sequential I/O — When Disk is Nearly as Fast as Network
+
+Common assumption: "disk is slow, RAM is fast." True — but only for **random I/O** (random reads/writes). With **sequential I/O** (sequential reads/writes), modern disks deliver impressively high throughput:
+
+| Operation | Throughput (estimated) |
+|-----------|----------------------|
+| Random disk read/write | ~100-200 IOPS, translating to a few MB/s |
+| Sequential disk read/write (SSD) | 500-3,000 MB/s |
+| Network (10GbE) | ~1,200 MB/s |
+| RAM random access | ~10,000-50,000 MB/s |
+
+Sequential disk I/O on SSDs can be **faster than the network**. And Kafka was designed from the ground up to take advantage of this:
+
+- Messages are **append-only** to the end of the partition log — no random seeks ever.
+- Consumers read **sequentially** from an offset, making full use of the **OS page cache** (the operating system automatically caches sequentially read data into RAM).
+- Kafka **doesn't manage its own application-level cache** — instead, it trusts the OS page cache. This means Kafka uses **all available free RAM** on the machine as cache, without needing any custom management or invalidation logic.
+
+Traditional databases have to random seek to the right row, read the index, jump to the data page — each operation is a disk seek costing ~10ms on HDD. Kafka only needs to append and read forward — zero seek overhead.
+
+### 7.2. Zero-copy — Eliminating Data Copy Overhead
+
+When a consumer requests data, Kafka needs to read from disk and send it over the network. In the traditional approach, data goes through **4 copies** and **2 context switches** (switching between kernel mode and user mode):
+
+```
+[Traditional — 4 copies]
+Disk → Kernel Buffer (copy 1) → User Buffer (copy 2)
+→ Socket Buffer (copy 3) → NIC Buffer (copy 4)
+    ↑ context switch          ↑ context switch
+```
+
+Kafka uses the **`sendfile()` system call** (on Linux) to completely bypass the user space copy:
+
+```
+[Zero-copy — 2 copies]
+Disk → Kernel Buffer (copy 1) → NIC Buffer (copy 2)
+              ↓
+    Data NEVER passes through the application
+```
+
+<ExcalidrawDiagram src="/kafka-zero-copy.excalidraw" alt="Traditional vs Zero-copy Data Transfer" />
+
+The result: **~60% reduction in CPU usage** for data transfer. This is why a Kafka broker can serve gigabytes of data per second while the CPU remains mostly idle — because it barely "touches" the data. Kafka doesn't serialize/deserialize messages at the broker level — it receives bytes from the producer and sends those exact bytes to the consumer. The broker treats messages as **opaque bytes** (the broker doesn't understand the content inside), only storing and forwarding them.
+
+This is something that message brokers like RabbitMQ cannot do, because RabbitMQ uses the smart broker model — data needs to be serialized at the broker in order to route it to the appropriate consumer.
+
+### 7.3. Batching and Compression — Grouping and Compressing
+
+Instead of sending each message individually, Kafka **groups multiple messages into a batch** before sending them over the network:
+
+- **Producer-side batching**: the producer accumulates messages in memory (based on `batch.size` or `linger.ms`), then sends the entire batch in a single request. One network round trip serves hundreds to thousands of messages, amortizing the cost of TCP/TLS handshakes.
+- **Compression at the batch level**: the entire batch is compressed with a codec (Snappy, LZ4, Zstd) before sending. The broker **stores the batch in compressed form** on disk — no decompression. The consumer receives the compressed batch and decompresses it in one go.
+
+| Codec | Compression speed | Compression ratio | When to use |
+|-------|-------------------|-------------------|-------------|
+| Snappy | Very fast | Medium (~2x) | When low latency is the priority |
+| LZ4 | Fast | Medium (~2.5x) | Good balance between speed and ratio |
+| Zstd | Medium | High (~3-4x) | When saving bandwidth/storage is the priority |
+
+Combining all three techniques:
+
+| Technique | Eliminates | Impact |
+|-----------|-----------|--------|
+| Sequential I/O | Random disk seeks | Read/write throughput 100x+ vs random |
+| Zero-copy | User-space copies + context switches | ~60% CPU reduction for data transfer |
+| Batching | Per-message network overhead | Amortizes TCP/TLS cost across thousands of messages |
+| Compression | Bandwidth consumption | 2-4x reduction in data transmitted over the network |
+
+There's no "magic" here — Kafka is fast because it **eliminates overhead at every layer**: disk access uses sequential I/O, data transfer uses zero-copy, network uses batching, and bandwidth uses compression. Each technique isn't new on its own, but combined together they create outstanding throughput.
+
+---
+
+## Conclusion
+
+Kafka isn't just a simple message queue — it's a **distributed commit log** designed for high throughput and strong durability. Kafka's power comes from the combination of:
+
+- **Partitions** — the unit of parallelism, allowing linear throughput scaling by adding partitions and consumers.
+- **Consumer Groups** — an automatic work distribution mechanism, enabling multiple independent systems to consume the same data stream.
+- **Replication** — ensuring data survives failures through the leader-follower model with ISR.
+- **Storage design** — append-only log + sparse index + segment rotation, fully leveraging sequential I/O.
+- **Zero-copy + Batching + Compression** — three low-level techniques that eliminate overhead at every layer.
+
+When you look at LinkedIn's system processing **7 trillion messages per day**, or Uber managing millions of real-time rides through Kafka — you realize this isn't the result of any single feature, but the result of many well-made design decisions at every layer of the architecture.
