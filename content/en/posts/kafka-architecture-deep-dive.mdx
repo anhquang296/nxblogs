@@ -18,7 +18,10 @@ This is exactly the problem that **Apache Kafka** solves. Instead of calling ser
 
 This post will dive deep into Kafka's internal architecture — from how data is stored on disk, how partitions enable parallelism, how replication ensures data isn't lost, to why Kafka can process millions of events per second.
 
-<ExcalidrawDiagram src="/kafka-architecture-overview.excalidraw" alt="Kafka Architecture Overview — Producers, Brokers, Partitions, Consumer Groups, KRaft" />
+<ExcalidrawDiagram
+  src="/kafka-architecture-overview.excalidraw"
+  alt="Kafka Architecture Overview — Producers, Brokers, Partitions, Consumer Groups, KRaft"
+/>
 
 ---
 
@@ -36,14 +39,14 @@ With **RabbitMQ** (push-based model), the **server decides**: the broker receive
 
 Kafka takes the completely opposite approach: the **consumer decides**. The Kafka broker simply stores data and serves it when asked. Consumers actively pull data from the broker when they're ready to process, managing their own read positions. This is the **smart consumer, dumb broker** model — and it's precisely this simplicity on the broker side that allows Kafka to scale to massive levels.
 
-| Criteria | RabbitMQ | Kafka |
-|----------|----------|-------|
-| Delivery model | Push — server pushes messages to consumers | Pull — consumers actively pull messages |
-| "Intelligence" | Smart broker, dumb consumer | Smart consumer, dumb broker |
-| Message after consumption | Deleted from queue | Still stored (based on time or size retention) |
-| Ordering | Per queue | Per partition |
-| Primary use case | Task queue, request-reply | Event streaming, log aggregation |
-| Throughput | ~50K messages/sec | ~1M+ messages/sec |
+| Criteria                  | RabbitMQ                                   | Kafka                                          |
+| ------------------------- | ------------------------------------------ | ---------------------------------------------- |
+| Delivery model            | Push — server pushes messages to consumers | Pull — consumers actively pull messages        |
+| "Intelligence"            | Smart broker, dumb consumer                | Smart consumer, dumb broker                    |
+| Message after consumption | Deleted from queue                         | Still stored (based on time or size retention) |
+| Ordering                  | Per queue                                  | Per partition                                  |
+| Primary use case          | Task queue, request-reply                  | Event streaming, log aggregation               |
+| Throughput                | ~50K messages/sec                          | ~1M+ messages/sec                              |
 
 ---
 
@@ -65,19 +68,19 @@ When a producer sends a message, Kafka uses the **partition key** (specified by 
 The question here is: how does the producer know how many partitions the Kafka cluster has in order to route messages?
 
 ```ts
-import { Kafka, CompressionTypes } from 'kafkajs';
+import { Kafka, CompressionTypes } from 'kafkajs'
 
 const kafka = new Kafka({
   clientId: 'my-app',
   brokers: ['broker1:9092', 'broker2:9092'],
-});
+})
 
 const producer = kafka.producer({
   idempotent: true,
   maxInFlightRequests: 5,
-});
+})
 
-await producer.connect();
+await producer.connect()
 ```
 
 When initializing a producer, you only need to declare a few broker addresses in the Kafka cluster. The producer will discover the cluster metadata during the bootstrap process (how many brokers, topics, and partitions the cluster has). Once it has the full metadata, the producer can compute the target partition for each message on its own.
@@ -112,7 +115,17 @@ When a message arrives at a broker, it's written to disk following a very clear 
     └── 00000000000000000000.timeindex
 ```
 
-The file name is the **base offset** — the offset of the first message in that segment. When a segment reaches its size limit (default 1GB) or time limit, Kafka creates a new segment:
+The problem is that each partition in Kafka is an infinite log — messages keep appending to the end of the file, and the offset increases from 0, 1, 2, ... into the billions.
+
+The consequences are:
+
+- The log file grows endlessly, and deleting old data would require rewriting the entire file.
+- Backup, replication, and file operations all become difficult.
+- The OS doesn't handle extremely large files well either.
+
+Therefore, Kafka splits each partition into smaller pieces called segments.
+
+The segment file name is the **base offset** — the offset of the first message in that segment. When a segment reaches its size limit (default 1GB) or time limit, Kafka creates a new segment:
 
 ```
 /var/kafka-logs/orders-0/
@@ -126,11 +139,11 @@ The file name is the **base offset** — the offset of the first message in that
 
 Each segment consists of three files:
 
-| File | Purpose | How it works |
-|------|---------|--------------|
-| `.log` | Stores the actual message data | Append-only — new messages are always written to the end. Messages in the middle are never modified or deleted. |
-| `.index` | Maps **offset to byte position** in the `.log` file | Sparse index — doesn't store every offset, only saves an entry every N offsets. When looking for offset X, Kafka binary searches the `.index` to find the nearest entry, then scans forward in the `.log`. |
-| `.timeindex` | Maps **timestamp to offset** | Allows consumers to find messages by time instead of offset. For example: "read from 2:00 PM today" translates to finding the corresponding offset, then reading from there. |
+| File         | Purpose                                             | How it works                                                                                                                                                                                               |
+| ------------ | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.log`       | Stores the actual message data                      | Append-only — new messages are always written to the end. Messages in the middle are never modified or deleted.                                                                                            |
+| `.index`     | Maps **offset to byte position** in the `.log` file | Sparse index — doesn't store every offset, only saves an entry every N offsets. When looking for offset X, Kafka binary searches the `.index` to find the nearest entry, then scans forward in the `.log`. |
+| `.timeindex` | Maps **timestamp to offset**                        | Allows consumers to find messages by time instead of offset. For example: "read from 2:00 PM today" translates to finding the corresponding offset, then reading from there.                               |
 
 <ExcalidrawDiagram src="/kafka-broker-storage.excalidraw" alt="Kafka Broker Storage Structure" />
 
@@ -138,6 +151,40 @@ This design provides two major benefits:
 
 1. **Extremely fast writes** — because it only appends to the end of a file, no random seeks needed. This is **sequential I/O**, and we'll discuss it more in the "Why is Kafka fast" section.
 2. **Efficient reads** — the sparse index enables finding any message with just a binary search + short scan, instead of scanning the entire log file.
+
+Within each partition, the newest segment — the one currently being written to — is called the **active segment**. All previous segments are **closed segments** — they are sealed and immutable, no new messages will ever be appended to them. Crucially, Kafka only cleans up closed segments; the active segment is always left untouched. So how does Kafka clean up closed segments?
+
+Kafka provides two cleanup policies via the `log.cleanup.policy` config:
+
+| Policy             | Mechanism                                                        | Key config                                   | When to use                                                                       |
+| ------------------ | ---------------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------- |
+| `delete` (default) | Deletes entire closed segments based on time or size             | `log.retention.hours`, `log.retention.bytes` | Most event topics — when you only need to keep data for a certain time window     |
+| `compact`          | Keeps only the latest message for each key, removes older values | `log.cleanup.policy=compact`                 | Changelog / state topics — when you need a "snapshot" of the latest state per key |
+
+With the `delete` policy, Kafka evaluates each closed segment against two criteria:
+
+- **By time**: if the largest timestamp in the segment (i.e., the last message written to that segment) is older than `log.retention.ms` (or `log.retention.hours` / `log.retention.minutes`) relative to the current time → the segment is deleted. The default is 168 hours (7 days).
+- **By size**: Kafka calculates the total size of all segments in the partition. If the total exceeds `log.retention.bytes`, Kafka deletes the oldest closed segments (in ascending base offset order) until the total size falls within the limit. The default is `log.retention.bytes = -1` (unlimited, meaning only time-based deletion applies).
+
+These two criteria operate **independently** — if either condition is met, the closed segment is deleted.
+
+With the `compact` policy, Kafka runs a background thread called the **log cleaner**. This thread reads through closed segments, builds an offset map for each key, and retains only the record with the highest offset (the latest value) per key — older records are discarded. When you want to mark a key as "deleted", you send a message with that key but a `null` value — called a **tombstone record**. Tombstones are retained for a configurable period (`delete.retention.ms`, default 24 hours) so downstream consumers have time to observe the deletion, then they are permanently removed.
+
+```
+Before compaction:
+  offset 0: key=A, value=1
+  offset 1: key=B, value=2
+  offset 2: key=A, value=3      ← newer value for key A
+  offset 3: key=C, value=4
+  offset 4: key=B, value=null   ← tombstone: delete key B
+
+After compaction:
+  offset 2: key=A, value=3      ← only the latest value kept
+  offset 3: key=C, value=4
+  offset 4: key=B, value=null   ← tombstone kept until delete.retention.ms expires
+```
+
+This is exactly why the `__consumer_offsets` topic uses log compaction — Kafka only needs the latest committed offset for each `(group_id, topic, partition)` combination, not the entire commit history.
 
 ### 3.3. Controller — The Brain That Orchestrates the Cluster
 
@@ -250,6 +297,7 @@ The three groups are completely **independent**: each group has its own offsets,
 If each partition existed on only **1 broker**, when that broker dies, the partition's data would be **permanently lost**. To solve this, Kafka **replicates** each partition into multiple copies called **replicas**, spread across different brokers.
 
 Each partition has:
+
 - **1 Leader replica** — handles all read/write requests from producers and consumers.
 - **N Follower replicas** — continuously pull new data from the leader to stay in sync. Followers don't serve client requests (except in certain special configurations).
 
@@ -276,11 +324,11 @@ ISR matters because it determines the **level of data safety** through the produ
 
 <ExcalidrawDiagram src="/kafka-replication.excalidraw" alt="Kafka Replication and ISR" />
 
-| `acks` | Behavior | Data durability | Latency |
-|--------|----------|-----------------|---------|
-| `0` | Producer fires and forgets — doesn't wait for broker acknowledgment | Lowest — message can be lost if broker dies before writing | Lowest |
-| `1` | Waits for **leader** to confirm the write | Medium — lost if leader dies before followers sync | Medium |
-| `all` | Waits for **all ISR replicas** to confirm the write | Highest — only lost if all ISR members die simultaneously | Highest |
+| `acks` | Behavior                                                            | Data durability                                            | Latency |
+| ------ | ------------------------------------------------------------------- | ---------------------------------------------------------- | ------- |
+| `0`    | Producer fires and forgets — doesn't wait for broker acknowledgment | Lowest — message can be lost if broker dies before writing | Lowest  |
+| `1`    | Waits for **leader** to confirm the write                           | Medium — lost if leader dies before followers sync         | Medium  |
+| `all`  | Waits for **all ISR replicas** to confirm the write                 | Highest — only lost if all ISR members die simultaneously  | Highest |
 
 In production, `acks=all` combined with `min.insync.replicas=2` is the common configuration. This ensures that each message must be written to **at least 2 replicas** before the producer receives a success acknowledgment. If only 1 replica is alive, the broker rejects writes to protect data integrity.
 
@@ -294,6 +342,7 @@ When the controller detects a broker failure (via heartbeat timeout):
 4. Producers and consumers receive the new metadata and switch to communicating with the new leader.
 
 This entire process happens within **a few seconds**. If the ISR is empty (all followers are lagging), Kafka has 2 options depending on the `unclean.leader.election.enable` configuration:
+
 - `false` (default): the partition goes **offline** until an ISR member comes back — **prioritizing consistency**.
 - `true`: allows a follower outside the ISR to become leader — **prioritizing availability** but with potential data loss.
 
@@ -329,7 +378,10 @@ Consumers decide **when** to commit offsets, and this is a critical design choic
 - **Auto-commit** (`enable.auto.commit=true`): Kafka automatically commits offsets at intervals (default 5 seconds). Simple but risky: if the consumer crashes after auto-commit but before finishing message processing, the message is "lost" (won't be reprocessed).
 - **Manual commit**: The consumer commits after processing is complete. Safer, but if it crashes after processing but before committing, the message gets processed again (duplicate). This is **at-least-once delivery** — the most common strategy in production.
 
-When a consumer dies and restarts (or when a rebalance occurs, which means a new consumer join into consumer group), Kafka looks up `__consumer_offsets` to find the last committed offset, then starts reading from the next position. The consumer doesn't need to remember anything — Kafka remembers for it.
+When a consumer dies and restarts, the **consumer rebalance protocol** is triggered, and Kafka looks up `__consumer_offsets` to find the last committed offset, then starts reading from the next position. The consumer doesn't need to remember anything — Kafka remembers for it.
+
+> **Consumer rebalance protocol** is the mechanism for redistributing partitions among consumers within the same consumer group in a balanced way, triggered by the **Group coordinator**.
+> It occurs when a consumer joins or leaves the group, when a consumer's heartbeat is not received, when the number of partitions changes, or when a consumer is overloaded and processing too slowly.
 
 Consumers are also completely flexible in how they query data: they can store offsets separately in memory, a database, or anywhere that fits their use case — as long as the offset is committed back to Kafka so the cluster knows the last position for recovery purposes.
 
@@ -345,12 +397,12 @@ The answer lies in three low-level optimization techniques that Kafka exploits t
 
 Common assumption: "disk is slow, RAM is fast." True — but only for **random I/O** (random reads/writes). With **sequential I/O** (sequential reads/writes), modern disks deliver impressively high throughput:
 
-| Operation | Throughput (estimated) |
-|-----------|----------------------|
-| Random disk read/write | ~100-200 IOPS, translating to a few MB/s |
-| Sequential disk read/write (SSD) | 500-3,000 MB/s |
-| Network (10GbE) | ~1,200 MB/s |
-| RAM random access | ~10,000-50,000 MB/s |
+| Operation                        | Throughput (estimated)                   |
+| -------------------------------- | ---------------------------------------- |
+| Random disk read/write           | ~100-200 IOPS, translating to a few MB/s |
+| Sequential disk read/write (SSD) | 500-3,000 MB/s                           |
+| Network (10GbE)                  | ~1,200 MB/s                              |
+| RAM random access                | ~10,000-50,000 MB/s                      |
 
 Sequential disk I/O on SSDs can be **faster than the network**. And Kafka was designed from the ground up to take advantage of this:
 
@@ -362,25 +414,11 @@ Traditional databases have to random seek to the right row, read the index, jump
 
 ### 7.2. Zero-copy — Eliminating Data Copy Overhead
 
-When a consumer requests data, Kafka needs to read from disk and send it over the network. In the traditional approach, data goes through **4 copies** and **2 context switches** (switching between kernel mode and user mode):
-
-```
-[Traditional — 4 copies]
-Disk → Kernel Buffer (copy 1) → User Buffer (copy 2)
-→ Socket Buffer (copy 3) → NIC Buffer (copy 4)
-    ↑ context switch          ↑ context switch
-```
-
-Kafka uses the **`sendfile()` system call** (on Linux) to completely bypass the user space copy:
-
-```
-[Zero-copy — 2 copies]
-Disk → Kernel Buffer (copy 1) → NIC Buffer (copy 2)
-              ↓
-    Data NEVER passes through the application
-```
+When a consumer requests data, Kafka needs to read from disk and send it over the network. In the traditional approach, data goes through **4 copies** and **2 context switches** (switching between kernel mode and user mode)
 
 <ExcalidrawDiagram src="/kafka-zero-copy.excalidraw" alt="Traditional vs Zero-copy Data Transfer" />
+
+Kafka uses the **`sendfile()` system call** (on Linux) to completely bypass the user space copy
 
 The result: **~60% reduction in CPU usage** for data transfer. This is why a Kafka broker can serve gigabytes of data per second while the CPU remains mostly idle — because it barely "touches" the data. Kafka doesn't serialize/deserialize messages at the broker level — it receives bytes from the producer and sends those exact bytes to the consumer. The broker treats messages as **opaque bytes** (the broker doesn't understand the content inside), only storing and forwarding them.
 
@@ -393,20 +431,20 @@ Instead of sending each message individually, Kafka **groups multiple messages i
 - **Producer-side batching**: the producer accumulates messages in memory (based on `batch.size` or `linger.ms`), then sends the entire batch in a single request. One network round trip serves hundreds to thousands of messages, amortizing the cost of TCP/TLS handshakes.
 - **Compression at the batch level**: the entire batch is compressed with a codec (Snappy, LZ4, Zstd) before sending. The broker **stores the batch in compressed form** on disk — no decompression. The consumer receives the compressed batch and decompresses it in one go.
 
-| Codec | Compression speed | Compression ratio | When to use |
-|-------|-------------------|-------------------|-------------|
-| Snappy | Very fast | Medium (~2x) | When low latency is the priority |
-| LZ4 | Fast | Medium (~2.5x) | Good balance between speed and ratio |
-| Zstd | Medium | High (~3-4x) | When saving bandwidth/storage is the priority |
+| Codec  | Compression speed | Compression ratio | When to use                                   |
+| ------ | ----------------- | ----------------- | --------------------------------------------- |
+| Snappy | Very fast         | Medium (~2x)      | When low latency is the priority              |
+| LZ4    | Fast              | Medium (~2.5x)    | Good balance between speed and ratio          |
+| Zstd   | Medium            | High (~3-4x)      | When saving bandwidth/storage is the priority |
 
 Combining all three techniques:
 
-| Technique | Eliminates | Impact |
-|-----------|-----------|--------|
-| Sequential I/O | Random disk seeks | Read/write throughput 100x+ vs random |
-| Zero-copy | User-space copies + context switches | ~60% CPU reduction for data transfer |
-| Batching | Per-message network overhead | Amortizes TCP/TLS cost across thousands of messages |
-| Compression | Bandwidth consumption | 2-4x reduction in data transmitted over the network |
+| Technique      | Eliminates                           | Impact                                              |
+| -------------- | ------------------------------------ | --------------------------------------------------- |
+| Sequential I/O | Random disk seeks                    | Read/write throughput 100x+ vs random               |
+| Zero-copy      | User-space copies + context switches | ~60% CPU reduction for data transfer                |
+| Batching       | Per-message network overhead         | Amortizes TCP/TLS cost across thousands of messages |
+| Compression    | Bandwidth consumption                | 2-4x reduction in data transmitted over the network |
 
 There's no "magic" here — Kafka is fast because it **eliminates overhead at every layer**: disk access uses sequential I/O, data transfer uses zero-copy, network uses batching, and bandwidth uses compression. Each technique isn't new on its own, but combined together they create outstanding throughput.
 
