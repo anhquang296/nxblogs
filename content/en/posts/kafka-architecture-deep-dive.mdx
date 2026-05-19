@@ -329,7 +329,7 @@ Consumers decide **when** to commit offsets, and this is a critical design choic
 - **Auto-commit** (`enable.auto.commit=true`): Kafka automatically commits offsets at intervals (default 5 seconds). Simple but risky: if the consumer crashes after auto-commit but before finishing message processing, the message is "lost" (won't be reprocessed).
 - **Manual commit**: The consumer commits after processing is complete. Safer, but if it crashes after processing but before committing, the message gets processed again (duplicate). This is **at-least-once delivery** — the most common strategy in production.
 
-When a consumer dies and restarts (or when a rebalance occurs in the group), Kafka looks up `__consumer_offsets` to find the last committed offset, then starts reading from the next position. The consumer doesn't need to remember anything — Kafka remembers for it.
+When a consumer dies and restarts (or when a rebalance occurs, which means a new consumer join into consumer group), Kafka looks up `__consumer_offsets` to find the last committed offset, then starts reading from the next position. The consumer doesn't need to remember anything — Kafka remembers for it.
 
 Consumers are also completely flexible in how they query data: they can store offsets separately in memory, a database, or anywhere that fits their use case — as long as the offset is committed back to Kafka so the cluster knows the last position for recovery purposes.
 

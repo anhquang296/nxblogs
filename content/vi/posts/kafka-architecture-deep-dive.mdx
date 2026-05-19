@@ -329,7 +329,7 @@ Consumer quyết định **khi nào** commit offset, và đây là lựa chọn 
 - **Auto-commit** (`enable.auto.commit=true`): Kafka tự động commit offset theo interval (mặc định 5 giây). Đơn giản nhưng rủi ro: nếu consumer crash sau khi auto-commit nhưng trước khi xử lý xong message → message bị "mất" (không được xử lý lại).
 - **Manual commit**: Consumer commit sau khi xử lý xong. An toàn hơn nhưng nếu crash sau xử lý nhưng trước commit → message bị xử lý lại (duplicate). Đây là **at-least-once delivery** — chiến lược phổ biến nhất trong production.
 
-Khi consumer chết và restart (hoặc khi có rebalance trong group), Kafka tra cứu `__consumer_offsets` để biết offset cuối cùng đã commit, rồi bắt đầu đọc từ vị trí tiếp theo. Consumer không cần nhớ gì — Kafka nhớ hộ.
+Khi consumer chết và restart (hoặc khi có rebalance trong group, nghĩa là có 1 consumer mới join vào consumer group), Kafka tra cứu `__consumer_offsets` để biết offset cuối cùng đã commit, rồi bắt đầu đọc từ vị trí tiếp theo. Consumer không cần nhớ gì — Kafka nhớ hộ.
 
 Consumer cũng hoàn toàn linh hoạt trong cách query dữ liệu: nó có thể lưu offset riêng ở memory, database, hoặc bất kỳ đâu phù hợp với use case — miễn là offset được commit lại Kafka để cluster biết vị trí cuối cùng khi cần recovery.
 
