@@ -1,0 +1,393 @@
+---
+title: 'Amazon Kinesis Data Streams & Data Firehose: From Real-Time Ingestion to Automated Delivery into S3, Redshift, OpenSearch'
+date: '2026-05-20'
+tags: ['Devops', 'AWS', 'SAA']
+description: 'Deep dive into Amazon Kinesis Data Streams & Data Firehose — shard limits, fan-out modes, scaling, Lambda transformation, Glue format conversion, buffering internals, and why these two services are often used together.'
+enableComment: true
+---
+
+# Amazon Kinesis Data Streams & Data Firehose: From Real-Time Ingestion to Automated Delivery into S3, Redshift, OpenSearch
+
+You're building an analytics system for an e-commerce application. Thousands of events pour in every second — clickstream, page views, add-to-cart, purchases — and you need to land all this data into S3 for analytics with Athena, while also pushing it into OpenSearch for the product team's real-time dashboard.
+
+The simplest approach? Write a consumer application that polls data from the stream, transforms it, then writes to S3. But then you have to manage batching (grouping many records into one large file instead of writing each record individually), compression, format conversion, retry logic when S3 returns errors, monitoring throughput, scaling the consumer when traffic spikes... You spend weeks building the "pipeline" before ever touching the actual analytics work.
+
+This is exactly the problem that the combo of **Amazon Kinesis Data Streams** and **Amazon Data Firehose** solves. Kinesis Data Streams handles the **ingestion** — receiving and storing real-time data streams with linear scalability. Data Firehose handles the **delivery** — automatically transforming, converting formats, buffering, and writing data to storage without you writing a single line of consumer code.
+
+This post will deep dive into both services — from Kinesis Data Streams' shard architecture (very similar to Kafka partitions), the fixed limits per shard, fan-out modes, to Data Firehose's internal pipeline: Lambda transformation, Glue format conversion, buffering internals, and the technical reasons why Firehose must buffer data before writing.
+
+<ExcalidrawDiagram src="/kinesis-firehose-overview.excalidraw" alt="Kinesis Data Streams & Data Firehose Overview — Producers, Shards, Firehose Pipeline, Destinations" />
+
+---
+
+## 1. What is Kinesis Data Streams?
+
+**Amazon Kinesis Data Streams (KDS)** is a fully managed **real-time data streaming** service from AWS — enabling applications to collect, process, and analyze continuous data streams with extremely low latency (under 200ms).
+
+If you've read the [Apache Kafka deep dive](/en/posts/kafka-architecture-deep-dive), the architecture of Kinesis Data Streams will feel very familiar. Both are based on the **distributed commit log** model — data is written sequentially to distributed logs, consumers actively pull data and manage their own read position. The biggest difference is that Kinesis Data Streams is **fully managed** — you don't need to manage brokers, worry about ZooKeeper/KRaft, or tune JVM heap or disk I/O. AWS handles all the underlying infrastructure.
+
+Key characteristics:
+
+- **Pull-based model** — like Kafka, consumers actively pull data from the stream when ready to process, rather than having the server push data to them.
+- **Data retention** — data is stored for a default of 24 hours, configurable up to **365 days**. During the retention period, any consumer can re-read the data.
+- **Replay capability** — consumers can go back and read from any point in the retention window. This allows reprocessing data when bugs are found, or adding new consumers to process historical data.
+
+---
+
+## 2. Core Concepts
+
+Since Kinesis Data Streams and Kafka share the same architectural model, the fastest way to understand Kinesis is to map the equivalent concepts:
+
+| Kinesis Data Streams       | Apache Kafka        | Explanation                                                                                                                                              |
+| -------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Stream**                 | Topic               | Logical channel containing data. Example: stream `clickstream`, stream `orders`.                                                                 |
+| **Shard**                  | Partition            | Unit of parallelism — each shard is a sequential, append-only log. Data is distributed to shards based on partition key.                               |
+| **Data Record**            | Message / Record     | Smallest unit of data — includes partition key, sequence number, and data blob (max 1 MB).                                                          |
+| **Partition Key**          | Partition Key        | String used to determine which shard a record goes to, via hash function: `MD5(partition_key) → shard`. Records with the same partition key always go to the same shard.        |
+| **Sequence Number**        | Offset               | Unique, incrementing identifier for each record in a shard — helps consumers know where they are in the stream.                                                  |
+| **KCL Application**        | Consumer Group       | Library (Kinesis Client Library) that helps multiple consumers coordinate processing data from a stream — automatically distributes shards among consumer instances and manages checkpoints (similar to committing offsets). |
+
+### Key Difference
+
+With Kafka, each partition's throughput depends on the **broker's hardware** — disk speed, network bandwidth, RAM. You can upgrade broker hardware to increase per-partition throughput.
+
+With Kinesis, each shard's throughput is a **fixed number set by AWS** — it cannot be changed. Want more throughput? The only way is to **add more shards** (horizontal scaling). This is the core design point you need to understand before moving forward.
+
+---
+
+## 3. Shard — The Core Unit of Kinesis
+
+### 3.1. Shard Limits — Fixed Numbers
+
+Each shard in Kinesis Data Streams has **fixed, unchangeable** throughput:
+
+| Metric                        | Limit                                                           |
+| ----------------------------- | --------------------------------------------------------------- |
+| Write throughput               | **1 MB/s** per shard                                            |
+| Write records                  | **1,000 records/s** per shard                                   |
+| Max record size                | **1 MB** per record                                             |
+| Read throughput (Shared)       | **2 MB/s** per shard — shared across all consumers             |
+| Read throughput (Enhanced)     | **2 MB/s** per shard **per consumer** — each consumer gets dedicated throughput |
+
+This means: if your stream needs to ingest **10 MB/s** of data, you need **at least 10 shards** (10 shards × 1 MB/s = 10 MB/s). Need 100 MB/s? 100 shards. Total throughput scales **linearly** with the number of shards.
+
+<ExcalidrawDiagram src="/kinesis-shard-limits.excalidraw" alt="Kinesis Shard — Fixed limits per shard, partition key routing, write 1 MB/s, read 2 MB/s" />
+
+Like Kafka, producers use the partition key to determine which shard a record goes to: `MD5(partition_key)` produces a 128-bit hash value, which is mapped to the corresponding shard's **hash key range**. Each shard owns a distinct range, and all ranges together cover the entire hash space.
+
+### 3.2. Shared Fan-Out vs Enhanced Fan-Out
+
+Kinesis provides two read modes that directly affect the throughput and latency consumers receive:
+
+**Shared Fan-Out** (default) — consumers call the `GetRecords` API to poll data from shards. All consumers share the **2 MB/s per shard** bandwidth. If 5 consumers read from the same shard, each gets on average **~400 KB/s**. Average latency is about **200ms** due to the polling mechanism.
+
+```javascript
+const { KinesisClient, GetShardIteratorCommand, GetRecordsCommand } = require('@aws-sdk/client-kinesis')
+
+const client = new KinesisClient({ region: 'ap-southeast-1' })
+
+const { ShardIterator } = await client.send(
+  new GetShardIteratorCommand({
+    StreamName: 'clickstream',
+    ShardId: 'shardId-000000000000',
+    ShardIteratorType: 'LATEST',
+  })
+)
+
+const { Records, NextShardIterator } = await client.send(
+  new GetRecordsCommand({ ShardIterator, Limit: 100 })
+)
+```
+
+**Enhanced Fan-Out** — consumers register via `SubscribeToShard` and receive data via **HTTP/2 push**. Each consumer gets a dedicated **2 MB/s per shard**, shared with no one. 5 consumers reading the same shard? Each still gets the full 2 MB/s. Latency drops to **~70ms** because data is pushed directly to the consumer instead of waiting for polls.
+
+Before subscribing, you need to register a **stream consumer** — an identity representing your consumer application. Each stream consumer gets a dedicated 2 MB/s per shard, completely isolated from other consumers:
+
+```javascript
+const { KinesisClient, RegisterStreamConsumerCommand, SubscribeToShardCommand } = require('@aws-sdk/client-kinesis')
+
+const client = new KinesisClient({ region: 'ap-southeast-1' })
+
+const { Consumer } = await client.send(
+  new RegisterStreamConsumerCommand({
+    StreamARN: 'arn:aws:kinesis:ap-southeast-1:123456789012:stream/clickstream',
+    ConsumerName: 'analytics-consumer',
+  })
+)
+
+const response = await client.send(
+  new SubscribeToShardCommand({
+    ConsumerARN: Consumer.ConsumerARN,
+    ShardId: 'shardId-000000000000',
+    StartingPosition: { Type: 'LATEST' },
+  })
+)
+
+for await (const event of response.EventStream) {
+  if (event.SubscribeToShardEvent) {
+    const { Records, MillisBehindLatest } = event.SubscribeToShardEvent
+  }
+}
+```
+
+| Criteria                | Shared Fan-Out                       | Enhanced Fan-Out                          |
+| ----------------------- | ------------------------------------ | ----------------------------------------- |
+| Delivery model          | Pull (GetRecords API)                | Push (SubscribeToShard, HTTP/2)            |
+| Read throughput         | 2 MB/s per shard — **shared**        | 2 MB/s per shard **per consumer**          |
+| Latency                 | ~200ms                               | ~70ms                                      |
+| Max consumers           | Soft limit, but bandwidth is shared   | Max **20 consumers** per stream            |
+| Additional cost         | None                                 | Extra charge per consumer per shard-hour + data |
+| When to use             | Few consumers, latency not critical   | Many consumers, need low latency           |
+
+### 3.3. Data Retention and Replay
+
+Kinesis Data Streams stores data in the stream based on the configured retention:
+
+- **Default**: 24 hours
+- **Maximum**: 365 days (Extended retention, charged per shard-hour)
+
+During the retention period, consumers can **replay** — re-read data from any point in time. This is just like Kafka: if a consumer has a bug and processes the last 2 hours of data incorrectly, you fix the bug and have the consumer read from 2 hours ago — no records are lost.
+
+---
+
+## 4. Scaling Modes
+
+Kinesis Data Streams offers two scaling modes that determine how you manage shards:
+
+### 4.1. Provisioned Mode
+
+You **decide** how many shards you need and manage them manually. When traffic increases, you perform **shard splitting** — splitting 1 shard into 2 new shards (halving the hash key range). When traffic decreases, you **merge** 2 adjacent shards into 1. Each split/merge operation takes a few seconds to a few minutes.
+
+Billing is per **shard-hour** — you pay for the number of shards you provision, regardless of whether you use the full throughput.
+
+### 4.2. On-Demand Mode
+
+AWS **automatically scales** the number of shards based on actual traffic. You don't need to manage shards — Kinesis automatically adds or removes shards as throughput changes. Default limit: auto-scales up to **200 MB/s write** (equivalent to 200 shards) or **double the peak throughput reached** in the last 30 days — whichever is larger.
+
+Billing is per **stream-hour** + **per GB** of data ingested and retrieved.
+
+| Criteria                      | Provisioned                          | On-Demand                                              |
+| ----------------------------- | ------------------------------------ | ------------------------------------------------------ |
+| Shard management              | Manual (split/merge)                  | Automatic                                                |
+| Scale speed                   | Seconds to minutes                    | Automatic, minutes                                       |
+| Throughput limit              | Depends on shards you provision       | 200 MB/s write or 2× peak in 30 days                    |
+| Pricing model                 | Per shard-hour (~$0.015/shard-hour)  | Per stream-hour + per GB ($0.08/GB in, $0.04/GB out)    |
+| When to use                   | Predictable traffic, cost optimization | Unpredictable traffic, no capacity management needed     |
+
+> **Note**: On-Demand mode is great when you don't know the traffic pattern in advance. But if traffic is stable and predictable, Provisioned mode is typically much cheaper — similar to how EC2 Reserved Instances are cheaper than On-Demand.
+
+---
+
+## 5. What is Amazon Data Firehose?
+
+Kinesis Data Streams solves the **ingestion** problem — receiving and storing real-time data streams. But the next step — **delivering data from the stream to storage** (S3, Redshift, OpenSearch) — still requires you to write consumer code: poll data, transform, batch, write, handle errors, retry...
+
+**Amazon Data Firehose** eliminates all that consumer code. It's a **fully managed delivery pipeline** — you just configure the source and destination, and Firehose automatically receives data, transforms it (if needed), buffers, and writes to storage. No code to write, no servers to manage, no scaling to worry about.
+
+If you think of Kinesis Data Streams as a **highway** where data flows continuously, then Data Firehose is the **fleet of trucks** dispatched to collect goods from the highway, repack them neatly (transform, convert format), and deliver them to the destination warehouse (S3, Redshift, OpenSearch).
+
+Key characteristics:
+
+- **Near real-time** — not real-time. Firehose needs time to buffer data before writing, so there's a minimum delivery delay of **~60 seconds**. The technical reason is explained in detail in section 7.4.
+- **Fully managed, auto-scaling** — no need to provision or manage capacity. Firehose scales automatically based on incoming data volume.
+- **No data storage** — Firehose is a pipeline, not a reservoir. Data passes through and gets delivered; there's no ability to replay or re-read.
+
+---
+
+## 6. Sources and Destinations
+
+### 6.1. Sources — Where Does Data Come From?
+
+Firehose receives data from multiple sources:
+
+- **Direct PUT** — applications call Firehose's `PutRecord` / `PutRecordBatch` API directly via AWS SDK. This is the simplest approach when you don't need Kinesis Data Streams in between.
+- **Kinesis Data Streams** — this is the most common combo. KDS serves as the ingestion layer, Firehose subscribes to the KDS stream to receive data and deliver it to storage. Benefit: you keep KDS's data retention, replay, and multiple consumer capabilities while getting Firehose's automated delivery.
+- **Amazon CloudWatch Logs** — push log subscriptions directly into Firehose.
+- **AWS IoT** — IoT rules can route data straight into Firehose.
+- **Amazon MSK** — Amazon Managed Streaming for Apache Kafka (AWS's managed Kafka service) can also be a source for Firehose.
+
+### 6.2. Destinations — Where Does Data Go?
+
+**AWS Destinations:**
+
+- **Amazon S3** — most common, used as a data lake. Objects are organized by UTC timestamp prefix: `YYYY/MM/DD/HH/`.
+- **Amazon Redshift** — data warehouse. Firehose writes temporarily to S3, then automatically runs a `COPY` command to load data into Redshift.
+- **Amazon OpenSearch** — search and analytics engine. Firehose calls the bulk API to index documents.
+
+**3rd-party Destinations:**
+
+- **Splunk**, **Datadog**, **New Relic**, **MongoDB** — Firehose has built-in integrations with popular observability and database platforms.
+
+**Custom Destinations:**
+
+- **HTTP Endpoint** — any HTTP API that accepts POST requests. Firehose sends data in batches with automatic retry on failures.
+
+### 6.3. S3 Backup
+
+Regardless of the primary destination, Firehose always supports **S3 backup** — saving a copy of the original data (before transformation) to a separate S3 bucket. Three options:
+
+- **All records** — back up all records to the S3 backup bucket, regardless of delivery success or failure.
+- **Failed records only** — only back up records that Firehose couldn't deliver to the primary destination.
+- **Disabled** — no backup.
+
+When the destination is S3 and **All or Failed data** backup is enabled, Firehose writes both raw data (original, pre-transform) and transformed data to S3 — but at different prefixes. This is useful for audit trails and debugging transformation errors.
+
+---
+
+## 7. Firehose Pipeline — Under the Hood
+
+Now let's dive into Firehose's internals — what steps does data go through from reception to storage.
+
+<ExcalidrawDiagram src="/firehose-pipeline.excalidraw" alt="Amazon Data Firehose Pipeline — Source → Lambda Transform → Format Conversion → Buffer → Destination + S3 Backup" />
+
+### 7.1. Receiving and Collecting Records
+
+Firehose receives data through two APIs:
+
+- **`PutRecord`** — send one record at a time. Each record is max **1 MB**.
+- **`PutRecordBatch`** — send multiple records in a batch. Max **500 records** or **4 MB** per batch call (whichever limit is reached first).
+
+When receiving data from Kinesis Data Streams, Firehose automatically polls from all shards of the stream and collects records. You don't need to manage this process.
+
+### 7.2. Lambda Transformation
+
+After receiving records, Firehose can invoke an **AWS Lambda function** to transform data before writing to storage. This step is **optional** — you only configure it when you want to modify the data.
+
+**How it works:**
+
+Firehose collects records into a small buffer (configurable, **1–3 MB** or **60 seconds** — whichever condition is met first), then sends that batch to the Lambda function. Lambda receives the batch of records, processes each one, and returns the result batch. Each record in the result is tagged with one of three statuses:
+
+| Status              | Meaning                                                                 |
+| ------------------- | ----------------------------------------------------------------------- |
+| **Ok**              | Record was transformed successfully → continues through the pipeline     |
+| **Dropped**         | Record was intentionally discarded (e.g., filtering invalid data) → not written |
+| **ProcessingFailed**| Lambda couldn't process the record → record is written to the **S3 error bucket** |
+
+**Common use cases:**
+
+- **Enrich data** — add metadata like geo-location or user profile to records.
+- **Mask PII** — hide sensitive Personal Identifiable Information such as emails and phone numbers before storing in the data lake.
+- **Filter invalid records** — remove records that don't pass validation (malformed JSON, missing required fields).
+- **Convert format** — transform data format (e.g., CSV → JSON) before the main format conversion step.
+
+If the Lambda function fails or times out, Firehose retries up to **3 times**. If it still fails, records are tagged as `ProcessingFailed` and written to the S3 error bucket — ensuring no data is lost.
+
+### 7.3. Format Conversion — AWS Glue Data Catalog
+
+After Lambda transformation (or immediately after receiving records if no Lambda is configured), Firehose can **convert data format** from JSON/CSV to **Apache Parquet** or **Apache ORC** — two **columnar storage formats** widely used in analytics.
+
+**Why columnar formats?**
+
+Traditional formats like JSON or CSV store data by **row** — each record stores all columns side by side. When an analytics query only needs 3 out of 50 columns, the system still has to read **all 50 columns** for every record and discard 47 that aren't needed.
+
+Columnar formats store data by **column** — all values of the same column are grouped together on disk. When a query only needs 3 columns, the system reads **only those 3 columns**, completely skipping the other 47. Results:
+
+- **Query speed increases 10–100x** for analytics workloads (queries reading few columns across many rows).
+- **File size decreases 3–5x** — because same-type data (same column) is stored together, compression algorithms work far more efficiently than compressing mixed-type data.
+
+**How Firehose performs conversion:**
+
+Firehose uses a schema from the **AWS Glue Data Catalog** — a centralized metadata store service from AWS where you define data structure (column names, data types). Firehose reads this schema to know how to **deserialize** the incoming JSON (parse JSON into data fields) and then **serialize** it back into Parquet/ORC (encode data in columnar format).
+
+> **Note**: Format conversion requires input data to have a consistent structure — all records must match the schema in the Glue Catalog. If a record has a field of the wrong type or is missing a required field, that record will fail conversion.
+
+### 7.4. Buffering — Why Buffer Before Writing?
+
+This is the most important section for understanding why Firehose is **near real-time** rather than real-time.
+
+Instead of writing each record individually to storage as soon as it arrives, Firehose **groups many records into a large batch** before writing once. This grouping process is called **buffering**, and you can configure it with two criteria:
+
+- **Buffer size**: from **1 MB** to **128 MB** — when the total size of records in the buffer reaches this threshold, Firehose flushes the buffer to storage.
+- **Buffer interval**: from **0 seconds** to **900 seconds** (15 minutes) — when the wait time reaches this threshold, Firehose flushes the buffer regardless of how much data has been collected.
+
+Firehose flushes when **whichever condition is met first**. Example: buffer size = 64 MB, buffer interval = 300 seconds. If after 120 seconds the buffer is already full at 64 MB → flush immediately. If after 300 seconds the buffer only has 10 MB → still flush.
+
+**Why buffer instead of writing each record immediately?**
+
+Four technical reasons:
+
+**1. Reduce API call costs.** S3 charges **$0.005 per 1,000 PUT requests**. If you receive 1 million records per hour and write each one individually, that's 1,000,000 PUT requests = **$5/hour = $3,600/month**. If buffer groups 1,000 records into 1 file, that's only 1,000 PUT requests = **$0.005/hour = $3.6/month**. Saving **~99.9%** on S3 PUT costs.
+
+**2. Better compression.** Compression algorithms work by finding **repeating patterns** in data. Larger files mean more data to find patterns in, resulting in higher compression ratios. A 64 MB file compressed with Gzip might shrink to 10 MB (6:1). But 64,000 small 1 KB files? Each file is too small for the algorithm to find patterns → compression ratio is nearly negligible.
+
+**3. Avoid the "small file problem".** When running analytics queries on S3 with Amazon Athena or Apache Spark, each S3 file needs to be **opened, headers read, parsed, then closed**. 1,000 large files (64 MB each) process much faster than 1,000,000 small files (64 KB each) — because the overhead of opening/closing files dominates processing time when files are too small. This is a well-known problem in big data called the **small file problem**.
+
+**4. Columnar formats need large batches.** Apache Parquet and ORC store data in **row groups** — a group of rows compressed and stored together. Row groups are most efficient with **thousands to millions of rows**. With just 1 row per file, Parquet's metadata overhead can be larger than the data itself, and the columnar compression advantage is almost entirely lost.
+
+| Buffer config                | Use case                                  | Delivery latency | Cost       | File size  |
+| ---------------------------- | ----------------------------------------- | ---------------- | ---------- | ---------- |
+| 1 MB / 60s                   | Near real-time monitoring, alerting        | ~60 seconds      | Higher     | Small      |
+| 64 MB / 300s                 | General analytics pipeline                 | ~5 minutes       | Medium     | Medium     |
+| 128 MB / 900s                | Cost-optimized data lake, batch analytics  | ~15 minutes      | Lowest     | Largest    |
+
+> **Best practice**: for S3 destinations used in analytics, use **buffer size 64–128 MB** to optimize cost and query performance. Only reduce to 1 MB when near real-time delivery is needed (e.g., monitoring dashboards that need data within 1 minute).
+
+### 7.5. Writing to Destination
+
+After the buffer is full (or time is up), Firehose writes the batch data to the destination:
+
+- **Amazon S3** — each batch is written as a single object. The object name contains a **UTC timestamp prefix**: `s3://bucket/YYYY/MM/DD/HH/filename`. This partitions data by time, making lifecycle management and range queries easy.
+- **Amazon Redshift** — Firehose writes data **temporarily to S3** first (intermediate bucket), then automatically executes a **`COPY`** command to load data from S3 into the Redshift table. This is the best practice for loading data into Redshift — the COPY command is optimized for bulk loading, much faster than individual INSERT statements.
+- **Amazon OpenSearch** — Firehose calls the **Bulk API** to index batch documents into the OpenSearch index.
+- **HTTP Endpoint** — Firehose sends a **POST request** containing the batch data. If the endpoint returns an error, Firehose **retries with exponential backoff** — waiting longer between each retry (1s, 2s, 4s, 8s...) to avoid overwhelming the destination.
+
+When delivery fails after all retries, records are written to the **S3 error bucket** — ensuring data is never lost, even when the destination is unavailable.
+
+### 7.6. S3 Backup — Preserving Original Data
+
+Beyond the S3 error bucket for failed records, Firehose also supports **source record backup** — saving a copy of the **original** data (before Lambda transformation and format conversion) to a separate S3 bucket.
+
+Why? Three reasons:
+
+- **Audit trail** — keep original records for compliance and verification.
+- **Debug transformations** — when Lambda or format conversion produces incorrect results, you have raw data to debug and reprocess.
+- **Reprocessing** — if the Firehose pipeline needs changes (e.g., new schema, additional columns), you can replay raw data from S3 backup through the new pipeline.
+
+---
+
+## 8. Important Considerations for Firehose
+
+- **Near real-time, not real-time** — minimum delivery delay is about 60 seconds (smallest buffer interval). If you need to process data within milliseconds, you need a consumer directly on Kinesis Data Streams or Kafka, not Firehose.
+
+- **At-least-once delivery** — Firehose guarantees each record is delivered **at least once**. In retry scenarios (e.g., network timeout then late success), records may be **duplicated**. Downstream systems need to be idempotent or have deduplication mechanisms.
+
+- **No data storage, no replay** — Firehose is a pipeline, not a reservoir. Data passes through and gets delivered, with no storage for later retrieval. If you need replay, use Kinesis Data Streams in front or enable S3 source record backup.
+
+- **Max record size is 1 MB** — if the payload is larger, you need to split it or use the claim check pattern (store the payload in S3, send the URL through Firehose).
+
+- **Each Firehose stream writes to only one destination** — if you need to write the same data to both S3 and OpenSearch, you need **two separate Firehose streams**. Common pattern: use Kinesis Data Streams as the shared source, then create multiple Firehose streams consuming from the same KDS stream, each writing to a different destination.
+
+---
+
+## 9. Kinesis Data Streams vs Data Firehose
+
+These two services **complement each other**, they don't compete. The comparison table below helps distinguish the role of each service:
+
+| Criteria                | Kinesis Data Streams                        | Amazon Data Firehose                          |
+| ----------------------- | ------------------------------------------- | --------------------------------------------- |
+| Primary role            | Real-time data ingestion & processing        | Managed data delivery to storage               |
+| Latency                 | Real-time (~70–200ms)                        | Near real-time (~60s+)                         |
+| Capacity management     | Manual (Provisioned) or auto (On-Demand)     | Fully automatic                                |
+| Data storage            | Yes (24 hours – 365 days)                    | No                                             |
+| Replay capability       | Yes                                          | No                                             |
+| Consumer code           | Required (KCL, Lambda, SDK)                  | Not needed                                     |
+| Data transformation     | Consumer handles it                          | Built-in Lambda + Glue format conversion        |
+| Destinations            | Any (depends on consumer)                    | S3, Redshift, OpenSearch, 3rd party, HTTP       |
+| Scaling                 | Add shards (Provisioned) or auto             | Fully automatic, no configuration needed         |
+| Pricing                 | Per shard-hour or per GB (On-Demand)         | Per GB ingested                                 |
+
+**Most common pattern**: Combine both — **Kinesis Data Streams → Data Firehose → S3**. KDS receives real-time data, allowing multiple consumers to process it (real-time analytics, alerting). Simultaneously, Firehose consumes from the same KDS stream, automatically transforms, converts format, buffers, and writes to the S3 data lake for batch analytics. You get the best of both worlds: real-time processing and automated delivery.
+
+---
+
+## Summary
+
+Kinesis Data Streams and Data Firehose solve two different problems in a streaming data pipeline:
+
+- **Kinesis Data Streams** — real-time ingestion layer. Architecture similar to Kafka with shard ≈ partition, but shard limits are fixed (1 MB/s write, 2 MB/s read per shard). Scale by adding shards (Provisioned) or let AWS auto-scale (On-Demand). Enhanced Fan-Out provides 2 MB/s per consumer with ~70ms latency when multiple independent consumers are needed.
+
+- **Data Firehose** — managed delivery pipeline. Receives data from KDS, Direct PUT, or CloudWatch Logs. Automatically transforms (Lambda), converts format (JSON → Parquet/ORC via Glue), buffers (1–128 MB / 0–900s), and writes to S3, Redshift, OpenSearch, or 3rd-party destinations. Near real-time because of buffering — and buffering is intentional: reduces API costs, improves compression efficiency, avoids the small file problem, and optimizes columnar format conversion.
+
+- **The KDS + Firehose combo** — the most common pattern. KDS handles ingestion and real-time processing, Firehose handles automated delivery to storage. The two services complement each other — KDS excels at real-time and replay, Firehose excels at automated delivery and zero-code operation.
+
+If you're coming from the Kafka world, Kinesis Data Streams will feel very familiar — and Data Firehose is essentially the part that in Kafka you'd have to build yourself: consumer code, batching logic, format conversion, S3 writer. AWS has packaged all of that into a managed service.
