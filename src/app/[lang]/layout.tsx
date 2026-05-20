@@ -6,6 +6,7 @@ import CustomHeader from '@/components/custom-header'
 import { Analytics } from '@vercel/analytics/next'
 import { SpeedInsights } from '@vercel/speed-insights/next'
 import { BackToTop } from '@/components/back-to-top'
+import { GeoTracker } from '@/components/geo-tracker'
 import { LocaleSync } from '@/components/locale-sync'
 import { Metadata } from 'next'
 import { Layout } from 'nextra-theme-blog'
@@ -54,6 +55,7 @@ export default async function LocaleLayout({ children, params }: Props) {
         <LocaleSync />
         <Analytics />
         <SpeedInsights />
+        <GeoTracker />
       </body>
     </html>
   )
