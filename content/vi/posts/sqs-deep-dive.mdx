@@ -301,7 +301,7 @@ Queue depth phản ánh trực tiếp **backlog thực tế** — bao nhiêu cô
 Thay vì dùng raw queue depth, bạn có thể tạo custom metric chính xác hơn:
 
 ```
-backlog_per_instance = ApproximateNumberOfMessages / số_instances_hiện_tại
+backlog_per_instance = ApproximateNumberOfMessages / current_instance_count
 ```
 
 Metric này cho biết mỗi instance đang "gánh" bao nhiêu message. Ví dụ: 10,000 messages với 5 instances → mỗi instance gánh 2,000 messages. Scale khi `backlog_per_instance` vượt ngưỡng cho phép sẽ đưa ra quyết định **tỷ lệ thuận** hơn so với raw queue depth.
