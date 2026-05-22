@@ -66,7 +66,7 @@ Một điều quan trọng: **subnet không bẩm sinh là public hay private**.
 - Route table có `0.0.0.0/0 → nat-xxx` → **private** subnet (traffic ra internet qua NAT Gateway)
 - Route table không có default route → **isolated** subnet (không ra internet được)
 
-Đây chính là lý do EC2 ở private subnet không thể bị internet access trực tiếp — route table của nó không có đường đi từ IGW vào.
+Đây chính là lý do EC2 ở private subnet không thể bị internet access trực tiếp — nó không có public IP, nên IGW không có mapping nào cho nó. Kể cả ai đó gửi packet đến private IP như `10.0.2.50`, địa chỉ đó thuộc dải RFC 1918 (dải IP dành riêng cho mạng nội bộ) — không thể route trên internet công cộng và sẽ không bao giờ đến được AWS.
 
 Trong mỗi subnet `/24` (256 IP), AWS **giữ lại 5 IP** không dùng được:
 
@@ -92,7 +92,7 @@ Packet từ client `1.2.3.4` với destination `52.10.10.10` (public IP của AL
 
 IGW làm đúng **2 việc**, không hơn:
 
-1. **NAT 1-to-1**: dịch public IP sang private IP (chiều vào), và ngược lại (chiều ra)
+1. **Map public IP to private IP**: dịch public IP sang private IP (chiều vào), và ngược lại (chiều ra)
 2. **Forward packet**: chuyển packet qua biên giới giữa internet và VPC
 
 Tại hop này, IGW tra bảng mapping nội bộ và dịch:
@@ -103,7 +103,7 @@ dst: 52.10.10.10 (ALB public IP) → dst: 10.0.1.10 (ALB private IP)
 
 Sau IGW, packet mang `dst: 10.0.1.10`. Từ thời điểm này, **public IP không còn tồn tại** bên trong VPC — mọi giao tiếp nội bộ đều qua private IP. Đây là điểm nhiều người hiểu sai: public IP chỉ "sống" ở tầng IGW, bên trong VPC không ai thấy nó.
 
-IGW là stateless — không filter, không cache, không load balance. Một VPC chỉ gắn được một IGW.
+IGW là stateless — không filter, không cache, không load balance. Nó có thể stateless vì NAT của nó là binding tĩnh 1-to-1 (một public IP luôn map với một private IP), khác với PAT của NAT Gateway phải track từng connection. Một VPC chỉ gắn được một IGW, và một IGW chỉ gắn được một VPC (nghiêm ngặt 1-to-1).
 
 <ExcalidrawDiagram
   src="/vpc-igw-nat-translation.excalidraw"
@@ -145,6 +145,8 @@ Lưu ý: route table **không xử lý packet** — nó chỉ là config. Thực
 ### 5. ALB nhận request, forward đến EC2
 
 Packet đến ALB ở public subnet. ALB **terminate connection** của client — nghĩa là TCP connection từ client kết thúc ở đây. ALB xử lý request rồi tạo **một connection hoàn toàn mới** đến EC2 ở private subnet.
+
+Lưu ý về IP của ALB: khác với EC2 có thể giữ Elastic IP cố định, internet-facing ALB không có public IP cố định. AWS gán IP động cho các ENI của ALB (mỗi AZ một ENI), và IP này có thể thay đổi bất cứ lúc nào. Vì vậy bạn luôn phải trỏ DNS vào DNS name của ALB (ví dụ `my-alb-123456.ap-southeast-1.elb.amazonaws.com`), không trỏ vào IP. IP `52.10.10.10` trong bảng giả định chỉ là ảnh chụp tại thời điểm trace packet.
 
 <ExcalidrawDiagram src="/vpc-alb-routing-to-private-subnet.excalidraw" alt="VPC alb routing to private subnet" />
 
@@ -219,7 +221,9 @@ EC2 xử lý xong request, giờ cần gọi `api.stripe.com` để charge credi
 
 Tại sao cần NAT Gateway? Toàn bộ service trong private subnet chỉ có **private IP**, không có Elastic IP — mà internet không biết route đến private IP, nên chúng **không thể giao tiếp trực tiếp với internet**. NAT Gateway nằm ở public subnet, có EIP, đóng vai trò **đại diện** cho các service trong private subnet: nó nhận packet từ chúng, thay source IP bằng EIP của mình, rồi gửi ra internet thay.
 
-Nhưng một NAT Gateway chỉ có một EIP — làm sao đại diện cho hàng chục, hàng trăm service cùng lúc? Câu trả lời nằm ở **port**. NAT Gateway sử dụng kỹ thuật **PAT** (Port Address Translation — dịch địa chỉ theo port): mỗi connection từ private subnet được gán một **port riêng** trên EIP. Ví dụ, EC2 `10.0.2.50` gửi request → NAT Gateway gán port `40001`, EC2 `10.0.2.51` gửi request → gán port `40002`. Khi response trả về EIP trên port `40001`, NAT Gateway tra bảng mapping, biết port này thuộc về `10.0.2.50` và chuyển response về đúng service.
+Nhưng một NAT Gateway chỉ có một EIP — làm sao đại diện cho hàng chục, hàng trăm service cùng lúc? Câu trả lời nằm ở **port**. NAT Gateway sử dụng kỹ thuật **PAT** (Port Address Translation — kỹ thuật ánh xạ nhiều connection private vào cùng một public IP bằng cách gán cho mỗi connection một source port riêng): mỗi connection từ private subnet được gán một **port riêng** trên EIP. Ví dụ, EC2 `10.0.2.50` mở connection đến Stripe → NAT Gateway gán port `40001`, cùng EC2 đó mở thêm connection đến logging service → gán port `40002`. Khi response trả về EIP trên port `40001`, NAT Gateway tra bảng mapping, biết port này thuộc về connection Stripe của `10.0.2.50` và chuyển response về đúng chỗ.
+
+Port được gán **theo từng connection** (theo bộ 5 giá trị gọi là 5-tuple: source IP, source port, destination IP, destination port, protocol), không phải theo từng EC2. Một EC2 có thể dùng hàng nghìn port nếu nó mở nhiều connection đồng thời. Đây là lý do NAT Gateway có giới hạn khoảng 55,000 connection đồng thời cho mỗi destination — xấp xỉ số ephemeral port khả dụng trên một EIP.
 
 Flow cụ thể:
 
@@ -239,14 +243,14 @@ Chú ý **2 lần NAT** xảy ra trên đường đi:
 
 So sánh nhanh IGW vs NAT Gateway:
 
-|                 | IGW                               | NAT Gateway                              |
-| --------------- | --------------------------------- | ---------------------------------------- |
-| Vị trí          | Biên giới VPC                     | Public subnet                            |
-| NAT loại        | 1-to-1 (mỗi EIP map 1 private IP) | Many-to-1 (nhiều private IP share 1 EIP) |
-| Chiều           | Hai chiều (in + out)              | Một chiều (chỉ out)                      |
-| Có ENI?         | Không                             | Có                                       |
-| Cần Elastic IP? | Không (gắn vào resource)          | Có (bắt buộc khi tạo)                    |
-| Chi phí         | Miễn phí                          | Tính theo giờ + GB data                  |
+|                 | IGW                               | NAT Gateway                                                                            |
+| --------------- | --------------------------------- | -------------------------------------------------------------------------------------- |
+| Vị trí          | Biên giới VPC                     | Public subnet                                                                          |
+| NAT loại        | 1-to-1 (mỗi EIP map 1 private IP) | Many-to-1 (nhiều private IP share 1 EIP)                                               |
+| Chiều           | Hai chiều (in + out)              | Chỉ chiều ra (chặn inbound không mời, cho phép return traffic nhờ connection tracking) |
+| Có ENI?         | Không                             | Có                                                                                     |
+| Cần Elastic IP? | Không (gắn vào resource)          | Có, cho Public NAT GW (Private NAT GW thì không cần)                                   |
+| Chi phí         | Miễn phí                          | Tính theo giờ + GB data                                                                |
 
 <ExcalidrawDiagram
   src="/vpc-nat-gateway-outbound.excalidraw"

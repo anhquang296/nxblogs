@@ -66,7 +66,7 @@ An important point: **a subnet is not inherently public or private**. That chara
 - Route table has `0.0.0.0/0 → nat-xxx` → **private** subnet (traffic exits to internet via NAT Gateway)
 - Route table has no default route → **isolated** subnet (no internet access)
 
-This is exactly why EC2 in the private subnet can't be accessed directly from the internet — its route table has no route from IGW in.
+This is exactly why EC2 in the private subnet can't be accessed directly from the internet — it has no public IP, so IGW has no mapping for it. Even if someone sent a packet to a private IP like `10.0.2.50`, that address (RFC 1918 — a reserved range for private networks) isn't routable on the public internet and would never reach AWS.
 
 Within each `/24` subnet (256 IPs), AWS **reserves 5 IPs** that cannot be used:
 
@@ -92,7 +92,7 @@ The packet from client `203.0.113.5` with destination `54.250.10.100` (ALB's pub
 
 IGW does exactly **2 things**, nothing more:
 
-1. **1-to-1 NAT**: translates public IP to private IP (inbound), and vice versa (outbound)
+1. **Map public IP to private IP**: translates public IP to private IP (inbound), and vice versa (outbound)
 2. **Forward packet**: moves the packet across the boundary between the internet and VPC
 
 At this hop, IGW looks up its internal mapping table and translates:
@@ -103,7 +103,7 @@ dst: 54.250.10.100 (ALB public IP) → dst: 10.0.1.20 (ALB private IP)
 
 After the IGW, the packet now carries `dst: 10.0.1.20`. From this point on, **public IP no longer exists** inside the VPC — all internal communication uses private IPs. This is a commonly misunderstood point: public IPs only "live" at the IGW layer; inside the VPC, no one sees them.
 
-IGW is stateless — no filtering, no caching, no load balancing. A VPC can only attach one IGW.
+IGW is stateless — no filtering, no caching, no load balancing. It can afford to be stateless because its NAT is a static 1-to-1 binding (one public IP always maps to one private IP), unlike NAT Gateway's PAT which must track each connection. A VPC can only attach one IGW, and one IGW can only attach to one VPC (strictly 1-to-1).
 
 <ExcalidrawDiagram
   src="/vpc-igw-nat-translation.excalidraw"
@@ -145,6 +145,8 @@ Note: the route table **doesn't process packets** — it's just config. The actu
 ### 5. ALB receives request, forwards to EC2
 
 The packet arrives at ALB in the public subnet. ALB **terminates the connection** from the client — meaning the TCP connection from the client ends here. ALB processes the request then creates a **completely new connection** to EC2 in the private subnet.
+
+A note on ALB's IP: unlike EC2 instances that can hold a stable Elastic IP, an internet-facing ALB does not have a fixed public IP. AWS dynamically assigns IPs to ALB's ENIs (one per Availability Zone), and these IPs can change at any time. That's why you must always point DNS to ALB's DNS name (e.g. `my-alb-123456.ap-southeast-1.elb.amazonaws.com`), never to an IP address. The IP `54.250.10.100` in our assumption table is a snapshot for this packet-tracing exercise only.
 
 <ExcalidrawDiagram src="/vpc-alb-routing-to-private-subnet.excalidraw" alt="VPC alb routing to private subnet" />
 
@@ -219,7 +221,9 @@ EC2 finishes processing the request, now it needs to call `api.stripe.com` to ch
 
 Why is NAT Gateway needed? Every service in a private subnet only has a **private IP** — no Elastic IP. The internet has no route to private IPs, so these services **cannot communicate with the internet directly**. NAT Gateway, sitting in the public subnet with an EIP, acts as a **representative** for private subnet services: it receives their packets, replaces the source IP with its own EIP, and sends them out to the internet on their behalf.
 
-But a NAT Gateway has only one EIP — how can it represent dozens or hundreds of services simultaneously? The answer lies in **ports**. NAT Gateway uses a technique called **PAT** (Port Address Translation): each connection from the private subnet is assigned a **unique port** on the EIP. For example, EC2 `10.0.2.50` sends a request → NAT Gateway assigns port `40001`, EC2 `10.0.2.51` sends a request → assigned port `40002`. When a response comes back to the EIP on port `40001`, NAT Gateway checks its mapping table, knows this port belongs to `10.0.2.50`, and forwards the response to the correct service.
+But a NAT Gateway has only one EIP — how can it represent dozens or hundreds of services simultaneously? The answer lies in **ports**. NAT Gateway uses a technique called **PAT** (Port Address Translation — a technique that maps multiple private connections to one public IP by assigning each connection a unique source port): each connection from the private subnet is assigned a **unique port** on the EIP. For example, EC2 `10.0.2.50` opens a connection to Stripe → NAT Gateway assigns port `40001`, the same EC2 opens another connection to a logging service → assigned port `40002`. When a response comes back to the EIP on port `40001`, NAT Gateway checks its mapping table, knows this port belongs to `10.0.2.50`'s Stripe connection, and forwards the response correctly.
+
+Port assignment is **per connection** (tracked by 5-tuple: source IP, source port, destination IP, destination port, protocol), not per EC2 instance. A single EC2 can consume thousands of ports if it has many concurrent connections. This is why NAT Gateway has a limit of around 55,000 simultaneous connections per unique destination — approximately the number of ephemeral ports available on a single EIP.
 
 The specific flow:
 
@@ -239,14 +243,14 @@ Note the **2 NAT translations** on the way out:
 
 Quick comparison — IGW vs NAT Gateway:
 
-|                      | IGW                                    | NAT Gateway                                  |
-| -------------------- | -------------------------------------- | -------------------------------------------- |
-| Location             | VPC boundary                           | Public subnet                                |
-| NAT type             | 1-to-1 (each EIP maps to 1 private IP) | Many-to-1 (multiple private IPs share 1 EIP) |
-| Direction            | Bidirectional (in + out)               | One-way (out only)                           |
-| Has ENI?             | No                                     | Yes                                          |
-| Requires Elastic IP? | No (attached to resource)              | Yes (required at creation)                   |
-| Cost                 | Free                                   | Per hour + per GB data                       |
+|                      | IGW                                    | NAT Gateway                                                                                         |
+| -------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Location             | VPC boundary                           | Public subnet                                                                                       |
+| NAT type             | 1-to-1 (each EIP maps to 1 private IP) | Many-to-1 (multiple private IPs share 1 EIP)                                                        |
+| Direction            | Bidirectional (in + out)               | Outbound-initiated only (blocks unsolicited inbound, allows return traffic via connection tracking) |
+| Has ENI?             | No                                     | Yes                                                                                                 |
+| Requires Elastic IP? | No (attached to resource)              | Yes, for Public NAT GW (Private NAT GW does not need one)                                           |
+| Cost                 | Free                                   | Per hour + per GB data                                                                              |
 
 <ExcalidrawDiagram
   src="/vpc-nat-gateway-outbound.excalidraw"
