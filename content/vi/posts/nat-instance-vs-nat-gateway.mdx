@@ -2,7 +2,7 @@
 title: 'NAT Instance vs NAT Gateway: Tự Quản Lý hay Để AWS Lo?'
 date: '2026-05-23'
 tags: ['AWS', 'Networking', 'SAA', 'Devops']
-description: 'So sánh chi tiết NAT Instance và NAT Gateway — từ cách NAT Instance hoạt động, tại sao phải tắt Source/Destination Check, đến bảng so sánh giúp bạn chọn đúng cho từng use case.'
+description: 'So sánh chi tiết NAT Instance, Zonal NAT Gateway và Regional NAT Gateway — từ cách NAT Instance hoạt động, tại sao phải tắt Source/Destination Check, đến bảng so sánh giúp bạn chọn đúng cho từng use case.'
 enableComment: true
 ---
 
@@ -164,7 +164,7 @@ Security Group tối thiểu cho NAT Instance:
 
 ---
 
-## 3. NAT Gateway — Managed Service (Recap)
+## 3. Zonal NAT Gateway — Managed Service (Recap)
 
 NAT Gateway là lựa chọn mà AWS **khuyến nghị mặc định**. Thay vì tự quản lý EC2, bạn chỉ cần:
 
@@ -180,34 +180,83 @@ AWS lo toàn bộ phần còn lại: patching, monitoring, scaling, high availab
 
 **Lưu ý quan trọng về High Availability**: NAT Gateway có HA tự động **trong một AZ**. Nếu AZ đó down, NAT Gateway cũng down. Để có HA trên toàn region, bạn cần deploy **một NAT Gateway ở mỗi AZ** và cấu hình route table tương ứng cho private subnet trong AZ đó. Bạn không cần lo về cross-AZ failover — vì khi một AZ down, các EC2 trong AZ đó cũng down theo, nên chúng không cần NAT nữa.
 
----
-
-## 4. Bảng so sánh chi tiết
-
-| Tiêu chí                     | NAT Instance                                         | NAT Gateway                                   |
-| ----------------------------- | ---------------------------------------------------- | --------------------------------------------- |
-| **Bản chất**                  | EC2 instance chạy AMI có cấu hình NAT               | Dịch vụ managed hoàn toàn bởi AWS             |
-| **Quản lý**                   | Bạn tự quản lý (patch, update, monitor)              | AWS quản lý toàn bộ                           |
-| **Tính sẵn sàng (HA)**       | Không có sẵn — phải tự setup bằng ASG multi-AZ       | HA tự động trong 1 AZ                          |
-| **Băng thông**                | Phụ thuộc instance type                              | Tự scale 5–100 Gbps                           |
-| **Hiệu năng**                | Bị giới hạn bởi CPU/network của EC2                  | Tối ưu cho NAT, hiệu năng cao                 |
-| **Chi phí**                   | Trả tiền EC2 instance (rẻ hơn với instance nhỏ)     | $0.045/giờ + $0.045/GB (đắt hơn)              |
-| **Security Group**            | ✅ Có thể gắn                                        | ❌ Không hỗ trợ (chỉ dùng NACL)              |
-| **Dùng làm Bastion host**    | ✅ Có thể                                            | ❌ Không thể                                  |
-| **Port forwarding**           | ✅ Hỗ trợ                                            | ❌ Không hỗ trợ                               |
-| **Source/Destination Check**  | Phải disable thủ công                                | Không cần (AWS tự xử lý)                      |
-| **Elastic IP**                | Có thể dùng EIP hoặc public IP                      | Bắt buộc gắn EIP                              |
+> Phần trên mô tả **Zonal NAT Gateway** — loại truyền thống hoạt động trong 1 AZ. Từ cuối 2025, AWS đã ra mắt **Regional NAT Gateway** với nhiều cải tiến — chi tiết ở phần tiếp theo.
 
 ---
 
-## 5. Khi nào nên dùng cái nào?
+## 4. Regional NAT Gateway — Bước tiến mới (2025)
 
-### Dùng NAT Gateway khi:
+Tháng 11/2025, AWS công bố **regional availability mode** cho NAT Gateway. Với tính năng này, bạn có thể tạo một NAT Gateway duy nhất tự động mở rộng và thu hẹp theo các Availability Zones (AZs) trong VPC dựa trên sự hiện diện của workload, để duy trì high availability đồng thời đơn giản hóa việc setup và quản lý.
 
-- **Môi trường production** cần độ tin cậy và HA cao
-- Cần **băng thông lớn** và khả năng auto-scale
-- Không muốn tốn thời gian quản lý hạ tầng NAT
-- Đây là **lựa chọn mặc định** mà AWS khuyến nghị
+Đây là bước tiến quan trọng vì trước đây, để có HA toàn region, bạn phải tự deploy NAT Gateway ở từng AZ. Giờ AWS đã làm việc đó thay bạn.
+
+### 4.1. Khác biệt so với Zonal NAT Gateway
+
+**1. Không cần Public Subnet**
+
+Theo truyền thống, NAT Gateway yêu cầu public subnet (subnet có route trực tiếp ra internet qua IGW) để truy cập internet. Khách hàng quan tâm bảo mật phải đảm bảo không ai tạo tài nguyên khác trong public subnet đó. Với Regional NAT Gateway, VPC **không cần public subnet** — đây là cải thiện bảo mật rất lớn vì VPC giờ có thể hoàn toàn private mà vẫn có internet egress (kết nối đi ra internet).
+
+**2. Tự động mở rộng theo AZ**
+
+Regional NAT Gateway hoạt động ở cấp VPC. Khi bạn mở rộng workload sang AZ mới, bạn có thể tái sử dụng cùng một Regional NAT Gateway ID. Regional NAT Gateway tự động mở rộng và duy trì **zonal affinity** (ưu tiên xử lý traffic trong cùng AZ) để đảm bảo high availability.
+
+**3. Routing đơn giản hơn**
+
+Với Zonal NAT Gateway, bạn phải tạo **route table riêng cho từng AZ** — mỗi route table trỏ đến NAT Gateway của AZ đó. Với Regional NAT Gateway, chỉ cần **1 route table duy nhất** với entry `0.0.0.0/0 → rnat-xxx`, dùng chung cho mọi private subnet ở mọi AZ.
+
+**4. Hai chế độ vận hành**
+
+Regional NAT Gateway hoạt động ở 2 chế độ:
+
+- **Automatic mode**: AWS quản lý IP address và xử lý các thay đổi AZ tự động — bạn không cần can thiệp gì khi thêm hoặc bớt AZ
+- **Manual mode**: bạn tự quản lý IP address và chịu trách nhiệm điều chỉnh gateway ở từng AZ — phù hợp khi cần kiểm soát chặt danh sách IP egress (ví dụ cho allowlisting)
+
+### 4.2. Giới hạn
+
+**1. Không hỗ trợ Private NAT**: Regional NAT Gateway yêu cầu **Internet Gateway** (IGW) trong VPC — tức là chỉ hỗ trợ **public NAT** (traffic ra internet). Nếu bạn cần **private NAT** (traffic nội bộ giữa VPC hoặc đến on-premise), vẫn phải dùng Zonal Private NAT Gateway.
+
+**2. Chi phí không giảm đáng kể**: Regional NAT Gateway đơn giản hóa vận hành, nhưng chi phí tương đương với việc deploy multi-AZ Zonal NAT Gateway. Nếu mục tiêu là giảm chi phí, nên cân nhắc chuyển sang **IPv6** thay vì dùng NAT.
+
+### 4.3. Khuyến nghị từ AWS
+
+AWS đề xuất chuyển sang Regional NAT Gateway cho **tất cả các use case** ngoại trừ những trường hợp yêu cầu **private connectivity** — tính năng mà Regional NAT Gateway chưa hỗ trợ.
+
+---
+
+## 5. Bảng so sánh chi tiết
+
+| Tiêu chí | NAT Instance | Zonal NAT Gateway | Regional NAT Gateway |
+| --- | --- | --- | --- |
+| **Bản chất** | EC2 instance chạy AMI có cấu hình NAT | Dịch vụ managed, hoạt động trong 1 AZ | Dịch vụ managed, hoạt động ở cấp region |
+| **Quản lý** | Bạn tự quản lý (patch, update, monitor) | AWS quản lý toàn bộ | AWS quản lý toàn bộ |
+| **Tính sẵn sàng (HA)** | Không có sẵn — phải tự setup bằng ASG multi-AZ | HA tự động trong 1 AZ | HA tự động trên toàn region (multi-AZ) |
+| **Băng thông** | Phụ thuộc instance type | Tự scale 5–100 Gbps | Tự scale 5–100 Gbps |
+| **Chi phí** | Trả tiền EC2 instance (rẻ hơn với instance nhỏ) | $0.045/giờ + $0.045/GB | Tương đương Zonal NAT Gateway |
+| **Security Group** | Có thể gắn | Không hỗ trợ (chỉ dùng NACL) | Không hỗ trợ (chỉ dùng NACL) |
+| **Dùng làm Bastion host** | Có thể | Không thể | Không thể |
+| **Port forwarding** | Hỗ trợ | Không hỗ trợ | Không hỗ trợ |
+| **Source/Destination Check** | Phải disable thủ công | Không cần (AWS tự xử lý) | Không cần (AWS tự xử lý) |
+| **Elastic IP** | Có thể dùng EIP hoặc public IP | Bắt buộc gắn EIP | Hỗ trợ (tùy chế độ) |
+| **Public subnet** | Bắt buộc | Bắt buộc | **Không cần** |
+| **Private NAT** | Có thể cấu hình | Hỗ trợ | Chưa hỗ trợ |
+| **Routing khi multi-AZ** | Route table riêng mỗi AZ | Route table riêng mỗi AZ | 1 route table dùng chung |
+
+---
+
+## 6. Khi nào nên dùng cái nào?
+
+### Dùng Regional NAT Gateway khi:
+
+- **Môi trường production** cần HA multi-AZ mà không muốn quản lý nhiều NAT Gateway
+- Muốn **đơn giản hóa routing** — chỉ cần 1 route table dùng chung cho mọi AZ
+- Muốn tăng cường **bảo mật** — VPC không cần public subnet
+- Khi thêm AZ mới, không muốn phải tạo thêm NAT Gateway và sửa route table
+- Đây là **lựa chọn mới được AWS khuyến nghị** thay thế Zonal NAT Gateway cho hầu hết use case
+
+### Dùng Zonal NAT Gateway khi:
+
+- Cần **private NAT** (traffic nội bộ giữa VPC hoặc đến on-premise) — Regional NAT Gateway chưa hỗ trợ
+- Đã có hạ tầng multi-AZ NAT Gateway ổn định và chưa cần migrate
 
 ### Dùng NAT Instance khi:
 
@@ -217,7 +266,7 @@ AWS lo toàn bộ phần còn lại: patching, monitoring, scaling, high availab
 - Cần kiểm soát traffic chi tiết qua **Security Group** thay vì chỉ dùng NACL
 - Lưu lượng truy cập internet **thấp và không đột biến**
 
-> **Tip cho SAA exam**: đề thi thường hỏi về sự khác biệt giữa NAT Instance và NAT Gateway. Nhớ 3 keyword chính: **Source/Destination Check** (phải tắt cho NAT Instance), **Security Group** (chỉ NAT Instance hỗ trợ), và **High Availability** (NAT Gateway có sẵn trong AZ, NAT Instance phải tự setup).
+> **Tip cho SAA exam**: Regional NAT Gateway là topic mới và sẽ xuất hiện trong đề thi. Nhớ các keyword chính: **Source/Destination Check** (phải tắt cho NAT Instance), **Security Group** (chỉ NAT Instance hỗ trợ), **Regional NAT Gateway** (HA multi-AZ tự động, không cần public subnet, 1 route table dùng chung), và **Private NAT** (chỉ Zonal NAT Gateway hỗ trợ, Regional chưa có).
 
 ---
 
@@ -228,7 +277,8 @@ Quay lại câu hỏi ban đầu: đồng nghiệp gợi ý dùng NAT Instance c
 Những điểm cốt lõi:
 
 - **NAT Instance** là EC2 tự quản lý, phải disable **Source/Destination Check** vì nó forward packet không thuộc về mình — cả source lẫn destination IP đều không phải IP của nó
-- **NAT Gateway** là managed service — AWS lo HA, scaling, patching — bạn chỉ cần tạo, gắn EIP, và cấu hình route table
+- **Zonal NAT Gateway** là managed service hoạt động trong 1 AZ — AWS lo HA, scaling, patching — nhưng cần deploy ở mỗi AZ để có HA toàn region
+- **Regional NAT Gateway** là bước tiến mới (2025) — HA multi-AZ tự động, **không cần public subnet**, chỉ cần **1 route table** dùng chung cho mọi AZ
 - NAT Instance cho phép gắn **Security Group**, dùng làm **bastion host**, và hỗ trợ **port forwarding** — những thứ NAT Gateway không làm được
-- NAT Gateway là lựa chọn mặc định cho **production**; NAT Instance phù hợp cho **dev/test** hoặc khi cần tính năng đặc biệt
-- Để có **HA toàn region**, cả hai đều cần deploy ở **mỗi AZ** — NAT Gateway có HA tự động trong 1 AZ, NAT Instance thì phải tự setup bằng ASG
+- **Regional NAT Gateway** là lựa chọn mới mà AWS khuyến nghị cho hầu hết use case; NAT Instance phù hợp cho **dev/test** hoặc khi cần tính năng đặc biệt
+- Regional NAT Gateway **chưa hỗ trợ private NAT** — nếu cần private connectivity, vẫn phải dùng Zonal NAT Gateway

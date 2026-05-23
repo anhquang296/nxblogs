@@ -2,7 +2,7 @@
 title: 'NAT Instance vs NAT Gateway: Self-Managed or Let AWS Handle It?'
 date: '2026-05-23'
 tags: ['AWS', 'Networking', 'SAA', 'Devops']
-description: 'A detailed comparison of NAT Instance and NAT Gateway — how NAT Instance works under the hood, why Source/Destination Check must be disabled, and a comparison table to help you pick the right one.'
+description: 'A detailed comparison of NAT Instance, Zonal NAT Gateway, and Regional NAT Gateway — how NAT Instance works under the hood, why Source/Destination Check must be disabled, and a comparison table to help you pick the right one.'
 enableComment: true
 ---
 
@@ -164,7 +164,7 @@ Minimum Security Group rules for a NAT Instance:
 
 ---
 
-## 3. NAT Gateway — Managed Service (Recap)
+## 3. Zonal NAT Gateway — Managed Service (Recap)
 
 NAT Gateway is the option **AWS recommends by default**. Instead of managing your own EC2, you simply:
 
@@ -180,34 +180,83 @@ AWS handles everything else: patching, monitoring, scaling, and high availabilit
 
 **Important note about High Availability**: NAT Gateway has automatic HA **within a single AZ**. If that AZ goes down, the NAT Gateway goes down too. For region-wide HA, you need to deploy **one NAT Gateway per AZ** and configure route tables accordingly for each AZ's private subnets. You don't need to worry about cross-AZ failover — because when an AZ goes down, the EC2 instances in that AZ go down as well, so they no longer need NAT.
 
----
-
-## 4. Detailed Comparison
-
-| Criteria                      | NAT Instance                                         | NAT Gateway                                   |
-| ----------------------------- | ---------------------------------------------------- | --------------------------------------------- |
-| **Nature**                    | EC2 instance running a NAT-configured AMI            | Fully managed AWS service                      |
-| **Management**                | You manage everything (patch, update, monitor)       | AWS manages everything                         |
-| **High Availability**         | Not built-in — must self-setup with ASG multi-AZ     | Automatic HA within 1 AZ                       |
-| **Bandwidth**                 | Depends on instance type                             | Auto-scales 5–100 Gbps                         |
-| **Performance**               | Limited by EC2 CPU/network                           | Optimized for NAT, high performance            |
-| **Cost**                      | Pay for EC2 instance (cheaper with small instances)  | $0.045/hr + $0.045/GB (more expensive)         |
-| **Security Group**            | ✅ Can attach                                        | ❌ Not supported (NACL only)                   |
-| **Use as Bastion host**       | ✅ Possible                                          | ❌ Not possible                                |
-| **Port forwarding**           | ✅ Supported                                         | ❌ Not supported                               |
-| **Source/Destination Check**  | Must disable manually                                | Not needed (AWS handles it)                    |
-| **Elastic IP**                | Can use EIP or public IP                             | EIP required                                   |
+> The section above describes **Zonal NAT Gateway** — the traditional type that operates within a single AZ. Since late 2025, AWS has launched **Regional NAT Gateway** with significant improvements — details in the next section.
 
 ---
 
-## 5. When Should You Use Which?
+## 4. Regional NAT Gateway — A Major Step Forward (2025)
 
-### Use NAT Gateway when:
+In November 2025, AWS announced **regional availability mode** for NAT Gateway. With this feature, you can create a single NAT Gateway that automatically scales up and down across Availability Zones (AZs) in your VPC based on workload presence, maintaining high availability while simplifying setup and management.
 
-- **Production environments** requiring high reliability and HA
-- You need **high bandwidth** and auto-scaling capabilities
-- You don't want to spend time managing NAT infrastructure
-- This is the **default recommendation** from AWS
+This is a major step forward because previously, achieving region-wide HA required manually deploying a NAT Gateway in each AZ. Now AWS handles that for you.
+
+### 4.1. Key Differences from Zonal NAT Gateway
+
+**1. No Public Subnet Required**
+
+Traditionally, NAT Gateway required a public subnet (a subnet with a direct route to the internet via IGW) for internet access. Security-conscious customers had to ensure no one created other resources in that public subnet. With Regional NAT Gateway, your VPC **doesn't need a public subnet** — this is a major security improvement because VPCs can now be completely private while still having internet egress (outbound internet connectivity).
+
+**2. Automatic AZ Scaling**
+
+Regional NAT Gateway operates at the VPC level. When you expand your workload to a new AZ, you can reuse the same Regional NAT Gateway ID. Regional NAT Gateway automatically scales and maintains **zonal affinity** (preferring to process traffic within the same AZ) to ensure high availability.
+
+**3. Simplified Routing**
+
+With Zonal NAT Gateway, you need to create **separate route tables for each AZ** — each pointing to that AZ's NAT Gateway. With Regional NAT Gateway, you only need **a single route table** with the entry `0.0.0.0/0 → rnat-xxx`, shared across all private subnets in every AZ.
+
+**4. Two Operating Modes**
+
+Regional NAT Gateway operates in 2 modes:
+
+- **Automatic mode**: AWS manages IP addresses and handles AZ changes automatically — you don't need to intervene when adding or removing AZs
+- **Manual mode**: you manage IP addresses yourself and are responsible for adjusting the gateway per AZ — suitable when you need tight control over egress IP addresses (e.g., for allowlisting)
+
+### 4.2. Limitations
+
+**1. No Private NAT Support**: Regional NAT Gateway requires an **Internet Gateway** (IGW) in the VPC — meaning it only supports **public NAT** (traffic to the internet). If you need **private NAT** (internal traffic between VPCs or to on-premise), you must still use Zonal Private NAT Gateway.
+
+**2. No Significant Cost Reduction**: Regional NAT Gateway simplifies operations, but costs are comparable to deploying multi-AZ Zonal NAT Gateways. If your goal is to reduce costs, consider migrating to **IPv6** instead of using NAT.
+
+### 4.3. AWS Recommendation
+
+AWS recommends migrating to Regional NAT Gateway for **all use cases** except those requiring **private connectivity** — a feature that Regional NAT Gateway does not yet support.
+
+---
+
+## 5. Detailed Comparison
+
+| Criteria | NAT Instance | Zonal NAT Gateway | Regional NAT Gateway |
+| --- | --- | --- | --- |
+| **Nature** | EC2 instance running a NAT-configured AMI | Managed service, operates in 1 AZ | Managed service, operates at region level |
+| **Management** | You manage everything (patch, update, monitor) | AWS manages everything | AWS manages everything |
+| **High Availability** | Not built-in — must self-setup with ASG multi-AZ | Automatic HA within 1 AZ | Automatic HA across region (multi-AZ) |
+| **Bandwidth** | Depends on instance type | Auto-scales 5–100 Gbps | Auto-scales 5–100 Gbps |
+| **Cost** | Pay for EC2 instance (cheaper with small instances) | $0.045/hr + $0.045/GB | Comparable to Zonal NAT Gateway |
+| **Security Group** | Can attach | Not supported (NACL only) | Not supported (NACL only) |
+| **Use as Bastion host** | Possible | Not possible | Not possible |
+| **Port forwarding** | Supported | Not supported | Not supported |
+| **Source/Destination Check** | Must disable manually | Not needed (AWS handles it) | Not needed (AWS handles it) |
+| **Elastic IP** | Can use EIP or public IP | EIP required | Supported (depends on mode) |
+| **Public subnet** | Required | Required | **Not required** |
+| **Private NAT** | Can be configured | Supported | Not yet supported |
+| **Routing for multi-AZ** | Separate route table per AZ | Separate route table per AZ | Single shared route table |
+
+---
+
+## 6. When Should You Use Which?
+
+### Use Regional NAT Gateway when:
+
+- **Production environments** requiring multi-AZ HA without managing multiple NAT Gateways
+- You want to **simplify routing** — just 1 shared route table for all AZs
+- You want enhanced **security** — no public subnet needed in the VPC
+- When adding new AZs, you don't want to create additional NAT Gateways and modify route tables
+- This is the **new AWS recommendation**, replacing Zonal NAT Gateway for most use cases
+
+### Use Zonal NAT Gateway when:
+
+- You need **private NAT** (internal traffic between VPCs or to on-premise) — Regional NAT Gateway doesn't support this yet
+- You already have stable multi-AZ NAT Gateway infrastructure and don't need to migrate yet
 
 ### Use NAT Instance when:
 
@@ -217,7 +266,7 @@ AWS handles everything else: patching, monitoring, scaling, and high availabilit
 - You need granular traffic control via **Security Groups** instead of just NACLs
 - Internet traffic is **low and predictable**
 
-> **SAA exam tip**: exam questions often focus on the differences between NAT Instance and NAT Gateway. Remember 3 key concepts: **Source/Destination Check** (must be disabled for NAT Instance), **Security Group** (only NAT Instance supports it), and **High Availability** (NAT Gateway has it built-in per AZ, NAT Instance requires manual setup).
+> **SAA exam tip**: Regional NAT Gateway is a new topic that will appear in exams. Remember the key concepts: **Source/Destination Check** (must be disabled for NAT Instance), **Security Group** (only NAT Instance supports it), **Regional NAT Gateway** (automatic multi-AZ HA, no public subnet needed, single shared route table), and **Private NAT** (only Zonal NAT Gateway supports it, Regional does not yet).
 
 ---
 
@@ -228,7 +277,8 @@ Back to the original question: your colleague suggested using a NAT Instance for
 Key takeaways:
 
 - **NAT Instance** is a self-managed EC2 that requires disabling **Source/Destination Check** because it forwards packets that don't belong to it — neither the source nor destination IP matches its own
-- **NAT Gateway** is a managed service — AWS handles HA, scaling, and patching — you just create it, attach an EIP, and configure the route table
+- **Zonal NAT Gateway** is a managed service operating within a single AZ — AWS handles HA, scaling, and patching — but requires deployment in each AZ for region-wide HA
+- **Regional NAT Gateway** is a major step forward (2025) — automatic multi-AZ HA, **no public subnet needed**, and only **1 route table** shared across all AZs
 - NAT Instance supports **Security Groups**, can serve as a **bastion host**, and enables **port forwarding** — capabilities that NAT Gateway lacks
-- NAT Gateway is the default choice for **production**; NAT Instance is suitable for **dev/test** or when you need special features
-- For **region-wide HA**, both require deployment in **each AZ** — NAT Gateway has automatic HA within an AZ, while NAT Instance requires manual setup with ASG
+- **Regional NAT Gateway** is the new AWS recommendation for most use cases; NAT Instance is suitable for **dev/test** or when you need special features
+- Regional NAT Gateway **does not yet support private NAT** — if you need private connectivity, you must still use Zonal NAT Gateway
