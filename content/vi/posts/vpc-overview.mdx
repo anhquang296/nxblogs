@@ -227,10 +227,10 @@ Port được gán **theo từng connection** (theo bộ 5 giá trị gọi là 
 
 Flow cụ thể:
 
-1. EC2 (10.0.2.50) tạo packet `src 10.0.2.50`, `dst 3.4.5.6`
-2. Route Table (private subnet) match 3.4.5.6 với rule `0.0.0.0/0 → nat-xxx`. Forward đến NAT Gateway
+1. EC2 (10.0.2.50) tạo packet `src 10.0.2.50`, `dst 3.5.6.7`
+2. Route Table (private subnet) match 3.5.6.7 với rule `0.0.0.0/0 → nat-xxx`. Forward đến NAT Gateway
 3. Sau khi đi qua NAT Gateway (public subnet, private IP: 10.0.1.20), `src 10.0.2.50` → `src 10.0.1.20`. Lưu connection vào tracking table (nhớ 10.0.2.50 để dịch ngược)
-4. Route Table (public subnet) match 3.4.5.6 với rule 0.0.0.0/0 → igw-xxx. Forward đến IGW
+4. Route Table (public subnet) match 3.5.6.7 với rule 0.0.0.0/0 → igw-xxx. Forward đến IGW
 5. Sau khi đi qua Internet Gateway, nó sẽ dịch private IP thành EIP của NAT Gateway `src 10.0.1.20` → `src 52.20.20.20`
 6. Internet Stripe thấy request từ 52.20.20.20
 
