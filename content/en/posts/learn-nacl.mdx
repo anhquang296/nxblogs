@@ -1,0 +1,165 @@
+---
+title: 'AWS Network ACL: The Stateless "Fence" Protecting Your Subnet'
+date: '2026-05-23'
+tags: ['Devops', 'AWS', 'SAA', 'SAP']
+description: 'Network ACL (NACL) — stateless firewall at the subnet level, comparison with Security Groups, how NACL rules work, and why you must allow Ephemeral Ports.'
+enableComment: true
+---
+
+# AWS Network ACL: The Stateless "Fence" Protecting Your Subnet
+
+You're running an e-commerce system on AWS. Your DevOps team discovers a suspicious IP from overseas continuously scanning ports on EC2 instances in your private subnet. [Security Groups](/en/posts/learn-security-group) have already blocked unnecessary ports — but you want to **completely block that IP**, preventing it from reaching any instance in the subnet.
+
+The problem: Security Groups only have **Allow** rules, no **Deny**. You simply cannot write a rule that says "block IP 1.2.3.4".
+
+This is where **NACL (Network Access Control List)** comes in. NACL lets you write **Deny** rules to stop traffic right at the subnet gateway — before it ever reaches any instance inside.
+
+This post will explain what NACL is, how it differs from Security Groups, and a critical concept that many newcomers overlook: **Ephemeral Ports**.
+
+<ExcalidrawDiagram
+  src="/nacl-overview.excalidraw"
+  alt="Network ACL vs Security Group — Two layers of network defense: NACL at subnet level (stateless, allow + deny) and Security Group at instance level (stateful, allow only)"
+/>
+
+---
+
+## 1. What is NACL?
+
+**NACL (Network Access Control List)** is a virtual firewall that operates at the **subnet** level. If you think of a [VPC](/en/posts/vpc-overview) as a city district and subnets as neighborhoods, then NACL is the **fence** surrounding each neighborhood — controlling who can enter (Inbound) and who can leave (Outbound).
+
+Key characteristics:
+
+- **Each subnet has exactly one NACL.** When you create a new subnet, AWS automatically assigns it to the VPC's **Default NACL**.
+- **The Default NACL allows everything** — both inbound and outbound traffic are allowed. This is why many people don't even know NACL exists until they need to block something.
+- **A newly created custom NACL denies everything.** If you create a new NACL and assign it to a subnet without adding any rules, all traffic will be blocked.
+- NACL is ideal for **blocking a specific IP** at the subnet level — something Security Groups cannot do.
+
+---
+
+## 2. How Do NACL Rules Work?
+
+NACL uses a **numbered rule system** to decide which traffic is allowed and which is denied. This mechanism is fundamentally different from Security Groups.
+
+### How it works:
+
+- Each rule has a **number from 1 to 32766**. The lower the number, the **higher the priority**.
+- NACL evaluates rules in ascending order. **The first matching rule is applied** — all remaining rules are ignored. This is called the **first match wins** mechanism.
+- The last rule is always an **asterisk (\*)** — a default rule that **denies all** traffic if no other rule matches.
+
+### Example:
+
+| Rule # | Type  | Protocol | Port Range | Source         | Action  |
+| ------ | ----- | -------- | ---------- | -------------- | ------- |
+| 100    | HTTPS | TCP      | 443        | 0.0.0.0/0      | ALLOW   |
+| 200    | HTTPS | TCP      | 443        | 10.0.0.10/32   | DENY    |
+| \*     | All   | All      | All        | 0.0.0.0/0      | DENY    |
+
+In this example, IP `10.0.0.10` sends an HTTPS request to the subnet. NACL evaluates top to bottom:
+
+1. **Rule #100**: source `0.0.0.0/0` (all IPs) matches first, so the traffic is **ALLOWED**.
+2. Rule #200 is never evaluated because rule #100 already matched.
+
+If you want to **block IP `10.0.0.10` while still allowing HTTPS for all other IPs**, you need to swap the order: place the DENY rule at a lower number than the ALLOW rule.
+
+| Rule # | Type  | Protocol | Port Range | Source         | Action  |
+| ------ | ----- | -------- | ---------- | -------------- | ------- |
+| 100    | HTTPS | TCP      | 443        | 10.0.0.10/32   | **DENY**  |
+| 200    | HTTPS | TCP      | 443        | 0.0.0.0/0      | ALLOW   |
+| \*     | All   | All      | All        | 0.0.0.0/0      | DENY    |
+
+Now IP `10.0.0.10` gets blocked at rule #100, while all other IPs are allowed at rule #200.
+
+> AWS recommends adding rules in **increments of 100** (100, 200, 300...) so you can easily insert new rules in between later. For example, if you need to add a rule between #100 and #200, you can use #150.
+
+---
+
+## 3. Why Do We Need NACL When Security Groups Already Exist?
+
+Many people wonder: [Security Groups (SG)](/en/posts/learn-security-group) already control traffic, so isn't NACL redundant? The answer is **no** — because they protect at two different layers and complement each other.
+
+### Comparison
+
+| Feature               | Security Group (SG)                  | Network ACL (NACL)                      |
+| --------------------- | ------------------------------------ | --------------------------------------- |
+| **Level**             | Instance Level (attached to ENI)     | Subnet Level (attached to subnet)       |
+| **State**             | **Stateful** — auto-allows response  | **Stateless** — must allow both directions |
+| **Rule types**        | **Allow** only                       | Both **Allow** and **Deny**             |
+| **Rule evaluation**   | All rules merged together            | Evaluated by **rule number** (first match) |
+| **Default behavior**  | Deny all inbound, Allow all outbound | Default NACL: Allow all                 |
+| **Primary use case**  | Allow specific apps to access        | Block specific IPs/CIDRs at subnet level |
+
+### Stateful vs Stateless — The Key Difference
+
+This is the most important distinction to understand:
+
+- **Security Group is Stateful**: if an inbound request is allowed, the response is **automatically** permitted to go out — no outbound rule check needed. Similarly, if an outbound request is allowed, the inbound response passes automatically.
+
+- **NACL is Stateless**: NACL evaluates inbound and outbound traffic **completely independently**. If you allow inbound but forget to allow outbound, the response will be blocked. This is why Ephemeral Ports become critical (explained in the next section).
+
+### Defense in Depth
+
+In security, the **Defense in Depth** principle recommends never relying on a single layer of protection. NACL and SG form two complementary defense layers:
+
+1. **Layer 1 — NACL (Subnet boundary)**: blocks bad traffic right at the subnet gateway, before it reaches any instance. Example: blocking an IP that is launching a DDoS attack.
+2. **Layer 2 — Security Group (Instance boundary)**: controls exactly which traffic each instance can receive. Example: only allowing the ALB to send traffic to EC2 on port 8080.
+
+If someone bypasses NACL (because you haven't added a block rule yet), Security Group is still the last line of defense.
+
+---
+
+## 4. Ephemeral Ports — Why NACL Must Allow Them
+
+This is the part that many AWS beginners overlook, but it is critical when configuring NACL.
+
+### What Are Ephemeral Ports?
+
+<ExcalidrawDiagram
+  src="/nacl-ephemeral-ports.excalidraw"
+  alt="Ephemeral Ports — Client sends request from ephemeral port 50105 to server port 443, server responds back to port 50105"
+/>
+
+When two devices communicate over a network, they need to use **ports**. For example, when you access an HTTPS website, your browser connects to **port 443** (a defined port) on the web server. But the browser also needs a port on the client side to **receive the response** — this port is randomly chosen by the operating system from a temporary range called **Ephemeral Ports**.
+
+Ephemeral port ranges differ by operating system:
+
+| Operating System       | Ephemeral Port Range |
+| ---------------------- | -------------------- |
+| IANA & Windows 10+     | 49152 – 65535        |
+| Many Linux Kernels     | 32768 – 60999        |
+
+### Concrete Example
+
+In the diagram above, a Client (IP `11.22.33.44`) accesses a Web Server (IP `55.66.77.88`) over HTTPS:
+
+- **Request**: Client sends a packet from **Src Port 50105** (ephemeral, randomly chosen by the OS) to **Dest Port 443** (the defined HTTPS port).
+- **Response**: Web Server sends a packet from **Src Port 443** back to **Dest Port 50105** (the client's original ephemeral port).
+
+### Why Must NACL Allow Ephemeral Ports?
+
+Recall the **stateless** nature of NACL:
+
+- With **Security Group (stateful)**: you only need to allow inbound port 443. The response is automatically permitted — you don't need to worry about ephemeral ports at all.
+
+- With **NACL (stateless)**: where request and response are checked independently, if you only allow inbound port 443 but forget to allow outbound for ephemeral port 50105, the request will reach the server but the **response will be blocked** on the way back!
+
+Correct NACL outbound rules configuration:
+
+| Rule # | Type   | Protocol | Port Range    | Destination | Action |
+| ------ | ------ | -------- | ------------- | ----------- | ------ |
+| 100    | Custom | TCP      | 1024 – 65535  | 0.0.0.0/0   | ALLOW  |
+| \*     | All    | All      | All           | 0.0.0.0/0   | DENY   |
+
+The port range `1024 – 65535` covers the ephemeral port range of both Windows and Linux, ensuring response traffic is always permitted.
+
+> This is one of the **most common mistakes** when configuring NACL: allowing inbound but forgetting to allow outbound for ephemeral ports. The result is that requests reach the server, the server processes them, but responses cannot make it back to the client.
+
+---
+
+## Conclusion
+
+NACL and Security Group are not alternatives to each other — they are **two complementary defense layers** in VPC architecture:
+
+- **NACL** is the fence at the subnet level — **stateless**, supports both **Allow and Deny**, rules are evaluated by **rule number** (first match wins). Use it to block specific IPs/CIDRs.
+- **Security Group** is the guard at the instance level — **stateful**, only **Allow** rules, all rules are merged together. Use it to control fine-grained traffic for each application.
+- Because NACL is **stateless**, you must allow the **Ephemeral Port range** (1024 – 65535) in outbound rules so response traffic is not blocked.
+- AWS recommends adding NACL rules in **increments of 100** for easy insertion of new rules when needed.

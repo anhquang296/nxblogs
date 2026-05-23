@@ -1,0 +1,165 @@
+---
+title: 'AWS Network ACL: "Hàng Rào" Stateless Bảo Vệ Subnet'
+date: '2026-05-23'
+tags: ['Devops', 'AWS', 'SAA', 'SAP']
+description: 'Network ACL (NACL) — stateless firewall ở cấp subnet, so sánh với Security Group, cách hoạt động của NACL Rules, và vì sao cần allow Ephemeral Ports.'
+enableComment: true
+---
+
+# AWS Network ACL: "Hàng Rào" Stateless Bảo Vệ Subnet
+
+Bạn đang vận hành một hệ thống e-commerce trên AWS. Đội DevOps phát hiện một IP lạ từ nước ngoài liên tục quét port trên các EC2 instance trong private subnet. [Security Group](/vi/posts/learn-security-group) đã chặn các port không cần thiết — nhưng bạn muốn **block hoàn toàn IP đó**, không cho nó chạm đến bất kỳ instance nào trong subnet.
+
+Vấn đề: Security Group chỉ có rule **Allow**, không có **Deny**. Bạn không thể viết rule "cấm IP 1.2.3.4".
+
+Đây chính là lúc **NACL (Network Access Control List)** phát huy tác dụng. NACL cho phép bạn viết rule **Deny** để chặn đứng traffic ngay tại cửa ngõ subnet — trước khi nó kịp chạm đến bất kỳ instance nào bên trong.
+
+Bài viết này sẽ giải thích NACL là gì, nó khác Security Group ở điểm nào, và một khái niệm quan trọng mà nhiều người bỏ qua: **Ephemeral Ports**.
+
+<ExcalidrawDiagram
+  src="/nacl-overview.excalidraw"
+  alt="Network ACL vs Security Group — Two layers of network defense: NACL at subnet level (stateless, allow + deny) and Security Group at instance level (stateful, allow only)"
+/>
+
+---
+
+## 1. NACL là gì?
+
+**NACL (Network Access Control List)** là một tường lửa ảo (virtual firewall) hoạt động ở cấp **subnet**. Nếu coi [VPC](/vi/posts/vpc-overview) là một khu đô thị và subnet là các khu phố, thì NACL chính là **hàng rào** bao quanh mỗi khu phố — kiểm soát ai được phép đi vào (Inbound) và ai được phép đi ra (Outbound).
+
+Một vài đặc điểm cốt lõi:
+
+- **Mỗi subnet có đúng 1 NACL.** Khi bạn tạo một subnet mới, AWS tự động gán nó vào **Default NACL** của VPC.
+- **Default NACL cho phép tất cả** — cả inbound lẫn outbound traffic đều được allow. Đây là lý do nhiều người không biết NACL tồn tại cho đến khi cần block thứ gì đó.
+- **Custom NACL mới tạo sẽ deny tất cả.** Nếu bạn tạo một NACL mới và gán cho subnet mà chưa thêm rule nào, mọi traffic sẽ bị chặn hoàn toàn.
+- NACL rất phù hợp để **block một IP cụ thể** ở cấp subnet — điều mà Security Group không làm được.
+
+---
+
+## 2. NACL Rules hoạt động như thế nào?
+
+NACL sử dụng hệ thống **rule theo số thứ tự (rule number)** để quyết định traffic nào được phép và traffic nào bị chặn. Cơ chế này khác hoàn toàn so với Security Group.
+
+### Nguyên tắc hoạt động:
+
+- Mỗi rule có một **số thứ tự từ 1 đến 32766**. Số càng nhỏ, **độ ưu tiên càng cao**.
+- NACL kiểm tra rule theo thứ tự từ nhỏ đến lớn. **Rule đầu tiên khớp sẽ được áp dụng** — các rule còn lại bị bỏ qua. Đây gọi là cơ chế **first match wins**.
+- Rule cuối cùng luôn là **dấu sao (\*)** — đây là rule mặc định, sẽ **deny tất cả** traffic nếu không có rule nào khác khớp.
+
+### Ví dụ minh họa:
+
+| Rule # | Type  | Protocol | Port Range | Source         | Action  |
+| ------ | ----- | -------- | ---------- | -------------- | ------- |
+| 100    | HTTPS | TCP      | 443        | 0.0.0.0/0      | ALLOW   |
+| 200    | HTTPS | TCP      | 443        | 10.0.0.10/32   | DENY    |
+| \*     | All   | All      | All        | 0.0.0.0/0      | DENY    |
+
+Trong ví dụ trên, IP `10.0.0.10` gửi request HTTPS đến subnet. NACL kiểm tra từ trên xuống:
+
+1. **Rule #100**: source `0.0.0.0/0` (tất cả IP) → khớp → **ALLOW**
+2. Rule #200 không bao giờ được kiểm tra vì rule #100 đã match trước.
+
+Nếu bạn muốn **block IP `10.0.0.10` nhưng vẫn allow HTTPS cho mọi IP khác**, bạn cần đảo thứ tự: đặt rule DENY ở số nhỏ hơn rule ALLOW.
+
+| Rule # | Type  | Protocol | Port Range | Source         | Action  |
+| ------ | ----- | -------- | ---------- | -------------- | ------- |
+| 100    | HTTPS | TCP      | 443        | 10.0.0.10/32   | **DENY**  |
+| 200    | HTTPS | TCP      | 443        | 0.0.0.0/0      | ALLOW   |
+| \*     | All   | All      | All        | 0.0.0.0/0      | DENY    |
+
+Bây giờ IP `10.0.0.10` sẽ bị chặn ở rule #100, còn mọi IP khác sẽ được allow ở rule #200.
+
+> AWS khuyến nghị thêm rule theo **bội số 100** (100, 200, 300...) để dễ dàng chèn thêm rule mới vào giữa khi cần. Ví dụ: nếu sau này cần thêm rule giữa #100 và #200, bạn có thể dùng #150.
+
+---
+
+## 3. Vì sao đã có Security Group, lại cần NACL?
+
+Nhiều người thắc mắc: [Security Group (SG)](/vi/posts/learn-security-group) đã kiểm soát traffic rồi, vậy NACL có thừa không? Câu trả lời là **không** — vì hai thằng này bảo vệ ở hai tầng khác nhau và bổ sung cho nhau.
+
+### Bảng so sánh
+
+| Đặc điểm             | Security Group (SG)                  | Network ACL (NACL)                      |
+| --------------------- | ------------------------------------ | --------------------------------------- |
+| **Cấp độ**            | Instance Level (gắn vào ENI)         | Subnet Level (gắn vào subnet)           |
+| **Trạng thái**        | **Stateful** — tự mở đường cho response | **Stateless** — phải mở cả 2 chiều    |
+| **Loại rule**         | Chỉ có **Allow**                     | Có cả **Allow** và **Deny**             |
+| **Đánh giá rule**     | Tất cả rule được gộp lại             | Kiểm tra theo **số thứ tự** (first match) |
+| **Mặc định**          | Deny all inbound, Allow all outbound | Default NACL: Allow all                 |
+| **Use case chính**    | Cho phép app cụ thể truy cập         | Block IP/CIDR cụ thể ở subnet level    |
+
+### Stateful vs Stateless — sự khác biệt then chốt
+
+Đây là điểm mấu chốt mà bạn cần hiểu rõ:
+
+- **Security Group là Stateful**: nếu một request inbound được allow, response sẽ **tự động** được phép đi ra mà không cần kiểm tra outbound rules. Tương tự, nếu outbound request được allow, response inbound cũng tự động được phép.
+
+- **NACL là Stateless**: NACL kiểm tra inbound và outbound traffic **hoàn toàn độc lập**. Nếu bạn allow inbound nhưng quên allow outbound, response sẽ bị chặn. Đây là lý do Ephemeral Ports trở nên quan trọng (sẽ giải thích ở phần tiếp theo).
+
+### Defense in Depth — phòng thủ nhiều lớp
+
+Trong bảo mật, nguyên tắc **Defense in Depth** (phòng thủ theo chiều sâu) khuyên bạn không nên dựa vào một lớp bảo vệ duy nhất. NACL và SG tạo thành hai lớp phòng thủ bổ sung cho nhau:
+
+1. **Lớp 1 — NACL (Subnet boundary)**: chặn traffic xấu ngay tại cửa ngõ subnet, trước khi nó kịp chạm đến bất kỳ instance nào. Ví dụ: block IP đang tấn công DDoS.
+2. **Lớp 2 — Security Group (Instance boundary)**: kiểm soát chi tiết từng instance được phép nhận traffic từ đâu. Ví dụ: chỉ cho phép ALB gửi traffic đến EC2 trên port 8080.
+
+Nếu ai đó vượt qua NACL (vì bạn chưa kịp thêm rule block), Security Group vẫn là lớp phòng thủ cuối cùng.
+
+---
+
+## 4. Ephemeral Ports — Vì sao NACL cần allow chúng?
+
+Đây là phần mà nhiều người mới học AWS hay bỏ qua, nhưng lại cực kỳ quan trọng khi cấu hình NACL.
+
+### Ephemeral Port là gì?
+
+<ExcalidrawDiagram
+  src="/nacl-ephemeral-ports.excalidraw"
+  alt="Ephemeral Ports — Client sends request from ephemeral port 50105 to server port 443, server responds back to port 50105"
+/>
+
+Khi hai thiết bị muốn giao tiếp qua mạng, chúng cần sử dụng **port** (cổng). Ví dụ: khi bạn truy cập một website HTTPS, trình duyệt kết nối đến **port 443** (defined port) trên web server. Nhưng trình duyệt cũng cần một port ở phía client để **nhận response** — port này được hệ điều hành chọn ngẫu nhiên từ một dải port tạm thời, gọi là **Ephemeral Port** (port phù du).
+
+Dải ephemeral port khác nhau tùy hệ điều hành:
+
+| Hệ điều hành          | Ephemeral Port Range |
+| ---------------------- | -------------------- |
+| IANA & Windows 10+     | 49152 – 65535        |
+| Many Linux Kernels     | 32768 – 60999        |
+
+### Ví dụ cụ thể
+
+Trong hình trên, Client (IP `11.22.33.44`) truy cập Web Server (IP `55.66.77.88`) qua HTTPS:
+
+- **Request**: Client gửi packet từ **Src Port 50105** (ephemeral, do OS chọn ngẫu nhiên) đến **Dest Port 443** (defined port của HTTPS).
+- **Response**: Web Server gửi packet từ **Src Port 443** về **Dest Port 50105** (ephemeral port của client ban đầu).
+
+### Vì sao NACL cần allow Ephemeral Ports?
+
+Quay lại đặc điểm **stateless** của NACL:
+
+- Với **Security Group (stateful)**: bạn chỉ cần allow inbound port 443. Response sẽ tự động được phép đi ra — bạn không cần quan tâm đến ephemeral port.
+
+- Với **NACL (stateless)**: Nơi mà việc kiểm tra request và response một cách độc lập, nếu bạn chỉ allow inbound port 443 mà quên allow outbound cho ephemeral port 50105, request sẽ đến được server nhưng **response sẽ bị block** trên đường về!
+
+Cấu hình NACL outbound rules đúng cách:
+
+| Rule # | Type   | Protocol | Port Range    | Destination | Action |
+| ------ | ------ | -------- | ------------- | ----------- | ------ |
+| 100    | Custom | TCP      | 1024 – 65535  | 0.0.0.0/0   | ALLOW  |
+| \*     | All    | All      | All           | 0.0.0.0/0   | DENY   |
+
+Port range `1024 – 65535` bao phủ ephemeral port range của cả Windows và Linux, đảm bảo response traffic luôn được phép đi qua.
+
+> Đây là một trong những **lỗi phổ biến nhất** khi cấu hình NACL: allow inbound nhưng quên allow outbound cho ephemeral ports. Kết quả là request đến được server, server xử lý xong, nhưng response không gửi về được client.
+
+---
+
+## Kết luận
+
+NACL và Security Group không phải là hai lựa chọn thay thế nhau — chúng là **hai lớp phòng thủ bổ sung** cho nhau trong kiến trúc VPC:
+
+- **NACL** là hàng rào ở cấp subnet — **stateless**, hỗ trợ cả **Allow và Deny**, rule được kiểm tra theo **số thứ tự** (first match wins). Dùng để block IP/CIDR cụ thể.
+- **Security Group** là lớp bảo vệ ở cấp instance — **stateful**, chỉ có **Allow**, tất cả rule được gộp lại. Dùng để kiểm soát chi tiết traffic cho từng ứng dụng.
+- Vì NACL là **stateless**, bạn phải allow **Ephemeral Port range** (1024 – 65535) trong outbound rules để response traffic không bị chặn.
+- AWS khuyến nghị thêm NACL rules theo **bội số 100** để dễ chèn thêm rule khi cần.
