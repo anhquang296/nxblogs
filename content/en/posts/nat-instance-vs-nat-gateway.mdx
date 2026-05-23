@@ -174,9 +174,11 @@ NAT Gateway is the option **AWS recommends by default**. Instead of managing you
 
 AWS handles everything else: patching, monitoring, scaling, and high availability within the AZ. Bandwidth auto-scales from **5 Gbps up to 100 Gbps** — no need to choose an instance type or worry about bottlenecks.
 
+**Note**: EC2 instances in the **same subnet** as the NAT Gateway cannot use it — only EC2 instances from **other subnets** can route traffic through the NAT Gateway. This is why the NAT Gateway is always placed in a public subnet, while EC2 instances that need NAT reside in a private subnet.
+
 > For details on how NAT Gateway works (PAT, double NAT, connection tracking), see [AWS VPC: Understanding VPC Through a Packet's Journey — Flow 3: EC2 → Stripe](/en/posts/vpc-overview#flow-3-ec2--stripe--outbound-through-nat-gateway).
 
-**Important note about High Availability**: NAT Gateway has automatic HA **within a single AZ**. If that AZ goes down, the NAT Gateway goes down too. For region-wide HA, you need to deploy **one NAT Gateway per AZ** and configure route tables accordingly for each AZ's private subnets.
+**Important note about High Availability**: NAT Gateway has automatic HA **within a single AZ**. If that AZ goes down, the NAT Gateway goes down too. For region-wide HA, you need to deploy **one NAT Gateway per AZ** and configure route tables accordingly for each AZ's private subnets. You don't need to worry about cross-AZ failover — because when an AZ goes down, the EC2 instances in that AZ go down as well, so they no longer need NAT.
 
 ---
 

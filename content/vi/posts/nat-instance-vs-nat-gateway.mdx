@@ -174,9 +174,11 @@ NAT Gateway là lựa chọn mà AWS **khuyến nghị mặc định**. Thay vì
 
 AWS lo toàn bộ phần còn lại: patching, monitoring, scaling, high availability trong AZ. Bandwidth tự scale từ **5 Gbps lên đến 100 Gbps** — bạn không cần chọn instance type hay lo bottleneck.
 
+**Lưu ý**: EC2 trong **cùng subnet** với NAT Gateway không thể sử dụng nó — chỉ EC2 từ **subnet khác** mới có thể route traffic qua NAT Gateway. Đây là lý do NAT Gateway luôn đặt ở public subnet, còn EC2 cần NAT thì nằm ở private subnet.
+
 > Chi tiết về cách NAT Gateway hoạt động (PAT, double NAT, connection tracking) đã được giải thích trong bài [AWS VPC: Hiểu VPC qua lăng kính của một Packet — Flow 3: EC2 → Stripe](/vi/posts/vpc-overview#flow-3-ec2--stripe--ra-internet-qua-nat-gateway).
 
-**Lưu ý quan trọng về High Availability**: NAT Gateway có HA tự động **trong một AZ**. Nếu AZ đó down, NAT Gateway cũng down. Để có HA trên toàn region, bạn cần deploy **một NAT Gateway ở mỗi AZ** và cấu hình route table tương ứng cho private subnet trong AZ đó.
+**Lưu ý quan trọng về High Availability**: NAT Gateway có HA tự động **trong một AZ**. Nếu AZ đó down, NAT Gateway cũng down. Để có HA trên toàn region, bạn cần deploy **một NAT Gateway ở mỗi AZ** và cấu hình route table tương ứng cho private subnet trong AZ đó. Bạn không cần lo về cross-AZ failover — vì khi một AZ down, các EC2 trong AZ đó cũng down theo, nên chúng không cần NAT nữa.
 
 ---
 
