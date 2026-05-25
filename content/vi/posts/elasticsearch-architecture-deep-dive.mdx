@@ -12,9 +12,11 @@ Bạn vừa nhận yêu cầu xây tính năng tìm kiếm cho 1 trang e-commerc
 
 Bạn mở PostgreSQL — vốn đang lưu toàn bộ sản phẩm — và viết câu query đầu tiên: `SELECT * FROM products WHERE name ILIKE '%samsung galaxy s24 ultra 256gb đen%'`. Kết quả: query mất 15 giây, scan toàn bộ bảng, và nếu user gõ thiếu chữ "ultra" thì không match. Bạn thử dùng `tsvector` và `ts_rank` của PostgreSQL Full-Text Search — tốt hơn một chút nhưng vẫn không hiểu typo, không stem được từ tiếng Việt, và khi index lên 50 triệu rows thì việc rebuild tốn hàng giờ.
 
-Đây không phải là bài toán mà một relational database có thể giải quyết tốt. Vấn đề cốt lõi nằm ở chỗ: search không chỉ là **so khớp chuỗi**, mà là một bài toán **phân tích ngôn ngữ + ranking + scale ngang**. Bạn cần một hệ thống biết tách "samsung galaxy s24 ultra" thành các token, hiểu rằng "đen" có thể là một thuộc tính màu, ranking documents theo TF-IDF hoặc BM25, và quan trọng nhất — phải scale được khi data lên hàng trăm GB hoặc TB.
+Đây không phải là bài toán mà một relational database có thể giải quyết tốt. Vấn đề cốt lõi nằm ở chỗ: search không chỉ là **so khớp chuỗi**, mà là một bài toán **phân tích ngôn ngữ + ranking + scale ngang**. Bạn cần một hệ thống biết tách "samsung galaxy s24 ultra" thành các token, hiểu rằng "đen" có thể là một thuộc tính màu, ranking documents theo TF-IDF hoặc BM25 (các thuật toán scoring kết hợp tần suất xuất hiện của từ với độ hiếm của term để đo độ liên quan), và quan trọng nhất — phải scale được khi data lên hàng trăm GB hoặc TB.
 
 Đây chính là không gian mà **Elasticsearch** chiếm lĩnh suốt hơn một thập kỷ qua. Là một **distributed search and analytics engine** xây trên nền **Apache Lucene** (thư viện inverted-index huyền thoại của Doug Cutting), Elasticsearch không chỉ đảm nhận search mà còn xử lý log aggregation (stack ELK), observability, security analytics, và là backbone của những hệ thống xử lý hàng **petabytes dữ liệu** tại Netflix, eBay, Uber, Wikipedia.
+
+Có một cách framing đắt tiền nhưng đúng mà bạn nên giữ trong đầu suốt bài viết: **Elasticsearch không phải database — nó là search engine có khả năng lưu trữ**. Đảo ngược thứ tự này là nguồn gốc của hầu hết hiểu nhầm về nó (vì sao không có ACID transactions, vì sao shard count immutable sau khi tạo, vì sao eventual consistency cho search là feature chứ không phải bug). Mọi đặc điểm kiến trúc bạn sắp đọc đều là **hệ quả tất yếu** của "search-first DNA" đó, không phải là design choice ngẫu nhiên.
 
 Nhưng cái làm Elasticsearch đặc biệt — và cũng là phần thường bị che giấu sau REST API trông có vẻ đơn giản — là **kiến trúc phân tán** của nó. Làm sao một cluster có thể tự cân bằng dữ liệu khi thêm node? Làm sao đảm bảo data không mất khi 1 node chết? Làm sao tránh được **split-brain** khi network bị chia cắt? Tại sao production luôn khuyến cáo phải có ít nhất 3 master-eligible nodes? Và tại sao số shards lại immutable sau khi tạo index?
 
@@ -153,9 +155,9 @@ Hãy hình dung bạn có 1 index `logs` lưu **300GB** log mỗi ngày. Nếu E
 - Mọi query phải chạy trên 1 node → CPU bottleneck
 - Node chết = mất luôn data → no fault tolerance
 
-**Shard** giải quyết cả 3 vấn đề. Một shard là một **Lucene index độc lập** — đầy đủ inverted index, doc values, stored fields, segments riêng — và là **đơn vị nhỏ nhất** để Elasticsearch scale ngang.
+Lời giải cho cả ba vấn đề trên là **shard**. Và đây là chỗ rất nhiều developer hiểu sai khi đến với Elasticsearch lần đầu: shard không phải "một slice của index" — nó là **một Lucene index hoàn chỉnh, có thể tự đứng vững**, đầy đủ inverted index, segments, doc values, stored fields riêng. "Index" của Elasticsearch chỉ là một abstraction logic chồng lên N Lucene indexes. Một khi bạn nắm được góc nhìn này, mọi hệ quả khác — vì sao shard count immutable, vì sao mỗi shard có overhead cố định, vì sao oversharding nguy hiểm — đều trở nên rõ ràng.
 
-Khi tạo index `logs` với `number_of_shards: 6`, Elasticsearch sẽ tạo ra 6 shard:
+Shard cũng là **đơn vị nhỏ nhất** để Elasticsearch scale ngang. Khi tạo index `logs` với `number_of_shards: 6`, Elasticsearch sẽ tạo ra 6 shard:
 
 ```
 Index "logs" (logical, 300GB)
@@ -214,7 +216,7 @@ Khi bạn POST một document vào index, Elasticsearch phải quyết định *
 shard_num = hash(_routing) % number_of_primary_shards
 ```
 
-Mặc định `_routing = _id`. Tức là `hash(_id) % number_of_shards` quyết định shard. Hash dùng là `MurmurHash3` — fast và phân tán đều.
+Mặc định `_routing = _id`. Tức là `hash(_id) % number_of_shards` quyết định shard. Hash dùng là `MurmurHash3` — một **non-cryptographic hash function** nổi tiếng vì tốc độ cao và phân tán đều, không phải vì security (cryptographic hash như SHA-256 chậm hơn nhiều, mà routing không cần chống collision có chủ ý).
 
 <ExcalidrawDiagram
   src="/elasticsearch-document-routing.excalidraw"
@@ -266,9 +268,13 @@ Cùng `routing` → cùng shard. Query với `routing` parameter sẽ chỉ scan
 
 **Trade-off**: nếu một số tenant lớn bất thường, shard chứa data của họ sẽ phình to hơn các shard khác (hot shard problem).
 
+Đây là điểm rất nhiều developer coi nhẹ vì nghe thì giống "performance tuning có thể thêm vào sau": **routing không phải optimization — nó là contract**. Một khi đã chọn `_routing` (mặc định `_id`, hoặc custom như `tenant_id`), bạn đã quyết định data locality và query pattern cho **toàn bộ vòng đời của index**. Đổi routing strategy về sau = reindex toàn bộ data sang index mới, không có shortcut.
+
 ---
 
 ## 3. Shard Allocation — Ai quyết định shard nằm ở đâu?
+
+Trước khi đi vào chi tiết, một mệnh đề định khung cho cả section này: **allocation trong Elasticsearch là kết quả của một chuỗi "NO" chứ không phải một chuỗi "YES"**. Một decider từ chối là đủ để chặn placement — không cần đa số đồng ý. Đây là design pattern bảo thủ có chủ đích, vì sai lầm về data placement (placement nhầm AZ, nhầm tier, vượt disk watermark) không thể undo bằng 1 API call — luôn tốn IO để copy lại. Thà từ chối allocate ngay từ đầu còn hơn allocate rồi phải rollback giữa chừng.
 
 ### 3.1. Allocation là gì?
 
@@ -500,11 +506,13 @@ PUT /_cluster/settings
 }
 ```
 
+Lưu ý nguyên tắc ẩn đằng sau công thức và `threshold` ở trên: **rebalancing không cố đạt cân bằng tuyệt đối — nó chỉ cố đạt "đủ cân bằng để không cần move thêm"**. Threshold tồn tại không phải để tiết kiệm CPU, mà vì mỗi shard move là một cuộc sao chép gigabyte qua network (xem section sau). Cluster thà chấp nhận một độ skew nhẹ giữa các node còn hơn move shard liên tục — trade off ngắn hạn để bảo vệ stability dài hạn.
+
 ### 4.4. Throttling — Đừng để rebalancing giết cluster
 
-Mỗi lần move shard thực ra là **copy toàn bộ dữ liệu shard từ source node sang target node** — có thể là vài chục GB. Nếu cluster rebalance đồng thời 50 shard, network và disk sẽ nghẹt → query latency tăng vọt.
+Câu đắt nhất bạn cần nhớ về rebalancing: **mỗi shard move = một cuộc copy gigabyte qua network**. Source node phải đọc toàn bộ Lucene segment files của shard và stream sang target node — có thể là vài chục GB cho mỗi shard. Throttling vì thế không phải optimization — nó là **biện pháp tự vệ**. Nếu cluster cho phép rebalance đồng thời 50 shard, network bandwidth và disk IO sẽ nghẹt, query latency tăng vọt, và bạn vừa biến một sự kiện routine (thêm node) thành incident.
 
-Vì vậy có các giới hạn:
+Đó là lý do Elasticsearch áp các giới hạn mặc định khá thấp:
 
 | Setting                                                          | Default | Ý nghĩa                                      |
 | ---------------------------------------------------------------- | ------- | -------------------------------------------- |
@@ -538,7 +546,7 @@ Peer recovery có 2 phases:
 
 **Phase 1 — File-based copy**: Source node copy toàn bộ Lucene segment files sang target node. Source node tạm thời "freeze" segments (vẫn cho write thêm, nhưng segments hiện tại không bị delete) để đảm bảo file copy nhất quán.
 
-**Phase 2 — Translog replay**: Trong lúc phase 1 chạy, primary vẫn nhận write. Những write đó được ghi vào **translog** (write-ahead log). Sau khi phase 1 xong, target node "replay" translog để bắt kịp với primary. Cuối cùng cluster đánh dấu shard mới là active.
+**Phase 2 — Translog replay**: Trong lúc phase 1 chạy, primary vẫn nhận write. Những write đó được ghi vào **translog** (write-ahead log — pattern lưu mọi mutation vào file append-only **trước khi** apply state thực sự, để có thể replay khi crash hoặc khi cần đồng bộ lại bản sao). Sau khi phase 1 xong, target node "replay" translog để bắt kịp với primary. Cuối cùng cluster đánh dấu shard mới là active.
 
 Monitor recovery:
 
@@ -702,6 +710,8 @@ Khi master quyết định một thay đổi cluster state (vd: allocate shard m
 
 Nếu trong timeout (`cluster.publish.timeout`, default 30s) không nhận đủ ack: master **step down** (tự nguyện từ nhiệm), một election mới sẽ chạy. Đây là cơ chế bảo vệ chống lại partial network failure — nếu master không thể đảm bảo majority đồng thuận, nó tự rút lui thay vì cố apply state mà nửa cluster không thấy.
 
+Đây là trade-off design cốt lõi cần nhìn thẳng: **2-phase publication chấp nhận tăng latency để đổi lấy correctness guarantee**. Một broadcast 1-phase nhanh hơn, nhưng nếu nửa cluster không nhận được, hai nửa sẽ nhìn cluster state khác nhau — và "hai sự thật" là thảm họa lớn hơn nhiều so với "chậm vài trăm millisecond". Trong distributed system, "không quyết định" hầu như luôn an toàn hơn "quyết định sai mà không ai phát hiện".
+
 Diff thay vì full state: nếu chỉ thêm 1 index, diff chỉ vài KB thay vì gửi cả cluster state vài MB. Quan trọng cho cluster lớn.
 
 ### 5.7. Split-Brain — Bài toán kinh điển
@@ -730,6 +740,8 @@ Hình dung cluster 5 nodes ở 2 zone:
 - Zone B có 2/5 nodes < quorum 3 → **không được phép** elect master → cluster B không thể accept write (kể cả read consistency cũng có hạn chế)
 
 Một và chỉ một partition có thể "make progress". Khi network heal lại, các node ở zone B sẽ rejoin cluster, nhận cluster state mới nhất từ master ở zone A, và discard mọi state cục bộ.
+
+Nói thẳng ra mục đích thật của quorum — đây là mệnh đề bạn nên ghim lại: **quorum không phải để đảm bảo cluster luôn sống. Quorum là để đảm bảo khi cluster sống, nó chỉ có một sự thật**. Trong distributed system, thà liệt một nửa còn hơn có hai "sự thật" khác nhau cùng tồn tại — vì hai sự thật có nghĩa là **data divergence không thể reconcile**, một loại lỗi tệ hơn downtime gấp nhiều lần. Đây cũng là lý do mọi protocol consensus nghiêm túc (Paxos, Raft, Zen2) đều ưu tiên **safety** hơn **liveness** khi buộc phải chọn giữa hai.
 
 **Best practice:** triển khai master nodes qua **3 zones**, mỗi zone 1 master. Với 3 master và quorum 2, cluster có thể tolerate mất 1 zone hoàn toàn. **Không bao giờ** đặt 2 master ở cùng zone trong setup 3-master.
 
@@ -765,6 +777,8 @@ Sáu nguyên tắc design xuyên suốt mà bạn cần nhớ:
 4. **Tách dedicated master nodes ở production** — không để master phải gánh thêm data/search load.
 5. **Triển khai master qua nhiều AZ** — chỉ cách chống được zone failure.
 6. **Mọi thứ đi qua master** — cluster state changes là 2-phase commit, bảo vệ consistency.
+
+Nhìn lại 6 nguyên tắc trên, bạn sẽ thấy chúng không phải là một collection of best practices ngẫu nhiên — chúng là **hệ quả tất yếu** của câu khẳng định đặt ra ngay từ mở bài: Elasticsearch là search engine có khả năng lưu trữ. Mỗi quyết định kiến trúc — immutable shard count, primary-replica asymmetry, master-driven cluster state, quorum-based voting, 2-phase publication — đều **đánh đổi flexibility lấy predictability**. Bạn không thể thay đổi shard count runtime, nhưng đổi lại bạn có routing deterministic. Bạn không có ACID transactions across shards, nhưng đổi lại bạn có write throughput tuyến tính theo số node. Đó là lý do Elasticsearch scale được đến petabyte: không phải vì có "magic at scale" nào, mà vì mọi cấu trúc dữ liệu và protocol đều được thiết kế để **dễ dự đoán dưới partition và failure**. Khi vận hành nó ở production, bạn không "fight against" những constraint này — bạn dùng chúng làm điểm tựa.
 
 Trong các bài tiếp theo của series, chúng ta sẽ đào sâu hơn vào **storage internals** — Lucene segments, translog, refresh/flush/merge —, **search internals** — inverted index, BM25 scoring, query DSL execution —, và **production tuning** — JVM heap sizing, index lifecycle management, snapshot/restore.
 
