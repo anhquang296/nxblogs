@@ -72,6 +72,14 @@ Khi traffic đi qua internet công cộng, nó phải nhảy qua nhiều hop —
 
 Kết quả: latency biến động, có lúc nhanh có lúc chậm, đặc biệt với người dùng ở xa Region deploy. Global Accelerator loại bỏ vấn đề này bằng cách đưa traffic vào backbone ngay từ Edge gần nhất.
 
+Ví dụ: bạn đang ở Việt Nam và gọi đến server đặt ở Region `us-east-1` (Virginia, Mỹ). Khi traffic đi qua internet công cộng, nó phải nhảy qua hàng loạt mạng độc lập — từ ISP nội địa (Viettel/VNPT), qua peering point trong nước (VNIX), ra cáp quang biển (AAG/APG), đến các điểm peering quốc tế (Equinix Singapore, Tokyo), qua các Tier-1 transit (NTT, Telia, Cogent), rồi cuối cùng đến ISP ở Mỹ và server đích. Mỗi mạng đều thuộc một công ty khác nhau, không ai chịu trách nhiệm cho toàn tuyến.
+
+<ExcalidrawDiagram src="/public-internet-vn-to-us-path.excalidraw" alt="Đường đi qua internet công cộng từ Việt Nam đến server ở Mỹ — nhiều hops qua các ISP và peering point" />
+
+Còn khi đi qua **AWS Backbone Network**, traffic vào AWS ngay tại Edge Location gần nhất (HCMC hoặc Singapore), rồi đi thẳng trên cáp quang riêng của AWS đến Region đích. Chỉ một bên (AWS) sở hữu và vận hành toàn tuyến — không peering, không phụ thuộc BGP, không jitter.
+
+<ExcalidrawDiagram src="/aws-backbone-vn-to-us-path.excalidraw" alt="Đường đi qua AWS Backbone Network từ Việt Nam đến Region us-east-1 — ít hops, đường đi xác định" />
+
 ### 2.2. Static IP — không phụ thuộc DNS propagation
 
 Khi bạn thay đổi endpoint phía sau (ví dụ: chuyển từ ALB này sang ALB khác, hoặc failover sang Region khác), 2 Anycast IP của Global Accelerator **không thay đổi**. Client vẫn kết nối đến cùng IP.

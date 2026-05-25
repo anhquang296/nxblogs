@@ -72,6 +72,14 @@ When traffic travels through the public internet, it must hop through many inter
 
 Result: variable latency — sometimes fast, sometimes slow — especially for users far from the deployment Region. Global Accelerator eliminates this by routing traffic into the backbone from the nearest Edge.
 
+For example, say you're in Vietnam and your call goes to a server in `us-east-1` (Virginia, USA). On the public internet, traffic has to hop through a chain of independent networks — domestic ISP (Viettel/VNPT), the national peering point (VNIX), out via a submarine cable (AAG/APG), through international peering points (Equinix Singapore, Tokyo), across Tier-1 transit providers (NTT, Telia, Cogent), and finally to a US ISP that delivers it to the destination server. Each network is operated by a different company — no single party is responsible for the whole path.
+
+<ExcalidrawDiagram src="/public-internet-vn-to-us-path.excalidraw" alt="Public internet path from Vietnam to a US server — many hops through ISPs and peering points" />
+
+Over the **AWS Backbone Network**, traffic enters AWS at the nearest Edge Location (HCMC or Singapore) and travels directly over AWS-owned fiber to the destination Region. A single operator (AWS) owns and runs the entire path — no peering, no BGP dependency, minimal jitter.
+
+<ExcalidrawDiagram src="/aws-backbone-vn-to-us-path.excalidraw" alt="AWS Backbone Network path from Vietnam to us-east-1 — few hops, deterministic route" />
+
 ### 2.2. Static IP — no DNS propagation dependency
 
 When you change the backend endpoint (e.g., switch from one ALB to another, or failover to a different Region), Global Accelerator's 2 Anycast IPs **don't change**. Clients still connect to the same IP.
