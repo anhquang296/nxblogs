@@ -34,7 +34,6 @@ You can verify directly:
 
 ```sql
 SELECT pg_relation_filepath('users');
--- base/16384/24576
 ```
 
 `16384` is the database OID, `24576` is the **relfilenode** of the `users` table — `relfilenode` is the physical filename of a relation in PostgreSQL.
