@@ -130,7 +130,7 @@ The hard part shows up under load: hundreds of backends hammer the pool concurre
 
 ### A three-layer architecture
 
-To support those three questions, the buffer manager is built from three parallel components (per the canonical description at [interdb.jp pgsql08](https://www.interdb.jp/pg/pgsql08/index.html)):
+To support those three questions, the buffer manager is built from three parallel components:
 
 - **Buffer table** — a hash table that maps `BufferTag → buffer_id`. This is the index that tells you whether a given page is currently pooled.
 - **Buffer descriptor array** — a metadata array that runs parallel to the buffer pool; each entry describes one slot via `tag`, `buf_id`, `refcount` (pin count), `usage_count`, and a `state` word holding flags such as `BM_DIRTY`, `BM_VALID`, `BM_IO_IN_PROGRESS`.
