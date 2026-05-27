@@ -222,19 +222,6 @@ Putting it together: bgwriter does steady-rate hygiene and anticipates eviction;
 
 ---
 
-## 5. Putting it together
-
-End-to-end recap: when a client sends a DML statement to PostgreSQL, the query traverses the parser, planner, and executor and arrives at the storage layer you've just read about. The backend probes a `BufferTag` through the buffer table; on a hit it pins the buffer in shared_buffers and operates directly in RAM; on a miss clock-sweep picks a victim and loads the requested page from the heap file into the slot. Each modification just sets `BM_DIRTY` and moves on — bgwriter and the checkpointer move dirty pages out to the data files in the background.
-
-Understanding the storage layer lets you:
-
-- **Read and tune `EXPLAIN (ANALYZE, BUFFERS)`**: `shared hit` is a buffer pool hit; `shared read` means we had to go to disk (possibly hitting the OS page cache or further); `shared dirtied` is a page the query marked dirty — beware of hint bits.
-- **Tune `shared_buffers` deliberately**: chase the working set rather than scaling blindly; 25% of RAM is a starting point, not the answer.
-- **Understand fillfactor**: update-heavy tables → lower fillfactor to leave room for HOT updates; read-mostly tables → keep it at 100.
-- **Understand why tables grow fast even with frequent `DELETE`s**: dead tuples are just tuples with `t_xmax` set, still occupying their page. That's the topic of [the Table Bloat deep dive](/posts/table-bloat) — VACUUM reclaims dead-tuple space by pruning line pointers; VACUUM FULL rewrites the entire heap; pg_repack does the same without long locks.
-- **Understand why non-HOT updates are expensive**: every secondary index costs a write. Reduce index count, or ensure the indexes don't cover the columns being updated.
-- **Know when to scale up to partitioning**: once a table is too large to vacuum and maintain cleanly, [partitioning](/posts/postgresql-partitioning) gives each child its own heap, indexes, and vacuum scope.
+## 5. Conclusion
 
 You can learn the PostgreSQL storage engine top-down (SQL → query plan → I/O) or bottom-up (bytes in a file → pages → buffers → tuples → MVCC → SQL). The second path is harder but gives you more durable understanding — instead of relying on "best practices I once heard," you can read any documentation and reason about the trade-offs from first principles.
-
-A natural follow-up in this deep-dive series would be **B-tree index internals** (page structure, page splits, deduplication, bottom-up index deletion) or **vacuum/autovacuum mechanics** (visibility horizon, XID wraparound, freezing). Both go deeper into territory this post has only grazed.

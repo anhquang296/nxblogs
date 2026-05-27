@@ -222,19 +222,6 @@ Tóm lại, bgwriter "dọn vệ sinh" theo cấp số nhỏ và đoán trước
 
 ---
 
-## 5. Putting it together
-
-Tổng kết end-to-end: khi client gửi một câu DML đến PostgreSQL, query đi qua parser/planner/executor, đến storage layer mà bạn vừa đọc về. Backend tra `BufferTag` qua buffer table; nếu hit thì pin buffer trong shared_buffers và làm việc trực tiếp trên RAM; nếu miss thì clock-sweep chọn victim, load page mới từ heap file lên slot. Mỗi lần backend modify tuple thì chỉ set `BM_DIRTY` rồi đi tiếp — bgwriter và checkpointer dọn dẹp dirty pages về data files trong background.
-
-Hiểu sâu storage layer giúp bạn:
-
-- **Đọc và tune `EXPLAIN (ANALYZE, BUFFERS)`**: `shared hit` là buffer pool hit, `shared read` là phải đọc từ disk (qua OS page cache hoặc xa hơn). `shared dirtied` là page bị set dirty bởi query — chú ý hint bits.
-- **Tune `shared_buffers` có ý thức**: chú ý working set thay vì tăng đại; 25% RAM là điểm khởi đầu, không phải đáp án.
-- **Hiểu fillfactor**: bảng nhiều UPDATE → giảm fillfactor để chừa chỗ cho HOT updates; bảng read-only → giữ 100.
-- **Hiểu tại sao bảng to nhanh dù `DELETE` nhiều**: dead tuples chỉ là tuple với `t_xmax` set, vẫn chiếm chỗ trên page. Đây là chủ đề của [Deep Dive về Table Bloat](/posts/table-bloat) — VACUUM thu hồi space của dead tuples bằng cách prune line pointer; VACUUM FULL viết lại toàn bộ heap; pg_repack làm tương tự nhưng không lock.
-- **Hiểu tại sao non-HOT update đắt**: ghi N index entry mới. Giảm số index, hoặc đảm bảo index không cover cột đang update.
-- **Biết khi nào nên scale sang partitioning**: khi một bảng quá lớn để vacuum/maintain hợp lý nữa, [partitioning](/posts/postgresql-partitioning) cho phép mỗi child có heap/index/vacuum scope riêng.
+## 5. Kết luận
 
 PostgreSQL storage engine có thể được học từ trên xuống (SQL → query plan → I/O) hoặc từ dưới lên (byte trong file → page → buffer → tuple → MVCC → SQL). Cách thứ hai khó hơn nhưng cho hiểu biết bền vững hơn — bạn không còn lệ thuộc vào "best practice từng nghe nói" mà có thể đọc bất cứ tài liệu nào và suy ra trade-off bằng những nguyên lý đã nắm vững.
-
-Bài tiếp theo trong loạt deep-dive này có thể là về **B-tree index internals** (page structure, page splits, deduplication, bottom-up index deletion) hoặc **vacuum/autovacuum mechanics** (visibility horizon, xid wraparound, freezing). Cả hai đều đi sâu hơn vào những gì bài này mới chạm tới ở mặt ngoài.
