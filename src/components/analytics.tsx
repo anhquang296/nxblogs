@@ -1,12 +1,14 @@
 'use client'
 
+import { GoogleAnalytics } from '@next/third-parties/google'
 import { track } from '@vercel/analytics'
 import { Analytics as AnalyticsVercel } from '@vercel/analytics/next'
 import { SpeedInsights as SpeedInsightsVercel } from '@vercel/speed-insights/next'
 import { usePathname } from 'next/navigation'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 const PROXY_HOST = 'p.stopjustcoding.com'
+const GA_ID = 'G-8R2R0EKFHF'
 
 function getGeoCookies() {
   const cookies = Object.fromEntries(document.cookie.split('; ').map((c) => c.split('=')))
@@ -40,6 +42,12 @@ function useGeoTracker() {
 export function Analytics() {
   useGeoTracker()
 
+  const [loadGa, setLoadGa] = useState(false)
+
+  useEffect(() => {
+    setLoadGa(window.location.hostname !== PROXY_HOST)
+  }, [])
+
   return (
     <>
       <AnalyticsVercel
@@ -54,6 +62,7 @@ export function Analytics() {
           return data
         }}
       />
+      {loadGa && <GoogleAnalytics gaId={GA_ID} />}
     </>
   )
 }
