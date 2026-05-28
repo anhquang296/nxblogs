@@ -8,6 +8,27 @@ interface ExcalidrawDiagramProps {
   alt?: string
 }
 
+let excalidrawModule: Promise<typeof import('@excalidraw/excalidraw')> | null = null
+
+// Turbopack dev resolves Excalidraw's font-subset worker URL as file://, which throws a
+// cross-origin SecurityError. Disabling Worker during import forces font subsetting onto
+// the main thread (identical SVG output, no error). Production keeps the worker.
+function loadExcalidraw() {
+  if (!excalidrawModule) {
+    if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
+      const OriginalWorker = window.Worker
+      window.Worker = undefined as unknown as typeof Worker
+      excalidrawModule = import('@excalidraw/excalidraw').finally(() => {
+        window.Worker = OriginalWorker
+      })
+    } else {
+      excalidrawModule = import('@excalidraw/excalidraw')
+    }
+  }
+
+  return excalidrawModule
+}
+
 export function ExcalidrawDiagram({ src, alt }: ExcalidrawDiagramProps) {
   const [dataUrl, setDataUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -25,17 +46,21 @@ export function ExcalidrawDiagram({ src, alt }: ExcalidrawDiagramProps) {
 
         const data = await res.json()
 
-        const { exportToBlob } = await import('@excalidraw/excalidraw')
+        const { exportToSvg } = await loadExcalidraw()
 
-        const blob = await exportToBlob({
+        const svgElement = await exportToSvg({
           elements: data.elements,
           appState: {
             ...data.appState,
             exportWithDarkMode: false,
             exportBackground: true,
+            exportEmbedScene: false,
           },
           files: data.files || {},
         })
+
+        const svgString = new XMLSerializer().serializeToString(svgElement)
+        const blob = new Blob([svgString], { type: 'image/svg+xml' })
 
         if (cancelled) {
           return
