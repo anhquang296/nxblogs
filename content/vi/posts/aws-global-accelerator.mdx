@@ -24,11 +24,11 @@ Sức mạnh cốt lõi của Global Accelerator đến từ ba thành phần:
 
 ### 1.1. AWS Backbone Network
 
-**AWS Backbone Network** là mạng riêng nội bộ của AWS, kết nối tất cả các Region và Edge Location với nhau. Mạng này hoàn toàn tách biệt khỏi internet công cộng — được AWS xây dựng và vận hành riêng với cáp quang chuyên dụng.
+<Tooltip content="AWS's private internal network connecting all Regions and Edge Locations">AWS Backbone Network</Tooltip> là mạng riêng nội bộ của AWS, kết nối tất cả các Region và Edge Location với nhau. Mạng này hoàn toàn tách biệt khỏi internet công cộng — được AWS xây dựng và vận hành riêng với cáp quang chuyên dụng.
 
 Khi traffic đi trên backbone:
 
-- **Nhanh hơn** — đường đi được tối ưu, không phải nhảy qua nhiều ISP (Internet Service Provider — nhà cung cấp dịch vụ internet) trung gian
+- **Nhanh hơn** — đường đi được tối ưu, không phải nhảy qua nhiều <Tooltip content="Internet Service Provider — nhà cung cấp dịch vụ internet">ISP</Tooltip> trung gian
 - **Ổn định hơn** — không bị ảnh hưởng bởi tắc nghẽn trên internet công cộng
 - **Nhất quán hơn** — latency ít biến động giữa các lần request
 
@@ -36,7 +36,7 @@ Khi traffic đi trên backbone:
 
 ### 1.2. Edge Locations
 
-AWS có hơn **100 Edge Location** (điểm hiện diện — point of presence) trải khắp thế giới. Khi người dùng gửi request, traffic sẽ được tiếp nhận tại Edge Location gần nhất, rồi từ đó đi vào backbone network.
+AWS có hơn **100 <Tooltip content="Điểm hiện diện — point of presence">Edge Location</Tooltip>** trải khắp thế giới. Khi người dùng gửi request, traffic sẽ được tiếp nhận tại Edge Location gần nhất, rồi từ đó đi vào backbone network.
 
 Điều này có nghĩa: phần lớn hành trình của traffic diễn ra trên "đường cao tốc riêng" của AWS, thay vì lang thang trên internet công cộng. Người dùng ở Frankfurt chỉ cần đi một đoạn ngắn trên internet công cộng đến Edge Location tại Frankfurt, sau đó toàn bộ hành trình từ Frankfurt đến Singapore đều đi trên backbone.
 
@@ -44,9 +44,9 @@ AWS có hơn **100 Edge Location** (điểm hiện diện — point of presence)
 
 ### 1.3. Anycast IP
 
-Thông thường, mỗi địa chỉ IP là **Unicast** — nghĩa là một IP gắn với một server duy nhất tại một vị trí cụ thể. Khi bạn kết nối đến IP đó, traffic luôn đi đến đúng server đó, bất kể bạn ở đâu.
+Thông thường, mỗi địa chỉ IP là <Tooltip content="Một IP gắn với một server duy nhất tại một vị trí cụ thể">Unicast</Tooltip> — nghĩa là một IP gắn với một server duy nhất tại một vị trí cụ thể. Khi bạn kết nối đến IP đó, traffic luôn đi đến đúng server đó, bất kể bạn ở đâu.
 
-**Anycast** thì ngược lại: cùng một IP được quảng bá (advertise) từ **nhiều điểm trên thế giới** cùng lúc. Khi client kết nối đến IP này, hệ thống routing của internet tự động đưa traffic đến điểm gần nhất — hoàn toàn tự động, không cần DNS routing phức tạp.
+<Tooltip content="Cùng một IP được quảng bá từ nhiều điểm trên thế giới, routing tự động đưa traffic đến điểm gần nhất">Anycast</Tooltip> thì ngược lại: cùng một IP được quảng bá (advertise) từ **nhiều điểm trên thế giới** cùng lúc. Khi client kết nối đến IP này, hệ thống routing của internet tự động đưa traffic đến điểm gần nhất — hoàn toàn tự động, không cần DNS routing phức tạp.
 
 Global Accelerator cấp cho bạn **2 static Anycast IP**, được quảng bá từ tất cả Edge Location. Bất kể người dùng ở đâu, họ luôn kết nối đến Edge gần nhất chỉ bằng cách truy cập cùng một IP.
 
@@ -76,7 +76,7 @@ Ví dụ: bạn đang ở Việt Nam và gọi đến server đặt ở Region `
 
 <ExcalidrawDiagram src="/public-internet-vn-to-us-path.excalidraw" alt="Đường đi qua internet công cộng từ Việt Nam đến server ở Mỹ — nhiều hops qua các ISP và peering point" />
 
-Còn khi đi qua **AWS Backbone Network**, traffic vào AWS ngay tại Edge Location gần nhất (HCMC hoặc Singapore), rồi đi thẳng trên cáp quang riêng của AWS đến Region đích. Chỉ một bên (AWS) sở hữu và vận hành toàn tuyến — không peering, không phụ thuộc BGP, không jitter.
+Còn khi đi qua **AWS Backbone Network**, traffic vào AWS ngay tại Edge Location gần nhất (HCMC hoặc Singapore), rồi đi thẳng trên cáp quang riêng của AWS đến Region đích. Chỉ một bên (AWS) sở hữu và vận hành toàn tuyến — không peering, không phụ thuộc <Tooltip content="Border Gateway Protocol — giao thức định tuyến giữa các mạng tự trị trên internet">BGP</Tooltip>, không jitter.
 
 <ExcalidrawDiagram src="/aws-backbone-vn-to-us-path.excalidraw" alt="Đường đi qua AWS Backbone Network từ Việt Nam đến Region us-east-1 — ít hops, đường đi xác định" />
 
@@ -84,13 +84,13 @@ Còn khi đi qua **AWS Backbone Network**, traffic vào AWS ngay tại Edge Loca
 
 Khi bạn thay đổi endpoint phía sau (ví dụ: chuyển từ ALB này sang ALB khác, hoặc failover sang Region khác), 2 Anycast IP của Global Accelerator **không thay đổi**. Client vẫn kết nối đến cùng IP.
 
-So sánh với DNS-based failover (ví dụ Route 53): khi bạn đổi record DNS, phải đợi TTL (Time to Live — thời gian cache DNS) hết hạn. Trong khoảng thời gian đó, một số client vẫn kết nối đến endpoint cũ. Với Global Accelerator, việc chuyển đổi là tức thì vì IP không đổi.
+So sánh với DNS-based failover (ví dụ Route 53): khi bạn đổi record DNS, phải đợi <Tooltip content="Time to Live — thời gian cache DNS">TTL</Tooltip> hết hạn. Trong khoảng thời gian đó, một số client vẫn kết nối đến endpoint cũ. Với Global Accelerator, việc chuyển đổi là tức thì vì IP không đổi.
 
 ### 2.3. Health-based failover tức thì
 
 Global Accelerator liên tục health-check các endpoint. Khi phát hiện endpoint không healthy, traffic được tự động chuyển sang endpoint healthy khác **trong vài giây**.
 
-Nhanh hơn rất nhiều so với DNS failover (phụ thuộc vào TTL, thường từ 60-300 giây). Với các ứng dụng yêu cầu high availability (tính sẵn sàng cao), vài giây so với vài phút là khác biệt lớn.
+Nhanh hơn rất nhiều so với DNS failover (phụ thuộc vào TTL, thường từ 60-300 giây). Với các ứng dụng yêu cầu <Tooltip content="Tính sẵn sàng cao — hệ thống hoạt động ổn định, ít downtime">high availability</Tooltip>, vài giây so với vài phút là khác biệt lớn.
 
 ### 2.4. Multi-Region với traffic weights
 
@@ -106,7 +106,7 @@ Global Accelerator cho phép bạn phân phối traffic giữa nhiều Region th
 
 ### Gaming và ứng dụng real-time
 
-Global Accelerator hỗ trợ cả **TCP và UDP**. Với game online, mỗi millisecond latency đều quan trọng. Đưa traffic vào backbone thay vì internet công cộng giúp giảm latency và giảm jitter (biến động độ trễ — sự không nhất quán về thời gian giữa các packet).
+Global Accelerator hỗ trợ cả **TCP và UDP**. Với game online, mỗi millisecond latency đều quan trọng. Đưa traffic vào backbone thay vì internet công cộng giúp giảm latency và giảm <Tooltip content="Biến động độ trễ — sự không nhất quán về thời gian giữa các packet">jitter</Tooltip>.
 
 ### Nền tảng tài chính / giao dịch
 
@@ -132,7 +132,7 @@ Bạn đang chạy v1 trên ALB-A và muốn chuyển sang v2 trên ALB-B. Thay 
 
 ### 4.1. Bản chất khác nhau
 
-**CloudFront** là **CDN** (Content Delivery Network — mạng phân phối nội dung). Nhiệm vụ của nó là **cache và phân phối nội dung** gần người dùng hơn. Nó hoạt động ở **Layer 7** (tầng ứng dụng) — đọc HTTP request, xử lý headers, cache response.
+**CloudFront** là <Tooltip content="Content Delivery Network — mạng phân phối nội dung qua các edge location">CDN</Tooltip>. Nhiệm vụ của nó là **cache và phân phối nội dung** gần người dùng hơn. Nó hoạt động ở **Layer 7** (tầng ứng dụng) — đọc HTTP request, xử lý headers, cache response.
 
 **Global Accelerator** là **network accelerator**. Nhiệm vụ của nó là **mang traffic đến origin nhanh hơn** qua AWS backbone, **không can thiệp vào request**. Nó hoạt động ở **Layer 3/4** (tầng mạng/vận chuyển) — chỉ lo vận chuyển packet, không quan tâm nội dung bên trong.
 

@@ -14,7 +14,7 @@ Bài viết này sẽ đi sâu vào cơ chế hoạt động, các đặc điể
 
 ## 1. Security Group là gì?
 
-Về cơ bản, **Security Group là một tường lửa ảo (virtual firewall)** hoạt động ở cấp độ Instance. Nó đóng vai trò kiểm soát lưu lượng truy cập mạng (Inbound và Outbound) cho các tài nguyên AWS, phổ biến nhất là các máy chủ EC2.
+Về cơ bản, **Security Group là một <Tooltip content="Tường lửa hoạt động dưới dạng phần mềm trong môi trường đám mây, kiểm soát lưu lượng mạng vào/ra mà không cần thiết bị vật lý">tường lửa ảo</Tooltip>** hoạt động ở cấp độ Instance. Nó đóng vai trò kiểm soát lưu lượng truy cập mạng (Inbound và Outbound) cho các tài nguyên AWS, phổ biến nhất là các máy chủ EC2.
 
 ### Nguyên lý hoạt động cốt lõi:
 
@@ -28,7 +28,7 @@ Về cơ bản, **Security Group là một tường lửa ảo (virtual firewall
 
 Để vượt qua bài thi SAA và vận hành tốt thực tế, bạn cần nằm lòng các đặc điểm sau:
 
-1. **Hoạt động ở Instance Level:** SG được gắn trực tiếp vào card mạng (ENI) của instance, không phải ở cấp độ Subnet. Điều này tạo ra sự linh hoạt tối đa cho từng máy chủ riêng lẻ.
+1. **Hoạt động ở Instance Level:** SG được gắn trực tiếp vào <Tooltip content="Elastic Network Interface — card mạng ảo của EC2 instance, chứa các thuộc tính mạng như IP, MAC address, và Security Groups">card mạng (ENI)</Tooltip> của instance, không phải ở cấp độ Subnet. Điều này tạo ra sự linh hoạt tối đa cho từng máy chủ riêng lẻ.
 2. **Tính năng Stateful (Trạng thái):** Đây là đặc điểm quan trọng nhất. Nếu bạn cho phép một request đi vào (Inbound), hệ thống sẽ tự động mở đường cho phản hồi (Response) đi ra mà không cần quan tâm đến rule Outbound là gì, và ngược lại.
 3. **Chỉ có Allow, không có Deny:** Bạn không thể viết rule để "cấm một IP cụ thể". Bạn chỉ có thể "cho phép những gì tin cậy", còn lại mặc định bị chặn.
 4. **Hiệu lực tức thì:** Mọi thay đổi về Rule sẽ có tác dụng ngay lập tức mà không yêu cầu reboot máy chủ.
@@ -36,7 +36,7 @@ Về cơ bản, **Security Group là một tường lửa ảo (virtual firewall
 
 ---
 
-## 3. Phân biệt SG và Network ACL (NACL)
+## 3. Phân biệt SG và <Tooltip content="Network Access Control List — lớp tường lửa hoạt động ở cấp Subnet trong VPC, là stateless và hỗ trợ cả rule Allow lẫn Deny">Network ACL (NACL)</Tooltip>
 
 Rất nhiều người nhầm lẫn giữa hai khái niệm này. Hãy nhớ bảng so sánh nhanh dưới đây:
 

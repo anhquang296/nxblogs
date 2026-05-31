@@ -1,0 +1,334 @@
+---
+title: 'Deep Dive: PostgreSQL Index — Vì Sao Index Tăng Tốc Query, Và Khi Nào Postgres Bỏ Qua Nó'
+date: '2026-05-29'
+tags: ['Database']
+description: 'Mổ xẻ B-tree index trong PostgreSQL — từ cấu trúc cây, leaf node và ctid, sức mạnh duyệt cây logarit, đơn vị đọc page, đến cách planner cân nhắc random I/O để chọn giữa Index Scan, Bitmap Heap Scan và Seq Scan.'
+enableComment: true
+---
+
+# Deep Dive: PostgreSQL Index — Vì Sao Index Tăng Tốc Query, Và Khi Nào Postgres Bỏ Qua Nó
+
+Bạn có một bảng `orders` 50 triệu dòng. Câu `SELECT * FROM orders WHERE customer_id = 12345` chạy mất 8 giây — `EXPLAIN` cho thấy một **Seq Scan** (sequential scan: quét tuần tự toàn bộ bảng từ đầu đến cuối). Bạn tạo một index trên `customer_id`, chạy lại, và query trả về trong 1 ms. Cảm giác như phép màu.
+
+Phấn khích, bạn làm điều tương tự cho câu `SELECT * FROM orders WHERE status = 'pending'` — vốn cũng đang chậm. Bạn tạo index trên `status`, chạy `EXPLAIN`... và PostgreSQL **vẫn chọn Seq Scan**, phớt lờ hoàn toàn cái index bạn vừa tạo. Index nằm đó, tốn dung lượng đĩa, làm chậm mọi câu `INSERT`, nhưng không được dùng. Vì sao cùng một thao tác "tạo index" lại cho hai kết quả trái ngược?
+
+Câu trả lời không nằm ở index — nó nằm ở **cách index trỏ vào dữ liệu thật trên đĩa**, và ở phép tính chi phí mà query planner thực hiện trước mỗi câu query. Bài viết này đi sâu vào **B-tree index** của PostgreSQL: từ cấu trúc cây, cách leaf node trỏ tới row qua `ctid`, sức mạnh duyệt cây theo cấp logarit, cho đến lý do `random I/O` khiến planner đôi khi quay lưng với index. Bài này nối tiếp [Deep Dive về PostgreSQL Storage Internals](/posts/postgresql-storage-internals) (heap file, page, tuple, `ctid`) — nên ở đâu cần khái niệm storage tầng dưới, mình sẽ link sang đó thay vì giải thích lại.
+
+## 1. Index là gì — và vì sao nó là "thuần dư thừa"
+
+Một câu nói gọn: **index làm cho query nhanh hơn**. Nhưng để hiểu *khi nào* nó nhanh và *khi nào* không, ta cần hiểu chính xác index *là gì* ở mức vật lý.
+
+**Index** là một **cấu trúc dữ liệu riêng biệt, nằm trong file riêng trên đĩa**, lưu một **bản sao** của (các) cột được lập chỉ mục, đã được **sắp xếp**, kèm theo con trỏ tới row tương ứng trong bảng. Hãy để ý ba chi tiết:
+
+1. **Index không thay đổi dữ liệu bảng.** Tạo index không đụng gì tới heap (vùng chứa dữ liệu thật của bảng). Nó chỉ tạo thêm một cấu trúc mới trỏ *về* bảng. Bạn có thể `DROP INDEX` bất cứ lúc nào mà không mất dữ liệu.
+2. **Index chiếm không gian đĩa riêng.** Nó là một relation riêng (`relfilenode` riêng — xem [Storage Internals](/posts/postgresql-storage-internals)), có FSM/VM forks riêng, và lớn lên theo số row của bảng.
+3. **Index là sự dư thừa thuần túy.** Mọi giá trị trong index đều đã có sẵn trong bảng. Index không thêm thông tin mới — nó chỉ *sắp xếp lại* một bản sao để tra cứu nhanh.
+
+Chính vì là dư thừa, index có cái giá của nó: mỗi `INSERT`/`UPDATE`/`DELETE` chạm tới cột được index đều phải cập nhật cả index, và mỗi index "ăn" thêm đĩa lẫn shared buffer. Đây là đánh đổi cốt lõi — **đọc nhanh hơn, đổi lấy ghi chậm hơn và tốn storage hơn**.
+
+Vậy quyết định tạo index dựa trên cái gì? Câu trả lời quan trọng nhất của toàn bộ chủ đề này:
+
+> Thông tin quan trọng nhất để lập chỉ mục **không phải** là cấu trúc bảng, mà là **cách ứng dụng của bạn truy vấn dữ liệu** — những cột nào xuất hiện trong `WHERE`, `JOIN`, `ORDER BY`, và với độ chọn lọc (selectivity) ra sao.
+
+Một index được thiết kế theo cấu trúc bảng (ví dụ "cứ index mọi khóa ngoại") thường lãng phí; một index được thiết kế theo *query pattern thực tế* mới tạo ra khác biệt. Ta sẽ quay lại nguyên tắc này ở mục 8.
+
+> PostgreSQL có nhiều loại index khác nhau — Hash, GiST, GIN, BRIN, SP-GiST — mỗi loại tối ưu cho một kiểu truy vấn riêng. Bài này tập trung hoàn toàn vào **B-tree**, loại index mặc định (`CREATE INDEX` không chỉ định loại sẽ tạo B-tree) và chiếm đại đa số index trong thực tế.
+
+---
+
+## 2. Cấu trúc B-tree: internal node định tuyến, leaf node giữ (key, ctid)
+
+**B-tree** (Balanced Tree — cây cân bằng) là một cấu trúc cây mà **mọi đường đi từ gốc xuống lá đều có cùng độ dài**. "Cân bằng" ở đây nghĩa là cây không bao giờ bị lệch một bên; thêm/xóa phần tử luôn giữ cho mọi lá ở cùng một độ sâu. Đây là tính chất nền tảng cho hiệu năng mà ta sẽ thấy ở mục 4.
+
+Chính xác hơn, index của PostgreSQL là một biến thể **B+ tree**: toàn bộ dữ liệu (key + con trỏ) nằm ở **leaf node** (nút lá), còn các node bên trên chỉ chứa **separator key** (khóa phân tách) để định tuyến. PostgreSQL hiện thực phiên bản **Lehman & Yao B-link tree** — một biến thể thêm con trỏ "right-link" nối các node cùng tầng, cho phép nhiều transaction đọc/ghi đồng thời mà hạn chế khóa (lock). Bạn không cần nhớ tên này, chỉ cần nắm ba tầng vai trò:
+
+- **Root node (nút gốc):** điểm bắt đầu của mọi lần tra cứu. Chỉ chứa separator key + con trỏ xuống con.
+- **Internal node (nút trong):** tầng giữa. Cũng chỉ chứa separator key + con trỏ. Vai trò duy nhất: **định tuyến** — "key bạn tìm thuộc nhánh con nào?".
+- **Leaf node (nút lá):** tầng đáy. Chứa **giá trị key thật** và **con trỏ tới row** trong heap (chính là `ctid`, mục 3). Đây là nơi dữ liệu index "kết thúc".
+
+<ExcalidrawDiagram
+  src="/postgresql-index-btree-structure.excalidraw"
+  alt="B-tree structure — a root with separator keys routes to internal nodes, which route to leaf nodes holding (key, ctid); leaf pages form a doubly-linked list enabling sideways range scans; high fanout keeps the tree shallow"
+/>
+
+Một chi tiết quan trọng: **các leaf node được nối với nhau thành một danh sách liên kết hai chiều (doubly-linked list)**. Mỗi leaf giữ con trỏ tới leaf bên trái và bên phải. Nhờ đó, sau khi tra cứu xuống đúng leaf chứa key bắt đầu, PostgreSQL có thể **đi ngang** dọc chuỗi leaf để đọc một dải giá trị liên tiếp (`WHERE created_at BETWEEN ... AND ...`, hoặc `ORDER BY`) mà không phải quay lên gốc — và đi được cả hai chiều, nên `ORDER BY ... DESC` cũng tận dụng được cùng một index.
+
+Yếu tố làm B-tree mạnh là **fanout** (số con tối đa của một node) cực lớn. Mỗi node là một page 8 KB; một entry trong internal node chỉ gồm key + con trỏ (vài chục byte), nên một node chứa được **hàng trăm** entry. Fanout hàng trăm là chìa khóa cho mục 4.
+
+---
+
+## 3. Leaf node trỏ tới row trên heap thế nào — `ctid`
+
+Đây là cơ chế cốt lõi của index trong PostgreSQL, và cũng là gốc rễ của vấn đề random I/O ở mục 6.
+
+Trong PostgreSQL, mỗi entry ở leaf node là một cặp **`(giá trị key, ctid)`**. **`ctid`** (Current Tuple ID) là địa chỉ vật lý của row trong heap, gồm hai phần: **`(block_number, item_offset)`**.
+
+Khi cần lấy row thật từ một entry leaf, PostgreSQL làm đúng hai bước:
+
+1. Dựa vào **`block_number`**, nó biết phải nạp **page (block) số mấy** từ heap file lên shared buffer (đơn vị nạp là cả một page 8 KB — xem [Storage Internals](/posts/postgresql-storage-internals)).
+2. Trong page đó, nó dùng **`item_offset`** để tra vào **line pointer array** — `line_pointer_array[item_offset]` cho ra một con trỏ, và con trỏ này mới trỏ tới **tuple** (row vật lý) cần tìm.
+
+<ExcalidrawDiagram
+  src="/postgresql-index-ctid-heap-fetch.excalidraw"
+  alt="Resolving a row in PostgreSQL — an index leaf entry holds key plus ctid (block, offset); the block number loads the heap page, the offset indexes the line pointer array, which points to the tuple"
+/>
+
+Vì sao phải qua một tầng gián tiếp là line pointer thay vì trỏ thẳng vào offset của tuple? Vì khi `VACUUM` dọn dead tuple và dồn lại page (defragmentation), các tuple bị dịch chuyển vị trí trong page. Line pointer cho phép tuple di chuyển *bên trong* page mà index **không cần cập nhật** — chỉ cần line pointer được cập nhật. Chi tiết cơ chế này nằm ở [Storage Internals](/posts/postgresql-storage-internals).
+
+Cách tổ chức này được gọi là **heap-organized table**: dữ liệu row sống trong heap, và *mọi* index — kể cả index trên primary key — đều là cấu trúc riêng bên ngoài, trỏ vào heap qua `ctid`. Không có index nào "đặc biệt" hơn index nào; tất cả đều bình đẳng và đều phải fetch heap để lấy row.
+
+Mô hình heap + `ctid` này có một hệ quả lớn: vì row **không** được sắp xếp vật lý theo bất kỳ index nào, các entry liên tiếp trên leaf có thể trỏ tới những row nằm rải rác khắp heap. Đây chính là mầm mống của random I/O — ta sẽ thấy ở mục 6.
+
+---
+
+## 4. Sức mạnh thứ nhất: duyệt cây và khả năng mở rộng logarit
+
+Việc duyệt cây từ gốc xuống lá là thao tác **cực kỳ hiệu quả** — hiệu quả đến mức Markus Winand (tác giả *Use The Index, Luke*) gọi nó là **sức mạnh thứ nhất của việc lập chỉ mục (the first power of indexing)**. Nó hoạt động gần như tức thời, kể cả trên tập dữ liệu khổng lồ. Hai lý do:
+
+**Thứ nhất, cây cân bằng.** Vì mọi leaf ở cùng độ sâu, *mọi* key đều cách gốc đúng **cùng một số bước**. Không có key nào "may mắn" gần gốc hay "xui xẻo" tận đáy sâu. Hiệu năng tra cứu là đồng đều và dự đoán được.
+
+**Thứ hai, độ sâu tăng theo cấp logarit.** Đây là phần đáng kinh ngạc. Nhờ fanout hàng trăm (mục 2), số leaf mà cây "với tới" tăng theo lũy thừa của độ sâu, nên độ sâu tăng *cực kỳ chậm* so với số lượng record:
+
+<ExcalidrawDiagram
+  src="/postgresql-index-logarithmic-depth.excalidraw"
+  alt="Logarithmic scalability — a table mapping index size to B-tree depth: 1,000 rows depth 2, 100,000 depth 3, 1,000,000 depth 4, 100,000,000 depth 4-5, 1,000,000,000 depth 5. Fanout of a few hundred children per node keeps depth tiny"
+/>
+
+Với fanout vài trăm, độ sâu cây ≈ `log_fanout(số_row)`. Trong thực tế, các index với **hàng triệu** record chỉ có độ sâu khoảng **bốn hoặc năm**. Một index trên một tỉ row vẫn chỉ cần ~5 tầng. Độ sâu bằng sáu **hầu như không bao giờ thấy**. Nghĩa là: tra cứu một key trong bảng một tỉ dòng chỉ tốn ~5 lần đọc node — và các node trên cao (root, internal tầng đầu) gần như luôn nằm sẵn trong shared buffer. Đó là lý do "tìm theo index" cho cảm giác tức thời.
+
+---
+
+## 5. Đơn vị đọc là page, không phải row — correlation và CLUSTER
+
+Mục 4 mới chỉ là một nửa câu chuyện — nửa "tìm thấy entry trong index". Nửa còn lại, thường tốn kém hơn nhiều, là **lấy row thật từ heap**. Và ở đây có một sự thật cốt lõi:
+
+> **PostgreSQL đọc theo page, không theo row.** Khi cần một row, nó nạp **cả page 8 KB** chứa row đó lên RAM — không bao giờ chỉ một dòng.
+
+Hệ quả trực tiếp: nếu **nhiều row khớp cùng nằm trên một page**, chúng được lấy trong **cùng một lần đọc page**. Ngược lại, nếu mỗi row khớp nằm trên một page khác nhau, mỗi row tốn một lần đọc page riêng. Cùng số row khớp, nhưng chi phí I/O có thể chênh nhau cả chục lần — chỉ vì **thứ tự vật lý** của dữ liệu trên heap.
+
+Mức độ "row được sắp vật lý trùng với thứ tự index" được PostgreSQL đo bằng một chỉ số gọi là **correlation** (tương quan), nằm trong `pg_stats`:
+
+```sql
+SELECT attname, correlation
+FROM pg_stats
+WHERE tablename = 'orders';
+```
+
+`correlation` chạy từ **-1 đến 1**:
+
+- **Gần 1 (hoặc -1):** thứ tự vật lý của row trên heap gần như trùng (hoặc đảo ngược) với thứ tự của index. Các key liền nhau trong index → các row liền nhau trên heap → gom cụm trên ít page. Quét một dải chỉ chạm vài page.
+- **Gần 0:** không có tương quan. Các key liền nhau trong index trỏ tới các row rải rác khắp heap. Quét một dải chạm rất nhiều page.
+
+<ExcalidrawDiagram
+  src="/postgresql-index-correlation.excalidraw"
+  alt="Correlation comparison — with high correlation, keys 3..6 sit on two adjacent heap pages (few reads); with low correlation, the same keys scatter across four different pages (many random reads). CLUSTER enforces high correlation"
+/>
+
+Ví dụ kinh điển của correlation — và là tâm điểm của một cuộc tranh cãi quen thuộc khi thiết kế bảng — là **chọn <Tooltip content="Auto-increment — kiểu số nguyên 8 byte do database tự cấp tăng dần">`BIGSERIAL`</Tooltip> hay `UUID` làm primary key**. Trên bề mặt, cuộc tranh cãi xoay quanh tính phân tán (UUID sinh được ở client, không cần round-trip tới database xin ID) và riêng tư (ID liên tiếp lộ thông tin business — đơn hàng số `7000` hôm nay tiết lộ doanh nghiệp xử lý khoảng 7000 đơn/ngày). Nhưng dưới tầng storage, sự khác biệt sống còn lại nằm ở **correlation**:
+
+- **`BIGSERIAL`** sinh ID tăng dần (1, 2, 3, …). Mỗi `INSERT` được append vào cuối heap, và ID mới cũng là lớn nhất trong index → row mới luôn rơi vào **leaf node ngoài cùng bên phải** của B-tree. Hai row vật lý gần nhau cũng có ID gần nhau → correlation tiến rất gần 1.
+- <Tooltip content="Phiên bản UUID phổ biến nhất — 122 bit hoàn toàn ngẫu nhiên">`UUID v4`</Tooltip> cho mỗi row một giá trị rải đều khắp không gian khóa. Hai row `INSERT` liền nhau về thời gian (do đó nằm liền nhau trên heap) lại có UUID **cách nhau cực xa** trong index → correlation gần 0.
+
+Tác hại của correlation thấp ở UUID v4 không nằm ở range query trên `id` (gần như không ai làm vậy) — mà ở <Tooltip content="Khuếch đại ghi — một thao tác logic của ứng dụng buộc database phải ghi xuống nhiều page hơn mức cần thiết">write amplification</Tooltip> **trên chính index**. Mỗi `INSERT` UUID v4 chạm vào một leaf page ngẫu nhiên trong B-tree thay vì luôn rơi vào page ngoài cùng bên phải. Với bảng lớn, B-tree không vừa shared buffer → mỗi `INSERT` phải nạp một page lạ từ disk lên, sửa, ghi lại. Throughput `INSERT` của bảng UUID v4 có thể chậm hơn cả chục lần so với `BIGSERIAL` ở cùng quy mô.
+
+Đây cũng là lý do **UUID v7** (và <Tooltip content="Universally Unique Lexicographically Sortable Identifier — một format tương tự ra đời sớm hơn">ULID</Tooltip>) được sinh ra: 48 bit đầu là **Unix timestamp millisecond**, phần còn lại mới là random. UUID v7 giữ được ưu điểm của UUID (sinh ở client, không lộ count) đồng thời thừa hưởng correlation cao của `BIGSERIAL` — UUID v7 sinh sau luôn lớn hơn UUID v7 sinh trước theo thứ tự sort, nên `INSERT` lại rơi vào leaf ngoài cùng bên phải như `BIGSERIAL`. Với project mới, UUID v7 thường là lựa chọn mặc định tốt nhất khi bạn cần tính phân tán của UUID mà không muốn trả giá correlation.
+
+### CLUSTER — ép thứ tự vật lý theo một index
+
+Khi correlation thấp làm một range query quan trọng trở nên chậm, bạn có thể **sắp xếp lại heap theo một index** bằng lệnh `CLUSTER`:
+
+```sql
+CLUSTER orders USING idx_orders_created_at;
+```
+
+Sau lệnh này, heap được ghi lại sao cho thứ tự vật lý của row trùng với thứ tự của `idx_orders_created_at` → correlation của `created_at` tiến về 1. Hai lưu ý quan trọng:
+
+- `CLUSTER` là thao tác **một lần**, **không được duy trì**. Row `INSERT`/`UPDATE` sau đó lại nằm sai chỗ; correlation giảm dần và bạn phải `CLUSTER` lại định kỳ.
+- `CLUSTER` lấy khóa `ACCESS EXCLUSIVE` (khóa độc quyền, chặn cả đọc lẫn ghi) và ghi lại toàn bộ bảng — cần cửa sổ bảo trì cho bảng lớn.
+
+---
+
+## 6. Random I/O — gót chân Achilles của index
+
+Giờ ta ghép hai mảnh — `ctid` (mục 3) và "đọc theo page" (mục 5) — để hiểu vì sao index *đôi khi bị bỏ qua*.
+
+Sau khi duyệt cây tới đúng vùng leaf, PostgreSQL có một dãy entry liên tiếp, mỗi entry là một `ctid`. Vấn đề: **các `ctid` liên tiếp trên leaf có thể trỏ tới các page nằm rải rác khắp heap** (đúng như mô hình heap + correlation thấp ở trên). Mỗi page như vậy là một lần **random access** — ổ đĩa (hoặc lớp cache phía dưới) phải "nhảy" tới một vị trí ngẫu nhiên để đọc.
+
+Đây là điểm cần phân biệt rõ:
+
+- **Sequential I/O (đọc tuần tự):** đọc các page liên tiếp nhau theo thứ tự vật lý. Cực nhanh — đĩa quay/đọc liên tục, hệ điều hành lại còn *read-ahead* (đọc trước) các page kế tiếp.
+- **Random I/O (đọc ngẫu nhiên):** mỗi lần đọc nhảy tới một page bất kỳ. Trên HDD đó là chi phí seek (di chuyển đầu đọc); trên SSD đỡ hơn nhiều nhưng vẫn đắt hơn sequential vì mất lợi thế read-ahead và phải xử lý từng page rời rạc.
+
+PostgreSQL mã hóa sự chênh lệch này bằng hai tham số chi phí: **`seq_page_cost`** (mặc định **1.0**) và **`random_page_cost`** (mặc định **4.0**). Nghĩa là theo ước lượng mặc định, đọc một page ngẫu nhiên "đắt" gấp **bốn lần** đọc một page tuần tự.
+
+Bây giờ là mấu chốt: **khi số row khớp đủ lớn, tổng chi phí random I/O của Index Scan vượt qua chi phí đọc tuần tự toàn bộ bảng.** Lúc đó, đọc tuần tự cả bảng (mỗi page đúng một lần, theo thứ tự, với read-ahead) lại *rẻ hơn* là nhảy lung tung theo `ctid`. Đây chính xác là khoảnh khắc planner chọn **Seq Scan** thay vì dùng index — và là lời giải cho câu chuyện `status = 'pending'` ở đầu bài.
+
+---
+
+## 7. Planner quyết định thế nào: Seq Scan vs Index Scan vs Bitmap Heap Scan
+
+Query planner của PostgreSQL là một **cost-based optimizer** (bộ tối ưu dựa trên chi phí): với mỗi cách thực thi khả dĩ, nó ước lượng một con số "chi phí" và chọn cách rẻ nhất. Hai đầu vào quyết định:
+
+1. **Selectivity (độ chọn lọc):** ước lượng *bao nhiêu phần trăm* row sẽ khớp điều kiện. Lấy từ thống kê trong `pg_statistic`, được cập nhật bởi `ANALYZE` (và autovacuum). Selectivity sai (thống kê cũ) là nguyên nhân số một của việc chọn nhầm scan.
+2. **Chi phí mỗi loại scan:** tính từ `seq_page_cost`, `random_page_cost`, `cpu_tuple_cost`, số page, số row ước lượng, và correlation.
+
+PostgreSQL có ba chiến lược chính để đọc dữ liệu theo điều kiện:
+
+<ExcalidrawDiagram
+  src="/postgresql-index-scan-strategies.excalidraw"
+  alt="Three scan strategies — Index Scan fetches one random heap page per matched row (best for few rows / high correlation); Bitmap Heap Scan collects all matching TIDs, sorts them by page, then reads each page once (best for medium selectivity); Seq Scan streams every page sequentially ignoring the index (best when many rows match)"
+/>
+
+### Index Scan
+
+Duyệt index, và **với mỗi entry khớp, lập tức fetch row từ heap theo `ctid`**. Vì fetch xen kẽ với duyệt index, mỗi row khớp thường là một random page read. **Tốt nhất khi:** số row khớp ít (selectivity cao), hoặc correlation cao (các row khớp gom cụm). Đây là kịch bản `customer_id = 12345` — chỉ vài chục đơn, fetch vài page là xong.
+
+### Bitmap Heap Scan
+
+Đây là lời giải thông minh của PostgreSQL cho vùng "selectivity trung bình". Nó tách làm hai pha:
+
+1. **Bitmap Index Scan:** duyệt index, gom **tất cả** `ctid` khớp vào một bitmap (bản đồ bit) đánh dấu *những page nào* cần đọc — chưa fetch row nào.
+2. **Bitmap Heap Scan:** đọc các page đó **theo thứ tự vật lý tăng dần**, mỗi page **đúng một lần**.
+
+Mẹo ở đây là **biến random I/O thành gần-sequential I/O**: thay vì nhảy tới page 7, rồi page 2, rồi page 9 (theo thứ tự index), nó sắp lại thành page 2, 7, 9 và đọc xuôi. Nếu nhiều row khớp nằm chung page, page đó cũng chỉ đọc một lần. **Tốt nhất khi:** selectivity trung bình — quá nhiều cho Index Scan, nhưng chưa đủ nhiều để phải quét cả bảng. Trong `EXPLAIN` bạn sẽ thấy cặp `Bitmap Heap Scan` + `Bitmap Index Scan`.
+
+### Seq Scan
+
+Bỏ qua index, đọc **toàn bộ** heap tuần tự từ đầu đến cuối, lọc từng row. Nghe có vẻ "ngu ngốc" nhưng với sequential I/O + read-ahead, nó cực nhanh trên mỗi page. **Tốt nhất khi:** số row khớp lớn (selectivity thấp) — như `status = 'pending'` chiếm 40% bảng. Lúc đó dù sao bạn cũng phải chạm gần hết các page, nên đọc tuần tự một lần rẻ hơn nhiều so với hàng triệu lần random fetch.
+
+### Đọc EXPLAIN để thấy quyết định
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT * FROM orders WHERE customer_id = 12345;
+-- Index Scan using idx_orders_customer_id ...
+--   Buffers: shared hit=4 read=3
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT * FROM orders WHERE status = 'pending';
+-- Seq Scan on orders ...
+--   Filter: (status = 'pending')
+--   Rows Removed by Filter: ...
+```
+
+Với `customer_id` (cardinality cao, ít row khớp) → Index Scan. Với `status` (cardinality thấp, 40% row khớp) → Seq Scan. **Cùng một thao tác `CREATE INDEX`, nhưng planner chọn khác nhau vì selectivity khác nhau.** Index trên `status` không sai về mặt kỹ thuật — nó chỉ vô dụng cho query này, và planner đủ thông minh để không dùng nó.
+
+> Bạn có thể *tạm thời* ép planner thử dùng index để so sánh, bằng `SET enable_seqscan = off;` rồi chạy lại `EXPLAIN ANALYZE`. Nếu thời gian thực tế *tệ hơn*, planner đã đúng. Đừng để `enable_seqscan = off` trong production — nó chỉ là công cụ chẩn đoán.
+
+---
+
+## 8. Cardinality, selectivity, và nghệ thuật chọn cột để index
+
+Giờ ta khép lại nguyên tắc ở mục 1: **index theo cách ứng dụng query, và ưu tiên cột có độ chọn lọc cao.**
+
+**Cardinality (lực lượng)** là số lượng giá trị *phân biệt* trong một cột. Nó quyết định selectivity:
+
+- **Cardinality cao** (ví dụ `email`, `user_id`, `order_id`): mỗi giá trị khớp rất ít row → selectivity cao → index B-tree rất hiệu quả. Đây là "đất diễn" lý tưởng của index.
+- **Cardinality thấp** (ví dụ `status` với 3–4 giá trị, hay cột boolean `is_active`): mỗi giá trị khớp một phần lớn bảng → selectivity thấp → index thường *bị bỏ qua* (như mục 7). Index trên cột cardinality thấp thường chỉ đáng giá khi phân bố lệch (skewed) và bạn dùng **partial index**.
+
+### Multi-column index và quy tắc leftmost prefix
+
+Một index nhiều cột `(a, b, c)` sắp xếp các entry theo `a`, rồi `b`, rồi `c`. Vì thứ tự đó, index dùng được cho điều kiện trên **tiền tố trái liên tục (leftmost prefix)**: `(a)`, `(a, b)`, `(a, b, c)` — nhưng **không** dùng hiệu quả cho riêng `(b)` hay `(c)`. Quy tắc thực dụng:
+
+- Đặt cột dùng cho so sánh bằng (`=`) **trước**, cột dùng cho dải (`>`, `<`, `BETWEEN`) hoặc `ORDER BY` **sau**.
+- Trong các cột `=`, đặt cột **selectivity cao** trước để loại bỏ row sớm.
+
+### Partial, expression, và covering index
+
+- **Partial index** — chỉ index một phần row thỏa điều kiện:
+
+```sql
+CREATE INDEX idx_orders_pending ON orders (created_at)
+WHERE status = 'pending';
+```
+
+Index này nhỏ xíu (chỉ chứa đơn `pending`) và biến một cột cardinality thấp thành index hữu ích cho đúng truy vấn cần nó.
+
+- **Expression index** — index trên kết quả của một hàm, để query dùng hàm đó vẫn tận dụng được index:
+
+```sql
+CREATE INDEX idx_users_lower_email ON users (lower(email));
+-- phục vụ: WHERE lower(email) = 'a@b.com'
+```
+
+- **Covering index** (`INCLUDE`) — đính kèm thêm cột vào leaf để query lấy đủ dữ liệu *ngay trong index*, không cần fetch heap:
+
+```sql
+CREATE INDEX idx_orders_customer ON orders (customer_id) INCLUDE (status, total);
+```
+
+Khi mọi cột query cần đều nằm trong index, planner có thể dùng **Index-Only Scan** — bỏ hẳn bước fetch heap. Nó dựa vào **Visibility Map** để biết page nào toàn live tuple mà bỏ qua việc kiểm tra visibility ở heap (cơ chế VM được mô tả trong [Storage Internals](/posts/postgresql-storage-internals)).
+
+### Hãy để query pattern dẫn đường
+
+Trong thực tế, bạn nhìn vào code truy vấn của ứng dụng để quyết định index. Ví dụ một repository điển hình với thư viện `pg` trong Node.js:
+
+```typescript
+import { Pool } from 'pg'
+
+const pool = new Pool()
+
+async function findRecentOrdersForCustomer(customerId: number, limit: number) {
+  const { rows } = await pool.query(
+    `SELECT id, status, total, created_at
+     FROM orders
+     WHERE customer_id = $1
+     ORDER BY created_at DESC
+     LIMIT $2`,
+    [customerId, limit]
+  )
+  return rows
+}
+```
+
+Query này lọc theo `customer_id` (bằng) rồi sắp theo `created_at` (dải/thứ tự). Index phục vụ nó tốt nhất là multi-column, đặt cột `=` trước, cột `ORDER BY` sau:
+
+```sql
+CREATE INDEX idx_orders_customer_created
+ON orders (customer_id, created_at DESC);
+```
+
+Với index này, PostgreSQL nhảy thẳng tới nhánh của `customer_id`, rồi vì các entry đã được sắp theo `created_at DESC` ngay trong leaf, nó đọc `LIMIT` dòng đầu tiên là xong — không cần sort, không cần quét thừa. Index được *thiết kế theo query*, chứ không theo cấu trúc bảng.
+
+---
+
+## 9. Index cũng bloat — một chút về bảo trì
+
+Index không phải "tạo xong là quên". Giống như bảng, index B-tree cũng **bloat** (phình to vì không gian lãng phí):
+
+- **Page split** để lại các leaf page chỉ đầy một nửa.
+- Khi row bị `DELETE`/`UPDATE`, entry index tương ứng trở thành **dead** nhưng chỉ được dọn khi `VACUUM` chạy. (Cơ chế dead tuple/MVCC được mổ xẻ trong [Deep Dive về Table Bloat](/posts/table-bloat).)
+
+Index phình to nghĩa là cây cao hơn cần thiết, nhiều page hơn phải nạp, cache kém hiệu quả hơn. Vài thao tác bảo trì cốt lõi:
+
+```sql
+-- Tìm index không bao giờ được dùng (ứng viên để xóa)
+SELECT relname, idx_scan
+FROM pg_stat_user_indexes
+WHERE idx_scan = 0;
+
+-- Dựng lại index để thu hồi không gian bloat, không khóa ghi
+REINDEX INDEX CONCURRENTLY idx_orders_customer_created;
+```
+
+`REINDEX ... CONCURRENTLY` dựng lại index mà không lấy khóa chặn ghi (tốn thời gian hơn nhưng an toàn cho production). Và đừng quên: **index không dùng tới là gánh nặng thuần túy** — nó làm chậm mọi `INSERT`/`UPDATE` và tốn đĩa mà chẳng tăng tốc query nào. `pg_stat_user_indexes` với `idx_scan = 0` là nơi đầu tiên để dọn dẹp.
+
+---
+
+## Kết luận
+
+Quay lại câu hỏi mở đầu. Vì sao index trên `customer_id` biến query 8 giây thành 1 ms, còn index trên `status` bị phớt lờ?
+
+- `customer_id` có **cardinality cao** → mỗi giá trị khớp ít row → **selectivity cao**. Planner duyệt cây (sức mạnh thứ nhất, ~vài bước), rồi fetch vài page theo `ctid`. Tổng chi phí nhỏ xíu → **Index Scan**.
+- `status = 'pending'` khớp **40% bảng** → **selectivity thấp**. Fetch từng đó row theo `ctid` nghĩa là hàng triệu lần **random I/O**, đắt hơn nhiều so với đọc tuần tự cả bảng một lần. Planner tính ra điều đó và chọn **Seq Scan** — index nằm im.
+
+Những điều cốt lõi cần mang theo:
+
+- **Index là bản sao dư thừa, đã sắp xếp, trỏ về bảng** — đọc nhanh hơn, đổi lấy ghi chậm hơn và tốn đĩa. Nó không thay đổi dữ liệu bảng.
+- **Duyệt cây là sức mạnh thứ nhất:** nhờ cây cân bằng và độ sâu tăng theo cấp logarit, một tỉ row vẫn chỉ ~5 tầng. Bước này gần như luôn rẻ.
+- **Chi phí thật nằm ở bước fetch heap.** PostgreSQL đọc theo **page 8 KB**, không theo row — nên **correlation** (thứ tự vật lý) quyết định một range query chạm bao nhiêu page. `CLUSTER` ép correlation cao nhưng không tự duy trì.
+- **Random I/O là gót chân Achilles.** Khi row khớp rải rác và đủ nhiều, planner chọn **Seq Scan**; ở vùng giữa, **Bitmap Heap Scan** sắp `ctid` theo page để biến random thành gần-sequential.
+- **Thiết kế index theo cách ứng dụng query**, ưu tiên cột **cardinality cao**; dùng multi-column (leftmost prefix), partial, expression, và covering index (`INCLUDE` → Index-Only Scan) cho đúng pattern.
+- **Bảo trì index:** xóa index `idx_scan = 0`, `REINDEX CONCURRENTLY` khi bloat.
+
+Index không phải nút "làm cho nhanh". Nó là một đánh đổi mà bạn thiết kế — và planner, với phép tính chi phí của nó, sẽ là người quyết định cuối cùng có dùng hay không.

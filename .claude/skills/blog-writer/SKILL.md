@@ -237,8 +237,16 @@ Immediately after the opening hook paragraphs, before the first `## 1.` section:
 
 #### Writing style rules
 
-1. **Explain every technical term on first mention**: Bold the term and explain inline
-   - Example: `**Broker** là một server (hay process) trong Kafka cluster chịu trách nhiệm nhận, lưu trữ, và phục vụ dữ liệu.`
+1. **Explain every technical term on first mention.** Two patterns, depending on whether the explanation is the *main idea* of the sentence or a *side-aside*:
+
+   - **Main-idea definitions** — when the sentence's purpose IS to define the term. Bold the term and let the sentence carry the definition:
+     - Example: `**Broker** là một server (hay process) trong Kafka cluster chịu trách nhiệm nhận, lưu trữ, và phục vụ dữ liệu.`
+
+   - **Inline-aside definitions → use `<Tooltip>`** — when the explanation is a parenthetical or em-dash aside that interrupts a longer thought (acronym expansions, short definitions tucked into a sentence about something else). Wrap the term in `<Tooltip content="explanation">term</Tooltip>` and remove the parenthetical entirely. Example transformation:
+     - Before: `Đây cũng là lý do **UUID v7** (và **ULID** — Universally Unique Lexicographically Sortable Identifier, một format tương tự ra đời sớm hơn) được sinh ra.`
+     - After: `Đây cũng là lý do **UUID v7** (và <Tooltip content="Universally Unique Lexicographically Sortable Identifier — một format tương tự ra đời sớm hơn">ULID</Tooltip>) được sinh ra.`
+     - The Tooltip component already styles its trigger as bold + dashed underline, so drop the `**...**` around the term *inside* the Tooltip. Inline code backticks (e.g., `` `BIGSERIAL` ``) work fine inside the Tooltip trigger and should be preserved for SQL keywords / identifiers.
+     - **When NOT to tooltip:** illustrative asides that elaborate *why* something matters (rather than defining a term) read more naturally as parentheticals. E.g., keep `riêng tư (ID liên tiếp lộ thông tin business — đơn hàng số 7000 hôm nay tiết lộ doanh nghiệp xử lý 7000 đơn/ngày)` inline — it's elaborating context, not defining "riêng tư".
 
 2. **Use analogies for complex concepts**:
    - Example: `Cache chính là cái bàn làm việc ngay trước mặt bạn (RAM). Database là thư viện khổng lồ nằm ở ngoại ô (Disk/SSD).`
