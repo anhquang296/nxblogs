@@ -14,7 +14,7 @@ const CustomHeader = async ({ lang }: Props) => {
           as="span"
           loop
           pauseDelay={3000}
-          className="cursor-default text-lg font-bold leading-normal"
+          className="cursor-default text-lg font-bold leading-normal font-mono"
           cursorStyle="underscore"
           startOnView={false}
           persistCursor
