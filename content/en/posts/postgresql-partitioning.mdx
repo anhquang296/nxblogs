@@ -1,12 +1,12 @@
 ---
-title: 'Deep Dive: PostgreSQL Partitioning — When One Big Table Becomes Many Small Ones'
+title: 'PostgreSQL Partitioning: When One Big Table Becomes Many Small Ones'
 date: '2026-05-26'
 tags: ['Database']
 description: 'PostgreSQL partitioning from A to Z — declarative partitioning, RANGE/LIST/HASH strategies, the mechanics of partition pruning, and two real-world use cases: time-series and multi-tenant SaaS.'
 enableComment: true
 ---
 
-# Deep Dive: PostgreSQL Partitioning — When One Big Table Becomes Many Small Ones
+# PostgreSQL Partitioning: When One Big Table Becomes Many Small Ones
 
 There comes a point in the life of nearly every production system: an `events` (or `logs`, or `orders`) table crosses the half-billion-row mark. Everything starts getting... uncomfortable. Queries return in 30 seconds instead of 30 milliseconds. `VACUUM` has been running for 6 hours and still hasn't finished. You'd like to delete data older than 12 months to reclaim disk space — but the `DELETE` itself produces millions of <Tooltip content="Rows that have been deleted or updated but still occupy disk space until VACUUM reclaims them — a consequence of PostgreSQL's MVCC model.">dead tuples</Tooltip> (see [Deep Dive on Table Bloat](/posts/table-bloat)), making things worse than before you ran it. Indexes balloon to 50GB. Backups take all night.
 
@@ -434,7 +434,7 @@ Knowing about partitioning is great, but the truth is **most projects will never
 
 There is no single magic number, but the PostgreSQL community has a few rules of thumb worth remembering:
 
-- **PostgreSQL official docs**: consider partitioning when *the table size exceeds the physical memory of the database server*. This is the core threshold — once the hot index no longer fits in `shared_buffers` (typically configured at 25–40% of RAM), every index probe becomes random I/O to disk.
+- **PostgreSQL official docs**: consider partitioning when the table size exceeds the physical memory of the database server. This is the core threshold — once the hot index no longer fits in `shared_buffers` (typically configured at 25–40% of RAM), every index probe becomes random I/O to disk.
 - **Practical "hurts now" zone**: 100 GB – 1 TB. Below this range, most problems can be fixed by tuning indexes, autovacuum, or simply giving the instance more RAM.
 - **Ideal partition size**: 1–100 GB per partition. Smaller → too many partitions, planning overhead climbs. Larger → you lose some of the lifecycle benefit (dropping one partition still frees meaningful space).
 - **Recommended partition count**: under 1,000 (practical ceiling around 5,000). Past that, the planner slows down and the relcache memory of every connection balloons.

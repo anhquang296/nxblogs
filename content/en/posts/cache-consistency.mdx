@@ -170,7 +170,7 @@ This solution was published by **Facebook** in their 2013 paper, combining two m
 **Phase 1 — Writer updates data (Master DB side):**
 
 1. Write new data to Master DB.
-2. Set a **Remote Marker** in Cache (e.g., key `marker:product:123`) with a short TTL (1-2 seconds). Meaning: *"Warning! Source data just changed. Any data read from Slave right now is unreliable."*
+2. Set a **Remote Marker** in Cache (e.g., key `marker:product:123`) with a short TTL (1-2 seconds). Meaning: "Warning! Source data just changed. Any data read from Slave right now is unreliable."
 3. Delete old data in Cache (also deleting any existing Lease Token).
 
 **Phase 2 — Reader reads data (Slave DB side):**

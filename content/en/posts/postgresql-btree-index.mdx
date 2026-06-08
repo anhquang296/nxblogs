@@ -1,12 +1,12 @@
 ---
-title: 'Deep Dive: PostgreSQL Index — Why Indexes Speed Up Queries, And When Postgres Ignores Them'
+title: 'PostgreSQL Index: Why Indexes Speed Up Queries, And When Postgres Ignores Them'
 date: '2026-05-29'
 tags: ['Database']
 description: 'A dissection of the B-tree index in PostgreSQL — from the tree structure, leaf nodes and ctid, the logarithmic power of tree descent, the page-as-unit read model, to how the planner weighs random I/O when deciding whether to use an index at all.'
 enableComment: true
 ---
 
-# Deep Dive: PostgreSQL Index — Why Indexes Speed Up Queries, And When Postgres Ignores Them
+# PostgreSQL Index: Why Indexes Speed Up Queries, And When Postgres Ignores Them
 
 You have an `orders` table with 50 million rows. The query `SELECT * FROM orders WHERE customer_id = 12345` takes 8 seconds — `EXPLAIN` shows a **Seq Scan** (sequential scan: read the entire table from start to end). You create an index on `customer_id`, rerun the query, and it returns in 1 ms. It feels like magic.
 
@@ -16,13 +16,13 @@ The answer isn't in the index — it's in **how an index points to the actual da
 
 ## 1. What an index is — and why it is "pure redundancy"
 
-A one-liner: **indexes make queries faster**. But to understand *when* they do and *when* they don't, we need to know precisely what an index *is* at the physical level.
+A one-liner: **indexes make queries faster**. But to understand **when** they do and **when** they don't, we need to know precisely what an index **is** at the physical level.
 
 An **index** is a **separate data structure, living in its own file on disk**, that holds a **sorted copy** of the indexed column(s), together with a pointer back to the corresponding row in the table. Three details matter:
 
-1. **An index does not change the table's data.** Creating an index touches nothing in the heap (the area that holds the table's real data). It only adds a new structure that points *back* to the table. You can `DROP INDEX` any time without losing data.
+1. **An index does not change the table's data.** Creating an index touches nothing in the heap (the area that holds the table's real data). It only adds a new structure that points **back** to the table. You can `DROP INDEX` any time without losing data.
 2. **An index occupies its own disk space.** It is its own relation (its own `relfilenode` — see [Storage Internals](/posts/postgresql-storage-internals)), has its own FSM/VM forks, and grows with the row count of the table.
-3. **An index is pure redundancy.** Every value in the index already exists in the table. An index adds no new information — it just *reorders* a copy so lookups can be fast.
+3. **An index is pure redundancy.** Every value in the index already exists in the table. An index adds no new information — it just **reorders** a copy so lookups can be fast.
 
 Because it is redundancy, an index has a price: every `INSERT`/`UPDATE`/`DELETE` touching an indexed column must also update the index, and every index "eats" extra disk and shared buffer. This is the core trade-off — **faster reads, paid for with slower writes and more storage**.
 
@@ -30,7 +30,7 @@ So what should drive the decision to create an index? The single most important 
 
 > The most important input to indexing is **not** the table's structure but **how your application queries the data** — which columns appear in `WHERE`, `JOIN`, `ORDER BY`, and at what selectivity.
 
-An index designed around the table's structure (e.g. "just index every foreign key") is usually wasteful; an index designed around the *actual query pattern* is what makes the difference.
+An index designed around the table's structure (e.g. "just index every foreign key") is usually wasteful; an index designed around the **actual query pattern** is what makes the difference.
 
 > PostgreSQL has many index types — Hash, GiST, GIN, BRIN, SP-GiST — each tuned for a particular kind of query. This article focuses entirely on **B-tree**, the default index type (`CREATE INDEX` without specifying a type produces a B-tree) and the one that dominates real-world usage.
 
@@ -73,9 +73,9 @@ When PostgreSQL needs to fetch the actual row from a leaf entry, it does exactly
   alt="Resolving a row in PostgreSQL — an index leaf entry holds key plus ctid (block, offset); the block number loads the heap page, the offset indexes the line pointer array, which points to the tuple"
 />
 
-Why go through this extra line-pointer indirection rather than point straight to the tuple's offset? Because when `VACUUM` cleans dead tuples and compacts a page (defragmentation), tuples shift positions inside the page. The line pointer lets a tuple move *within* a page **without requiring any index update** — only the line pointer needs to change. The details of this mechanism live in [Storage Internals](/posts/postgresql-storage-internals).
+Why go through this extra line-pointer indirection rather than point straight to the tuple's offset? Because when `VACUUM` cleans dead tuples and compacts a page (defragmentation), tuples shift positions inside the page. The line pointer lets a tuple move **within** a page **without requiring any index update** — only the line pointer needs to change. The details of this mechanism live in [Storage Internals](/posts/postgresql-storage-internals).
 
-This organisation is called a **heap-organized table**: row data lives in the heap, and *every* index — including the primary-key index — is a separate structure outside it, pointing into the heap via `ctid`. No index is "special" relative to the others; all are equal, and all must fetch the heap to retrieve the row.
+This organisation is called a **heap-organized table**: row data lives in the heap, and **every** index — including the primary-key index — is a separate structure outside it, pointing into the heap via `ctid`. No index is "special" relative to the others; all are equal, and all must fetch the heap to retrieve the row.
 
 This heap + `ctid` model has one large consequence: because rows are **not** physically sorted by any index, consecutive entries in a leaf can point to rows scattered all over the heap. That is the seed of random I/O — we will see it in section 6.
 
@@ -83,11 +83,11 @@ This heap + `ctid` model has one large consequence: because rows are **not** phy
 
 ## 4. The first power: tree descent and logarithmic scalability
 
-Descending the tree from root to leaf is an **extraordinarily efficient** operation — so efficient that Markus Winand (author of *Use The Index, Luke*) calls it the **first power of indexing**. It is virtually instantaneous, even over enormous datasets. Two reasons:
+Descending the tree from root to leaf is an **extraordinarily efficient** operation — so efficient that Markus Winand (author of **Use The Index, Luke**) calls it the **first power of indexing**. It is virtually instantaneous, even over enormous datasets. Two reasons:
 
-**First, the tree is balanced.** Because all leaves are at the same depth, *every* key is exactly **the same number of hops** from the root. No key is "lucky" near the root or "unlucky" deep at the bottom. Lookup performance is uniform and predictable.
+**First, the tree is balanced.** Because all leaves are at the same depth, **every** key is exactly **the same number of hops** from the root. No key is "lucky" near the root or "unlucky" deep at the bottom. Lookup performance is uniform and predictable.
 
-**Second, depth grows logarithmically.** This is the astonishing part. Thanks to a fanout of hundreds (section 2), the number of leaves the tree "reaches" grows exponentially with depth, so depth grows *extremely slowly* with row count:
+**Second, depth grows logarithmically.** This is the astonishing part. Thanks to a fanout of hundreds (section 2), the number of leaves the tree "reaches" grows exponentially with depth, so depth grows **extremely slowly** with row count:
 
 <ExcalidrawDiagram
   src="/postgresql-index-logarithmic-depth.excalidraw"
@@ -150,16 +150,16 @@ After this command, the heap is rewritten so that row physical order matches the
 
 ## 6. Random I/O — the Achilles' heel of indexes
 
-Now let's glue two pieces — `ctid` (section 3) and "read by page" (section 5) — together to see why an index *sometimes gets ignored*.
+Now let's glue two pieces — `ctid` (section 3) and "read by page" (section 5) — together to see why an index **sometimes gets ignored**.
 
 After descending to the right leaf area, PostgreSQL holds a sequence of consecutive entries, each one a `ctid`. The catch: **consecutive `ctid`s on a leaf can point to pages scattered all over the heap** (exactly the heap + low-correlation model above). Each such page is a **random access** — the disk (or the cache layer beneath) has to "jump" to a random location to read.
 
 The distinction worth being explicit about:
 
-- **Sequential I/O:** reading pages in physical order, one after another. Extremely fast — the disk spins/reads continuously, and the OS also performs *read-ahead* (prefetches subsequent pages).
+- **Sequential I/O:** reading pages in physical order, one after another. Extremely fast — the disk spins/reads continuously, and the OS also performs **read-ahead** (prefetches subsequent pages).
 - **Random I/O:** each read jumps to an arbitrary page. On HDD that's a seek cost (moving the read head); on SSD it's much better but still costlier than sequential because the read-ahead advantage is lost and each page has to be handled individually.
 
-But *why* is "jumping around" more expensive? You have to peel back one more layer: beneath PostgreSQL sit the operating system and the disk hardware, and sequential I/O's advantage actually comes from them.
+But **why** is "jumping around" more expensive? You have to peel back one more layer: beneath PostgreSQL sit the operating system and the disk hardware, and sequential I/O's advantage actually comes from them.
 
 When PostgreSQL wants to read a page, it consults the <Tooltip content="Postgres's shared RAM area for caching heap/index pages">shared buffer</Tooltip> first. On a miss, it calls `read()` down to the OS — and the OS consults its <Tooltip content="The kernel's RAM area that caches disk blocks, shared across all processes">page cache</Tooltip>. Only when the page cache also misses does an actual disk read happen. Two layers of caching stacked on top of each other mean: many "disk reads" in code are really a `memcpy` from RAM.
 
@@ -169,13 +169,13 @@ Even once we descend to the hardware, the gap is large. On **HDD**, every random
 
 PostgreSQL encodes this gap with two cost parameters: **`seq_page_cost`** (default **1.0**) and **`random_page_cost`** (default **4.0**). Under the default estimate, reading a random page is "four times" as expensive as reading a sequential one. The 4× ratio isn't arbitrary — it is a quantitative encoding of everything we just discussed: lost read-ahead, per-IO overhead, broken cache locality, and (on HDD) seek/rotational latency. On fast SSDs, people commonly tune `random_page_cost` down to `1.5`–`2.0`, but the "random is pricier than sequential" reality never fully disappears.
 
-Now the punchline: **once the number of matching rows is large enough, the cumulative random I/O cost of an Index Scan exceeds the cost of sequentially reading the entire table.** At that point, sequentially scanning the whole table (each page exactly once, in order, with read-ahead) is *cheaper* than hopping around following `ctid`s. This is precisely the moment the planner picks **Seq Scan** instead of using the index — and the resolution to the `status = 'pending'` story from the introduction.
+Now the punchline: **once the number of matching rows is large enough, the cumulative random I/O cost of an Index Scan exceeds the cost of sequentially reading the entire table.** At that point, sequentially scanning the whole table (each page exactly once, in order, with read-ahead) is **cheaper** than hopping around following `ctid`s. This is precisely the moment the planner picks **Seq Scan** instead of using the index — and the resolution to the `status = 'pending'` story from the introduction.
 
 ---
 
 ## 7. Indexes bloat too — a little on maintenance
 
-An index isn't "create and forget". Like tables, B-tree indexes also **bloat** (grow due to wasted space). But an index has a bloat source *of its own — purely structural to the B-tree*, unrelated to MVCC, that must be dissected before we talk about `VACUUM`.
+An index isn't "create and forget". Like tables, B-tree indexes also **bloat** (grow due to wasted space). But an index has a bloat source of its own — purely structural to the B-tree, unrelated to MVCC, that must be dissected before we talk about `VACUUM`.
 
 ### The page split mechanism
 
@@ -183,9 +183,9 @@ Every B-tree leaf page is **a fixed 8 KB**. When a new row is inserted, PostgreS
 
 When the leaf is already full but a new entry still has to go in: PostgreSQL **allocates a new leaf page**, moves about half the entries into the new page, leaves the other half in the old page — then updates the <Tooltip content="The doubly-linked list connecting leaves on the same level, introduced in section 2">right-link</Tooltip> pointers so the new page is spliced in, and **pushes a new separator key up to the parent** to route to the new page. If the parent is also full, the parent splits too, and the process can propagate all the way up to the root (at which point the tree grows by one level). This is called a **page split**.
 
-The storage consequence: **two pages each ~50% full** instead of one full page. The index file expands by 8 KB. Those two half-empty pages are only refilled if a later insert happens to fall into the key range they hold — but if subsequent inserts keep landing *elsewhere* (very common with UUID keys, or a random `customer_id`), those two half-empty leaves can sit at ~50% utilisation forever.
+The storage consequence: **two pages each ~50% full** instead of one full page. The index file expands by 8 KB. Those two half-empty pages are only refilled if a later insert happens to fall into the key range they hold — but if subsequent inserts keep landing **elsewhere** (very common with UUID keys, or a random `customer_id`), those two half-empty leaves can sit at ~50% utilisation forever.
 
-Importantly: a B-tree index **never shrinks on its own**. `VACUUM` only reclaims dead entries (see below); it does *not* merge two adjacent half-empty leaves into one. Over time, half-empty leaves accumulate → total page count grows → the tree may gain an extra level (each lookup pays one more I/O) → <Tooltip content="The ratio of useful bytes to total bytes in a relation">page utilisation</Tooltip> drops from ~90% at creation time to perhaps 40–50%. This is the "**the index relation also bloats**" part — nothing to do with dead tuples.
+Importantly: a B-tree index **never shrinks on its own**. `VACUUM` only reclaims dead entries (see below); it does **not** merge two adjacent half-empty leaves into one. Over time, half-empty leaves accumulate → total page count grows → the tree may gain an extra level (each lookup pays one more I/O) → <Tooltip content="The ratio of useful bytes to total bytes in a relation">page utilisation</Tooltip> drops from ~90% at creation time to perhaps 40–50%. This is the "**the index relation also bloats**" part — nothing to do with dead tuples.
 
 For that reason, B-tree indexes have their own `fillfactor` (defaulting to **90** for indexes, vs 100 for the heap): at creation time, leave ~10% slack in each leaf so subsequent inserts/updates have room without forcing a split. The trade-off: the file starts a bit larger but splits happen much less often — especially helpful for tables with many writes into the middle of the key range.
 

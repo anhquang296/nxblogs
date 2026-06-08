@@ -69,7 +69,7 @@ Kỹ thuật này được sử dụng rộng rãi trong Nginx (`proxy_cache_loc
 
 **Locking (Distributed Mutex):** Khi Hot Key bị miss, mỗi request phải cố gắng acquire một **distributed mutex lock** (ví dụ: dùng `SETNX` trong Redis). Chỉ request nào lấy được lock mới được phép đi xuống DB. Các request còn lại sleep rồi thử đọc Cache lại.
 
-**Probabilistic Early Expiration (P.E.E):** Thay vì đợi key thực sự hết hạn (TTL = 0), mỗi lần đọc Cache, hệ thống chạy một **thuật toán xác suất** để quyết định: *"Có nên giả vờ key đã hết hạn và chủ động lấy dữ liệu mới từ DB không?"*
+**Probabilistic Early Expiration (P.E.E):** Thay vì đợi key thực sự hết hạn (TTL = 0), mỗi lần đọc Cache, hệ thống chạy một **thuật toán xác suất** để quyết định: "Có nên giả vờ key đã hết hạn và chủ động lấy dữ liệu mới từ DB không?"
 
 Thuật toán dựa trên công thức **X-Fetch**. Key sẽ được làm mới sớm nếu:
 

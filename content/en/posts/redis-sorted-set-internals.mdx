@@ -8,11 +8,11 @@ enableComment: true
 
 # Redis Sorted Set: Skip List + Hash Table — The Data Structure Duo Behind Redis O(log N)
 
-You're building a leaderboard for a game with 10 million players. Every second, thousands of score updates pour in. The system needs to answer two questions in **under 1ms**: *"What rank is Player X?"* and *"Who are the top 100?"*
+You're building a leaderboard for a game with 10 million players. Every second, thousands of score updates pour in. The system needs to answer two questions in **under 1ms**: "What rank is Player X?" and "Who are the top 100?"
 
 If you use SQL: `SELECT * FROM scores ORDER BY score DESC LIMIT 100` on a 10 million row table — even with an index — still takes tens to hundreds of milliseconds. Add a `WHERE` for individual rank and you'd have to scan the entire table.
 
-Then someone says: *"Just use Redis `ZADD` and `ZREVRANK`."* You try it — **sub-millisecond**. But why? What data structure inside Redis makes it this fast?
+Then someone says: "Just use Redis `ZADD` and `ZREVRANK`." You try it — **sub-millisecond**. But why? What data structure inside Redis makes it this fast?
 
 If you've read the [Rate Limiting Patterns](/posts/rate-limiting-patterns) article, you've already seen Sorted Set appear in the Sliding Window Log section — `ZADD`, `ZREMRANGEBYSCORE`, `ZCARD`. This article will dissect what's happening **underneath** those commands.
 
@@ -72,9 +72,9 @@ Thanks to the hash table, three operations become extremely fast:
 2. **Duplicate check during `ZADD`** — before adding a new member, Redis checks the hash table to see if the member already exists. If so → this is a score update (delete old position in skip list, insert new position). If not → new insert.
 3. **`ZREM key member`** — needs to find the member to delete. The hash table locates the member in O(1), then deletes it from the skip list.
 
-In short: the hash table is the "fast lookup engine" — whenever Redis needs to answer *"does this member exist? what's its score?"*, the hash table answers in O(1).
+In short: the hash table is the "fast lookup engine" — whenever Redis needs to answer "does this member exist? what's its score?", the hash table answers in O(1).
 
-But the hash table **doesn't know about ordering**. You can't ask the hash table *"who's ranked #1?"* or *"list all members with scores from 1000 to 2000"*. That's the skip list's job.
+But the hash table **doesn't know about ordering**. You can't ask the hash table "who's ranked #1?" or "list all members with scores from 1000 to 2000". That's the skip list's job.
 
 ---
 

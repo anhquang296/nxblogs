@@ -12,7 +12,7 @@ One Monday morning, the dashboard shows P99 latency on the `/search` endpoint sp
 
 What you need right now is something to stop those requests **before** they hit the DB. That's **rate limiting**.
 
-But "rate limit" isn't _one_ algorithm — there are at least **5 approaches**, each suited to a different situation. Choose wrong and you'll either waste money, wrongly reject good clients, or worse: think you're protected when you're not. This article walks through each pattern, with illustrative code and an assessment of production complexity.
+But "rate limit" isn't **one** algorithm — there are at least **5 approaches**, each suited to a different situation. Choose wrong and you'll either waste money, wrongly reject good clients, or worse: think you're protected when you're not. This article walks through each pattern, with illustrative code and an assessment of production complexity.
 
 ---
 
@@ -171,7 +171,7 @@ async function slidingWindowCounter(userId: string, limit: number, windowSec: nu
 
 **Advantages.** Memory is `O(1)` like fixed window, accuracy is **approximately ~99%** compared to sliding log. Cloudflare published a post explaining they use this at the edge ([blog.cloudflare.com/counting-things-a-lot-of-different-things](https://blog.cloudflare.com/counting-things-a-lot-of-different-things)).
 
-**Disadvantages.** It's _approximate_ — it assumes traffic is evenly distributed in the previous window, which isn't always true. But the error is acceptable for most APIs.
+**Disadvantages.** It's **approximate** — it assumes traffic is evenly distributed in the previous window, which isn't always true. But the error is acceptable for most APIs.
 
 **Variants.** Many systems divide into multiple sub-windows (e.g., 6 sub-windows of 10s each for a 60s window) to improve accuracy. This is a middle ground between sliding log and the classic sliding counter.
 
@@ -212,7 +212,7 @@ async function tokenBucket(userId: string, capacity: number, refillPerSec: numbe
 }
 ```
 
-> **Note:** the code above _has a race condition_ — read and write are not atomic. Production must wrap it in a <Tooltip content="A Lua program executed atomically inside Redis via the EVAL command, letting multiple reads and writes run as a single indivisible step.">Lua script</Tooltip> (see section 4).
+> **Note:** the code above **has a race condition** — read and write are not atomic. Production must wrap it in a <Tooltip content="A Lua program executed atomically inside Redis via the EVAL command, letting multiple reads and writes run as a single indivisible step.">Lua script</Tooltip> (see section 4).
 
 **Advantages.** **Allows bursts** up to capacity. Fits well with uneven traffic: web/mobile is usually quiet then bursts during user sessions. <Tooltip content="A rate-limiting algorithm that maintains a 'bucket' of tokens refilled over time; each request consumes a token, and requests are rejected when the bucket is empty.">Token bucket</Tooltip> "rewards" frugal clients by letting them spend more when needed.
 
@@ -351,7 +351,7 @@ This middleware **doesn't** care what algorithm is inside — it just calls `lim
 
 ## Conclusion
 
-Rate limiting isn't _one_ algorithm but a **toolbox**. Choose wrong and you'll either waste money (sliding log for a 100k/min limit), wrongly reject good clients (fixed window when traffic bursts), or worse, think you're protected when the algorithm doesn't match the traffic pattern.
+Rate limiting isn't **one** algorithm but a **toolbox**. Choose wrong and you'll either waste money (sliding log for a 100k/min limit), wrongly reject good clients (fixed window when traffic bursts), or worse, think you're protected when the algorithm doesn't match the traffic pattern.
 
 Rule of thumb: start with **Sliding Window Counter** as the default for public APIs. Switch to **Token Bucket** when burst traffic is normal and you want to allow it. Use **Leaky Bucket** when you need to smooth outbound traffic to a strict downstream. Save **Fixed Window** for long quotas (daily, monthly) and **Sliding Log** for small-but-sensitive endpoints.
 

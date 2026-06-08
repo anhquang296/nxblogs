@@ -8,11 +8,11 @@ enableComment: true
 
 # Redis Sorted Set: Skip List + Hash Table — Bộ đôi cấu trúc dữ liệu đằng sau O(log N) của Redis
 
-Bạn đang xây leaderboard cho một game có 10 triệu người chơi. Mỗi giây, hàng ngàn lượt cập nhật điểm đổ về. Hệ thống cần trả lời hai câu hỏi trong **dưới 1ms**: *"Player X xếp hạng bao nhiêu?"* và *"Top 100 là ai?"*
+Bạn đang xây leaderboard cho một game có 10 triệu người chơi. Mỗi giây, hàng ngàn lượt cập nhật điểm đổ về. Hệ thống cần trả lời hai câu hỏi trong **dưới 1ms**: "Player X xếp hạng bao nhiêu?" và "Top 100 là ai?"
 
 Nếu dùng SQL: `SELECT * FROM scores ORDER BY score DESC LIMIT 100` trên bảng 10 triệu dòng — kể cả có index — vẫn mất hàng chục đến hàng trăm milliseconds. Thêm `WHERE` cho rank cá nhân thì phải scan cả bảng.
 
-Rồi ai đó nói: *"Dùng Redis `ZADD` với `ZREVRANK` đi."* Bạn thử — **sub-millisecond**. Nhưng tại sao? Cấu trúc dữ liệu nào bên trong Redis khiến nó nhanh đến vậy?
+Rồi ai đó nói: "Dùng Redis `ZADD` với `ZREVRANK` đi." Bạn thử — **sub-millisecond**. Nhưng tại sao? Cấu trúc dữ liệu nào bên trong Redis khiến nó nhanh đến vậy?
 
 Nếu bạn đã đọc bài [Rate Limiting Patterns](/posts/rate-limiting-patterns), bạn đã thấy Sorted Set xuất hiện ở phần Sliding Window Log — `ZADD`, `ZREMRANGEBYSCORE`, `ZCARD`. Bài này sẽ mổ xẻ những gì đang xảy ra **bên dưới** những command đó.
 
@@ -72,9 +72,9 @@ Nhờ hash table, ba thao tác sau trở nên cực nhanh:
 2. **Kiểm tra trùng lặp khi `ZADD`** — trước khi thêm member mới, Redis check hash table để biết member đã tồn tại chưa. Nếu có → đây là update score (xoá vị trí cũ trong skip list, chèn vị trí mới). Nếu chưa → insert mới.
 3. **`ZREM key member`** — cần tìm member để xoá. Hash table cho phép locate member trong O(1), sau đó mới xoá trong skip list.
 
-Tóm lại: hash table là "bộ tra cứu nhanh" — bất cứ khi nào Redis cần trả lời *"member này có tồn tại không? score của nó là bao nhiêu?"*, hash table trả lời trong O(1).
+Tóm lại: hash table là "bộ tra cứu nhanh" — bất cứ khi nào Redis cần trả lời "member này có tồn tại không? score của nó là bao nhiêu?", hash table trả lời trong O(1).
 
-Nhưng hash table **không biết thứ tự**. Bạn không thể hỏi hash table *"ai xếp hạng 1?"* hay *"liệt kê tất cả member có score từ 1000 đến 2000"*. Đó là việc của skip list.
+Nhưng hash table **không biết thứ tự**. Bạn không thể hỏi hash table "ai xếp hạng 1?" hay "liệt kê tất cả member có score từ 1000 đến 2000". Đó là việc của skip list.
 
 ---
 

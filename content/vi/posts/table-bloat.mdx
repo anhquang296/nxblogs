@@ -1,12 +1,12 @@
 ---
-title: 'Deep Dive: Table Bloat trong PostgreSQL và Chiến lược Tối ưu Storage'
+title: 'Table Bloat trong PostgreSQL: Chiến lược Tối ưu Storage'
 date: '2026-01-25'
 tags: ['Database']
 description: 'PostgreSQL table bloat — MVCC dead tuples, cơ chế VACUUM, bloat detection, và chiến lược thu hồi storage lãng phí để cải thiện query performance.'
 enableComment: true
 ---
 
-# Deep Dive: Table Bloat trong PostgreSQL và Chiến lược Tối ưu Storage
+# Table Bloat trong PostgreSQL: Chiến lược Tối ưu Storage
 
 Gần đây tôi có nghiên cứu sâu về cách PostgreSQL quản lý lưu trữ và bắt gặp một chủ đề cực kỳ thú vị: **Table Bloat**. Với những ai làm việc với dữ liệu lớn, việc "scale up" dung lượng ổ cứng chỉ là giải pháp bề nổi. Để tối ưu hóa thực sự về chi phí hạ tầng (đặc biệt là trên Cloud với mô hình provisioned IOPS/storage) và cải thiện hiệu năng I/O, chúng ta buộc phải hiểu tường tận cách Postgres ghi và xóa dữ liệu ở mức vật lý.
 

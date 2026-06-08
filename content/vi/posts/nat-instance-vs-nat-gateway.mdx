@@ -10,7 +10,7 @@ enableComment: true
 
 Bạn đang review hóa đơn AWS tháng này. Dòng **NAT Gateway** nổi bật với con số không hề nhỏ — $0.045/giờ cộng $0.045/GB data processed. Với môi trường dev/staging chạy 24/7, chi phí NAT Gateway có thể lên đến hàng trăm đô mỗi tháng chỉ để EC2 trong private subnet download package hay gọi external API.
 
-Đồng nghiệp gợi ý: _"Sao không dùng NAT Instance cho dev? Chạy trên `t3.micro`, tốn có vài đô."_
+Đồng nghiệp gợi ý: "Sao không dùng NAT Instance cho dev? Chạy trên `t3.micro`, tốn có vài đô."
 
 NAT Instance — nghe quen thuộc nhưng bạn chưa bao giờ setup. Nó cũng là NAT, nhưng chạy trên EC2 thay vì dùng managed service. Vậy nó hoạt động như thế nào? Tại sao phải tắt Source/Destination Check? Và khi nào thì nên dùng nó thay vì NAT Gateway?
 
@@ -59,7 +59,7 @@ AWS từng cung cấp **pre-configured Amazon Linux AMI** cho NAT Instance, như
 
 #### Source/Destination Check là gì?
 
-Mặc định, AWS bật **Source/Destination Check** trên mọi EC2 instance. Tính năng này kiểm tra: _packet đến hoặc đi từ instance này có source IP hoặc destination IP trùng với IP của chính instance đó không?_ Nếu không — packet bị **drop** ngay lập tức.
+Mặc định, AWS bật **Source/Destination Check** trên mọi EC2 instance. Tính năng này kiểm tra: packet đến hoặc đi từ instance này có source IP hoặc destination IP trùng với IP của chính instance đó không? Nếu không — packet bị **drop** ngay lập tức.
 
 #### Tại sao AWS bật mặc định?
 

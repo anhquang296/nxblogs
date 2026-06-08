@@ -170,7 +170,7 @@ Giải pháp này được **Facebook** công bố trong paper năm 2013, kết 
 **Giai đoạn 1 — Writer cập nhật dữ liệu (phía Master DB):**
 
 1. Ghi dữ liệu mới vào Master DB.
-2. Đặt **Remote Marker** vào Cache (ví dụ key `marker:product:123`) với TTL ngắn (1-2 giây). Ý nghĩa: *"Cảnh báo! Dữ liệu gốc vừa thay đổi. Mọi dữ liệu đọc từ Slave lúc này đều không đáng tin."*
+2. Đặt **Remote Marker** vào Cache (ví dụ key `marker:product:123`) với TTL ngắn (1-2 giây). Ý nghĩa: "Cảnh báo! Dữ liệu gốc vừa thay đổi. Mọi dữ liệu đọc từ Slave lúc này đều không đáng tin."
 3. Xóa dữ liệu cũ trong Cache (đồng thời xóa luôn Lease Token nếu đang tồn tại).
 
 **Giai đoạn 2 — Reader đọc dữ liệu (phía Slave DB):**

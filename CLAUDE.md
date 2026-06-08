@@ -23,11 +23,13 @@
 
 - Blog posts live in `content/{lang}/posts/*.mdx`
 - Frontmatter fields: `title`, `date` (ISO format), `tags` (string array), `description`, `enableComment` (boolean)
+- Post titles must lead with the article's topic (e.g., `Sequential Read: ...`, `PostgreSQL Index: ...`), never a generic prefix like "Deep Dive:"
 - Post filenames use kebab-case
 - Every post must exist in both `en/` and `vi/` directories
 - When creating a new blog post, write the Vietnamese version first (`content/vi/posts/`), finalize it, then create the English translation (`content/en/posts/`)
 - Available MDX components: `<Posts />`, `<Tags />`, `<Avatar />`, and feature-specific components registered in `src/mdx-components.tsx`
 - When mentioning a technical concept or term (e.g., data shards, parity shards, erasure coding), always briefly explain what it is so the reader can understand without prior knowledge
+- For emphasis, use bold (`**text**`) only — never italic (`*text*` or `_text_`)
 
 # Code Style
 

@@ -1,0 +1,234 @@
+---
+title: 'Sequential Read: Từ read() Xuống Đĩa, Và Vì Sao Postgres Đôi Khi Chọn Seq Scan Thay Vì Index'
+date: '2026-06-08'
+tags: ['Database']
+description: 'Lần theo những gì thực sự xảy ra giữa một câu query PostgreSQL và mặt đĩa — cấu tạo HDD (seek và rotational latency), sequential vs random I/O, một lệnh read() thực sự đọc bao nhiêu, cửa sổ read-ahead thích nghi của kernel, và vì sao một seq scan "tuần tự" vẫn phải seek. Tầng I/O nằm sau seq_page_cost và random_page_cost.'
+enableComment: true
+---
+
+# Sequential Read: Từ read() Xuống Đĩa, Và Vì Sao Postgres Đôi Khi Chọn Seq Scan Thay Vì Index
+
+Trong [bài deep dive về B-tree index](/posts/postgresql-btree-index), ta đã kết luận: khi một query phải lấy phần lớn số dòng của bảng, query planner sẽ bỏ qua index và chọn **Seq Scan** — quét tuần tự cả bảng — vì đọc tuần tự rẻ hơn nhiều so với việc nhảy theo `ctid` tới hàng nghìn trang rải rác. Nghe hợp lý, và bạn đã chấp nhận nó như một sự thật hiển nhiên.
+
+Rồi một ngày: cùng một câu query, cùng một bảng `orders`, `EXPLAIN` ước lượng Seq Scan tốn chừng đó cost — nhưng `EXPLAIN ANALYZE` cho thấy thời gian thực tế gấp năm lần con số ấy. Cost model không đổi, số dòng không đổi, không ai lock bảng. Vậy cái gì đã đổi?
+
+Câu trả lời không nằm trong SQL, mà ở những tầng bên dưới nó — nơi một thao tác "tuần tự trên giấy" có thể thoái hóa thành "ngẫu nhiên trên mặt đĩa". Và để xuống được tới đó, ta phải trả lời một loạt câu hỏi mà rất nhiều backend dev "biết mà không chắc":
+
+- "Seq Scan" trong query plan có đúng là một **sequential read** ở tầng đĩa không?
+- Một lệnh `read()` đọc một page hay nhiều page?
+- Một heap file "gồm các page liên tiếp" có thực sự nằm liên tiếp trên **đĩa** không?
+
+Phần lớn sự mơ hồ đến từ chỗ ta gộp các tầng lại làm một. Bài này tách bạch chúng, lần theo toàn bộ chuỗi từ **mặt đĩa quay** lên tới **query executor**, lấy PostgreSQL làm lăng kính. Bài này đứng trên vai [Storage Internals](/posts/postgresql-storage-internals) (heap file, page 8 KB, shared buffer) và [B-tree Index](/posts/postgresql-btree-index) (random I/O, `seq_page_cost`/`random_page_cost`) — ở đâu cần khái niệm nền, mình link về đó thay vì giảng lại.
+
+<ExcalidrawDiagram
+  src="/postgresql-sequential-read-overview.excalidraw"
+  alt="Stack 4 tầng của sequential read — Query executor (Seq Scan vs Index Scan), PostgreSQL I/O layer (read() 8KB, multi-block read), Kernel (page cache + read-ahead), Storage (platter, seek + rotational latency); mỗi tầng tự quyết định dựa trên thông tin riêng nó có"
+/>
+
+Và vì phần lớn khác biệt latency giữa "tuần tự" và "ngẫu nhiên" sinh ra từ vật lý của một ổ đĩa quay, ta bắt đầu từ chính cái đĩa.
+
+## 1. Giải phẫu một ổ HDD — latency thực sự đến từ đâu
+
+Toàn bộ câu chuyện "tuần tự nhanh hơn ngẫu nhiên" — cái quyết định lựa chọn của planner — bắt nguồn từ cơ học của một **ổ cứng cơ (HDD)**. Trên một database đặt dữ liệu trên HDD, khoảng cách này là **tất cả**. Nên trước khi nói về bất kỳ I/O pattern nào, hãy thống nhất từ vựng vật lý.
+
+![HDD Disk](/hdd-disk.svg)
+
+Một ổ HDD gồm các **platter** (đĩa từ) xếp chồng trên một <Tooltip content="Trục quay giữ và xoay toàn bộ chồng platter ở một tốc độ cố định">spindle</Tooltip>, quay ở một tốc độ cố định tính bằng **RPM** (vòng/phút — phổ biến 7.200 hoặc 15.000). Mỗi mặt platter chia thành các **track** (rãnh tròn đồng tâm), mỗi track lại chia thành các <Tooltip content="Đơn vị vật lý nhỏ nhất ổ đĩa đọc/ghi — 512 byte ở ổ cũ, 4 KB ở ổ hiện đại. Không thể đọc nửa sector">sector</Tooltip>. Tập hợp cùng một track trên mọi platter gọi là một <Tooltip content="Cylinder — cùng một track ở mọi mặt platter; đọc hết một cylinder không cần di chuyển đầu đọc">cylinder</Tooltip>. Và để đọc được dữ liệu, một **actuator arm** (cần truy xuất) mang các **read/write head** (đầu đọc/ghi) — tất cả các đầu đọc gắn cứng vào cùng một cần và di chuyển cùng nhau.
+
+Chi phí của **một** lần đọc gồm ba thành phần:
+
+- **Seek time** — thời gian di chuyển cần để đầu đọc tới đúng track đích. Đây là thao tác cơ học đắt nhất, trung bình **~5–10 ms** (ổ server tốt ~4 ms, ổ desktop ~9 ms).
+- **Rotational latency** — sau khi đầu đọc đã ở đúng track, vẫn phải chờ sector đích quay tới **dưới** đầu đọc. Trung bình bằng nửa vòng quay: ở 7.200 RPM, một vòng mất 8,33 ms → trung bình **~4,2 ms**.
+- **Transfer time** — thời gian thực sự truyền byte một khi đã định vị xong. Với 8 KB, phần này gần như bằng 0.
+
+Đây là mấu chốt cấp năng lượng cho cả bài viết. Với một lần đọc **ngẫu nhiên** 8 KB, seek + rotational latency **thống trị** (~10 ms), còn việc truyền dữ liệu thì không đáng kể — bạn trả ~10 ms để lấy 8 KB. Với đọc **tuần tự**, đầu đọc đã nằm sẵn đúng chỗ, nên các sector kề nhau "trôi" qua dưới đầu đọc liên tục; chi phí cố định kia chỉ trả một lần rồi được khấu trừ (amortize) cho cả dải dữ liệu dài. Kết quả: một ổ HDD đạt **~150 MB/s** khi đọc tuần tự, nhưng với đọc ngẫu nhiên block nhỏ chỉ làm được khoảng **75–150 IOPS** — tức vài trăm KB/s. Khoảng cách cỡ **~100 lần**.
+
+> Hãy nhớ con số ~100× này: nó chính là thứ mà query planner đang ước lượng khi cân nhắc giữa Seq Scan và Index Scan.
+
+Và một lưu ý mở ngoặc cho phần sau: **SSD không có gì trong số này** — không cần, không quay. Ta sẽ quay lại ở mục 6 để xem vì sao trên SSD, khoảng cách trên gần như biến mất.
+
+---
+
+## 2. Từ một bảng tới các sector trên platter
+
+Hầu hết chúng ta hình dung một bảng ở góc nhìn **logic**: từ [Storage Internals](/posts/postgresql-storage-internals), một bảng là một **heap file**, và heap file chỉ là một dãy **page 8 KB** nằm ở các offset liên tiếp — page 0 ở byte 0, page 1 ở byte 8192, page 2 ở byte 16384... "Dữ liệu là file gồm các page liên tiếp." Đúng, nhưng đó mới là một nửa: **một offset trong file không phải là một vị trí trên đĩa.**
+
+Giữa "page trong heap file" và "sector trên platter" có **hai tầng ánh xạ**:
+
+1. **Heap file → <Tooltip content="Extent — một dải block vật lý liên tục mà filesystem cấp cho file; một file ít phân mảnh gồm ít extent lớn">filesystem extent</Tooltip> → <Tooltip content="Logical Block Address — địa chỉ block tuyến tính mà ổ đĩa phơi ra cho OS; LBA liên tiếp gần như tương ứng sector liền kề">LBA</Tooltip>.** Heap file thực ra là một file trên filesystem. Filesystem đặt các dải byte của file vào những block vật lý, gom thành các extent. Trên một filesystem mới hoặc vừa defrag, cả file nằm gọn trong một extent lớn duy nhất → các page liên tiếp nhận các LBA liên tiếp. Nhưng khi bảng lớn dần và vùng trống bị manh mún, file bị xé thành nhiều extent rải rác xa nhau.
+2. **LBA → physical address.** Firmware của ổ đĩa ánh xạ mỗi LBA tới một vị trí cụ thể (cylinder, track, sector). LBA liên tiếp ≈ sector liền kề.
+
+Đây là **bản lề của cả bài viết**:
+
+> Các page liên tiếp trong một heap file **thường** là các sector liền kề trên platter — nhưng chỉ vì filesystem tình cờ xếp chúng liền mạch; **không có gì trong bản thân "heap file" đảm bảo điều đó.**
+
+Chính sự thật này giải thích cả hai vế: vì sao một seq scan **logic** thường nhanh (mục 3), và vì sao nó có thể sụp thành random I/O **vật lý** khi ánh xạ bị phá vỡ (mục 6).
+
+Một chi tiết PostgreSQL làm rõ thêm điều này: khi một heap file đặt giới hạn kích thước, nó sẽ bị tách thành các file segment (`relfilenode`, `relfilenode.1`, `relfilenode.2`… — xem [Storage Internals](/posts/postgresql-storage-internals)). Ngay cả ranh giới giữa các segment cũng là những đối tượng filesystem riêng biệt, hoàn toàn có thể nằm ở các extent khác nhau trên đĩa.
+
+---
+
+## 3. Hai pattern I/O: sequential vs random
+
+Giờ ta đã có từ vựng để định nghĩa chính xác hai pattern. **Sequential read** và **random read** là cách phân loại **I/O pattern** ở tầng storage — tức **thứ tự vị trí** mà ta yêu cầu dữ liệu, không phải ta đọc cái gì hay vì mục đích gì.
+
+- **Sequential read**: đọc các block/page liền kề theo địa chỉ tăng dần — block N, N+1, N+2, ...
+- **Random read**: nhảy tới các vị trí rời rạc, khó đoán — block 10, rồi 4732, rồi 88, rồi 2901.
+
+<ExcalidrawDiagram
+  src="/sequential-vs-random-io-pattern.excalidraw"
+  alt="So sánh hai pattern — sequential đọc các block 100,101,102… liền kề, đầu đọc trôi liên tục đạt ~150 MB/s; random nhảy tới 10, 4732, 88, 2901 với một lần seek + rotation mỗi bước, throughput sụp xuống vài trăm KB/s"
+/>
+
+Một ví dụ nhầm lẫn phổ biến: giả sử bảng có 50 page và ta cần đọc từ page 10 đến page 20. Đây là **sequential read**, dù ta đã bỏ qua page 1–9. Điều quyết định không phải "đọc từ đầu file" mà là 11 page cần đọc nằm liền kề và được truy cập theo trật tự. Bắt đầu từ giữa file không biến nó thành random.
+
+Đặt lên cơ học mục 1, sự khác biệt hiện ra rõ ràng:
+- Với **random**, mỗi lần đọc trả một seek + rotational latency (~10 ms)
+- Với **sequential**, đầu đọc nằm yên trên track và các sector kề nhau trôi qua liên tục, giảm đáng kể seek + rotational latency.
+
+### Đặt tên các tầng cho rõ — và trả lời câu hỏi ở đầu bài
+
+Đây là chỗ gỡ nút thắt khái niệm hay bị lẫn nhất, và là câu trả lời trực tiếp cho câu hỏi mở bài:
+
+- Một **Seq Scan** trong query plan là một <Tooltip content="Access method — cách query executor truy cập một bảng: quét toàn bộ, hay đi qua index">access method</Tooltip> ở tầng **executor** — nó nói đọc cái gì, bằng phương pháp nào.
+- Một **sequential read** là một **I/O pattern** ở tầng **storage** — nó nói đĩa được truy cập theo trật tự nào.
+
+Một Seq Scan **thường được hiện thực bằng** sequential read — đó chính là lý do vì sao Seq Scan đánh bại Index Scan khi query cần đọc phần lớn bảng. Nhưng hai khái niệm **không phải lúc nào cũng trùng**: một heap file phân mảnh biến Seq Scan thành random read vật lý (mục 6), và sequential read cũng xuất hiện **ngoài** Seq Scan — ví dụ một index range scan đọc các leaf page liền kề của B-tree cũng là sequential read.
+
+Và nhớ lại ánh xạ ở mục 2: một sequential read về **logic** chỉ thực sự sequential về **vật lý** khi các page của heap file ánh xạ vào sector liền kề. Khi không, "tuần tự" thoái hóa thành ngẫu nhiên — ta sẽ mổ xẻ ở mục cuối.
+
+---
+
+## 4. Một lệnh read() đọc bao nhiêu? Gỡ nhầm lẫn syscall
+
+Một giả định rất phổ biến: "database đọc từng page một, mỗi `read()` một page." Câu này vừa đúng vừa sai, tùy bạn nhìn ở tầng nào. Để gỡ, cần tách bạch **ba con số khác nhau** thường bị gộp làm một.
+
+<ExcalidrawDiagram
+  src="/read-syscall-three-numbers.excalidraw"
+  alt="Ba con số độc lập của read() — (a) ứng dụng yêu cầu count byte; (b) kernel chạm đĩa bao nhiêu là do page cache + read-ahead quyết định, không phải count; (c) thiết bị luôn làm việc theo nguyên block 4KB / sector 512B"
+/>
+
+**`read()` yêu cầu bao nhiêu.** Chữ ký syscall là:
+
+```c
+ssize_t read(int fd, void *buf, size_t count);
+```
+
+`read()` đọc **tối đa** `count` byte. `count` do ứng dụng quyết định — không hề có ràng buộc "một page mỗi lần". Nếu database truyền `count` bằng kích thước 16 page, một lệnh `read()` duy nhất sẽ yêu cầu 16 page. Đây chính là **multi-block read**. Vậy "mỗi `read()` một page" là một **lựa chọn thiết kế**, không phải quy luật.
+
+**OS thực sự chạm đĩa bao nhiêu.** Đây là chỗ tách rời quan trọng nhất: **lượng byte `read()` yêu cầu ≠ lượng byte OS đọc từ đĩa.** Bạn `read()` 1 page, nhưng nếu read-ahead (mục 5) đang chạy, OS có thể nạp luôn 16 page vào <Tooltip content="Page cache — vùng RAM của kernel cache các block đĩa, dùng chung cho mọi tiến trình">page cache</Tooltip>. Hoặc bạn `read()` 1 page nhưng page đó đã nằm trong page cache → OS **không chạm đĩa lần nào**, chỉ copy từ cache ra buffer của bạn. `read()` mô tả ý định của ứng dụng; còn đĩa bị truy cập bao nhiêu là do cache + read-ahead của kernel quyết định.
+
+**Đơn vị I/O vật lý.** Tầng dưới cùng, đĩa và kernel làm việc theo **block** (thường 4 KB) hoặc **sector** (512 B). OS luôn đọc theo bội số của block — không thể đọc nửa block. Một page database 8 KB tương ứng 2 block 4 KB. Khi bạn `read()` 100 byte, kernel vẫn nạp nguyên block chứa 100 byte đó.
+
+Ba con số này độc lập với nhau, và việc gộp chúng chính là gốc rễ của câu hỏi "`read()` đọc một page đúng không?".
+
+### PostgreSQL làm gì
+
+PostgreSQL đọc heap và index theo đơn vị **8 KB block**. Kinh điển, nó phát từng block một qua <Tooltip content="pread — như read() nhưng đọc tại một offset cho trước mà không thay đổi con trỏ file, cho phép nhiều luồng đọc song song trên cùng file descriptor">`pread()`</Tooltip>, và **dựa vào read-ahead của OS** để biến chuỗi 8 KB rời rạc đó thành I/O hiệu quả khi quét tuần tự. Trong nhiều năm, đó đúng là toàn bộ câu chuyện — "Postgres luôn đọc đúng từng block 8 KB, kể cả khi seq scan".
+
+Điều đó đã đổi. **PostgreSQL 17** thêm **read stream API** và tham số **`io_combine_limit`**: với seq scan (và `ANALYZE`, cùng vài thao tác khác), Postgres nay **gom** nhiều block 8 KB liền kề vào một lần đọc lớn hơn — mặc định lên tới **128 KB** thay vì 8 KB. Chính là khái niệm multi-block read ở trên, hiện thực ngay trong database:
+
+```sql
+SHOW io_combine_limit;   -- 128kB  (PostgreSQL 17+)
+```
+
+**PostgreSQL 18** đi thêm một bước: **asynchronous I/O** thật sự, điều khiển qua `io_method` (mặc định `worker` dùng các tiến trình nền; hoặc `io_uring` trên Linux). Với seq scan, bitmap heap scan và `VACUUM`, AIO cho phép **chồng lấp** (overlap) việc đọc đĩa với việc xử lý dữ liệu, đạt cải thiện 2–3× — đặc biệt rõ trên storage mạng như EBS, nơi mỗi lần chờ I/O là một round-trip mạng.
+
+> Mấu chốt để gỡ "database chỉ đọc từng page": ở tầng **logic**, executor **tiêu thụ** dữ liệu từng page một — đúng. Nhưng ở tầng **I/O**, việc **nạp** dữ liệu thì không nhất thiết từng page: nó có thể là multi-block read, hoặc nhiều yêu cầu đọc bất đồng bộ chồng lên nhau. Hai con số đó khác nhau.
+
+---
+
+## 5. Read-ahead trong kernel
+
+Read-ahead (đọc trước / prefetch ở tầng OS) là cơ chế kernel **chủ động** nạp trước các block mà nó **dự đoán** ứng dụng sắp cần, trước cả khi `read()` cho các block đó được gọi. Mục tiêu: che giấu độ trễ I/O. Khi ứng dụng đến lượt đọc block kế tiếp, dữ liệu đã sẵn trong page cache, `read()` trả về tức thì mà không chờ đĩa.
+
+<ExcalidrawDiagram
+  src="/kernel-read-ahead-window.excalidraw"
+  alt="Vòng đời cửa sổ read-ahead — block 0 cache miss kích hoạt đọc đồng bộ và prefetch bất đồng bộ block 1–15; ứng dụng đọc 0,1,2,3 toàn cache hit; khi chạm readahead marker ở block 12, kernel phóng tiếp cửa sổ block 16–47 trong nền"
+/>
+
+**Phát hiện pattern.** Kernel theo dõi chuỗi `read()` trên mỗi file descriptor. Thấy các offset tăng đều liền kề (N, N+1, N+2...), nó kết luận đây là sequential access và bật read-ahead. Thấy các offset nhảy lung tung, nó thu hẹp hoặc tắt read-ahead — vì đoán trước sẽ sai, prefetch nhầm chỉ tổ lãng phí băng thông đĩa lẫn RAM cache.
+
+**Cửa sổ thích nghi (adaptive window).** Kernel duy trì một read-ahead "window" kích thước thay đổi động: khi mới nghi là sequential, prefetch một lượng nhỏ; mỗi lần dự đoán **đúng** (ứng dụng quả thực đọc tới các block đã nạp trước), kernel **tăng** kích thước window — lần sau đọc trước nhiều hơn; khi pattern bị phá vỡ, window co lại hoặc reset về 0. Workload càng tuần tự rõ ràng, kernel prefetch càng mạnh tay; workload random thì read-ahead gần như biến mất.
+
+Linux hiện thực bằng ý tưởng <Tooltip content="Readahead marker — một block trong cửa sổ được gắn cờ; khi ứng dụng đọc trúng nó, kernel phóng đợt prefetch kế tiếp một cách bất đồng bộ">readahead marker</Tooltip>. Khi ứng dụng đọc **trúng** block có marker, đó là tín hiệu để kernel phóng đợt prefetch kế tiếp — **bất đồng bộ**, chạy song song trong khi ứng dụng vẫn đang xử lý dữ liệu đã có. Nhờ vậy việc nạp đĩa và việc tính toán của ứng dụng gối lên nhau:
+
+1. Ứng dụng `read()` block 0, cache miss nên kernel đọc block 0, **đồng thời** prefetch block 1–15 vào page cache, và đánh dấu marker trên block 12.
+2. Ứng dụng đọc block 1, 2, 3..., các block này đã được prefetch và lưu lại trên OS page cache, nên trả về lập tức, không cần đến disk.
+3. Đọc tới block có marker (block 12), kernel quyết định prefetch tiếp các block 16 - 47
+
+> Lý tưởng: ứng dụng không bao giờ phải dừng chờ đĩa.
+
+---
+
+## 6. Khi giả định sụp đổ: seq scan vẫn phải seek
+
+Tới đây ta có một chuỗi đẹp: seq scan → đọc tuần tự theo offset của heap file → sequential read vật lý → tận dụng read-ahead → nhanh. Nhưng đó là **trường hợp lý tưởng**.
+
+Seq scan **giảm** seek chứ không **loại bỏ** nó.
+
+<ExcalidrawDiagram
+  src="/logical-vs-physical-contiguity.excalidraw"
+  alt="Logic vs vật lý — các page heap file 0..4 liền mạch về logic được scan theo thứ tự, nhưng ánh xạ tới các extent rải rác trên platter, khiến đầu đọc phải nhảy qua lại; một seq scan biến thành random I/O vật lý"
+/>
+
+Vẫn còn nhiều nguồn sinh seek ngay cả khi bạn "đọc tuần tự":
+
+1. **Phân mảnh filesystem** — như mục 2: heap file có thể nằm rải nhiều extent. Đọc tuần tự về logic vẫn sinh seek vật lý mỗi khi nhảy giữa các extent.
+2. **Remapped sector** — sector hỏng được controller chuyển sang vùng dự phòng, gây seek bất ngờ ngay cả khi LBA liền kề.
+3. **I/O xen kẽ từ tiến trình khác** — đĩa phục vụ nhiều query cùng lúc. Trong khi seq scan của bạn đang đọc page 100, một query khác chen vào đọc ở vùng đĩa khác → đầu đọc bị kéo đi → khi quay lại đọc page 101 thì phải seek về. Đọc "tuần tự" của bạn bị xé lẻ bởi tải đồng thời.
+4. **Cấu trúc phụ** — đôi khi scan cần chạm tới các cấu trúc nằm chỗ khác (free space map, visibility map — xem [Storage Internals](/posts/postgresql-storage-internals)), không liền kề trong vùng heap chính.
+
+### Vì sao page của heap file bị rải rác
+
+Nối tiếp mục 2, có ba nguồn khiến các page liền kề về logic lại nằm rải rác về vật lý:
+
+- **Phân mảnh filesystem.** Khi bảng lớn dần, filesystem cấp extent từ vùng trống đang có; nếu vùng trống manh mún, các extent của cùng heap file bị rải khắp nơi.
+- **Heap không có thứ tự lưu trữ.** "Heap" đúng nghĩa là **không sắp xếp** — row được đặt vào bất kỳ page nào còn chỗ.
+- **Update/delete và tái sử dụng không gian.** Khi row bị xóa/sửa, page giải phóng chỗ trống và được tái dùng qua free space map; dữ liệu chèn sau rơi vào những page trống rải rác thay vì nối tiếp cuối file. Theo thời gian, các row ghi gần nhau về **thời gian** lại phân tán về **vị trí**. (Cơ chế dead tuple/MVCC được mổ xẻ trong [bài Table Bloat](/posts/table-bloat).)
+
+Đây là lý do tồn tại các thao tác bảo trì: `CLUSTER` sắp xếp lại vật lý các page của bảng theo thứ tự một index, biến random thành sequential — nhưng với heap thuần (mặc định của Postgres) nó là thao tác **một lần**, không tự duy trì, và bảng sẽ dần "trôi" về trạng thái rải rác (xem [B-tree index](/posts/postgresql-btree-index) mục 5); còn `VACUUM` dọn dẹp và nén lại để giảm phân mảnh.
+
+```sql
+CLUSTER orders USING idx_orders_created_at;
+```
+
+### Vì sao cost model dùng giá trị kỳ vọng
+
+Đây cũng là lý do mô hình chi phí của PostgreSQL dùng **giá trị kỳ vọng** chứ không phải tuyệt đối:
+
+```sql
+SHOW seq_page_cost;      -- 1
+SHOW random_page_cost;   -- 4
+```
+
+PostgreSQL không đặt `seq_page_cost = 0`, mà đặt `= 1.0` — tức seq scan vẫn **có** chi phí mỗi page, chỉ rẻ hơn. Con số 1.0 thay vì 0 chính là sự thừa nhận rằng đọc tuần tự không hề miễn phí và không hề không-seek; nó chỉ rẻ hơn đáng kể trong điều kiện điển hình. `random_page_cost = 4.0` (chứ không phải 40, dù khoảng cách phần cứng tới 100×) vì cost model giả định ~90% lần đọc random rơi vào cache — nó mô hình hóa "random chậm hơn ~40 lần, nhưng 90% được cache". Trên SSD, người ta thường chỉnh `random_page_cost` xuống `1.1`–`2.0` vì khoảng cách seq/random hẹp lại.
+
+Và đây chính là lời giải cho câu chuyện mở bài: khi heap file phân mảnh nặng, một seq scan "trên giấy" lại tạo ra random I/O vật lý và chậm hơn nhiều so với chi phí planner ước tính. `EXPLAIN ANALYZE` cho thấy thời gian thực lệch xa cost ước lượng — và nguyên nhân nằm ở **tầng filesystem/đĩa**, không phải ở tầng query plan.
+
+Cuối cùng, trên **SSD** cả cuộc thảo luận về seek này nhạt đi: không có đầu đọc cơ học, không có chuyển động vật lý, nên khác biệt seq/random chỉ còn là overhead nhỏ về IOPS và mức độ song song hóa — không còn là vài mili-giây cơ học mỗi lần nhảy. Phần lớn "nỗi đau" của random I/O trong bài này là câu chuyện của ổ đĩa quay.
+
+---
+
+## Kết
+
+Chuỗi từ đĩa đến query plan có thể tóm gọn thành một nguyên tắc: **mỗi tầng đưa ra quyết định riêng dựa trên thông tin riêng nó có.** Đĩa làm việc theo block và "thích" truy cập tuần tự. Kernel quan sát pattern offset rồi đoán xem có nên read-ahead. PostgreSQL phát các lần đọc theo page 8 KB (đôi khi gom thành lần đọc lớn hơn) và dựa vào read-ahead của OS. Và query executor, ở trên cùng, chọn Seq Scan hay Index Scan dựa trên ước lượng có bao nhiêu page phải đọc và chi phí mỗi loại đọc.
+
+Giữ cho các tầng tách bạch chính là chìa khóa để đọc đúng một query plan. Tóm lại bằng câu hỏi mỗi tầng trả lời:
+
+| Khái niệm | Tầng | Trả lời câu hỏi |
+|---|---|---|
+| Sequential scan | Query executor | Đọc **cái gì**, bằng **phương pháp** nào? |
+| Multi-block read | Database I/O layer | Database **phát lệnh đọc** ra sao? |
+| Read-ahead | Kernel / OS | OS **đoán trước** và nạp cache thế nào? |
+| Sequential read | Storage / đĩa | Đĩa được **truy cập** theo pattern nào? |
+
+Những điều cốt lõi mang về:
+
+- **Khoảng cách seq/random sinh ra từ vật lý của HDD.** Một lần đọc ngẫu nhiên trả seek + rotational latency (~10 ms); đọc tuần tự khấu trừ chúng một lần rồi stream (~150 MB/s). Đó là ~100×, và trên SSD nó gần như biến mất.
+- **Một offset trong file không phải một vị trí trên đĩa.** Page liền kề trong heap file **thường** là sector liền kề — nhưng chỉ vì filesystem tình cờ xếp liền mạch; không gì đảm bảo điều đó.
+- **`read()` đọc đúng số byte bạn bảo nó đọc** — còn việc đĩa bị chạm bao nhiêu (cache + read-ahead) và thiết bị làm việc theo block là ba con số độc lập.
+- **Seq Scan (access method) thường được hiện thực bằng sequential read (I/O pattern)** — nhưng hai khái niệm ở hai tầng khác nhau và có thể lệch nhau.
+- **Seq scan giảm seek chứ không loại bỏ nó.** Phân mảnh, remapped sector, I/O xen kẽ đều biến một scan "tuần tự" thành seek — đó là lý do `seq_page_cost = 1.0` chứ không phải 0.
+
+Khi tối ưu, đừng trộn các tầng: một query "chậm" có thể vì planner chọn nhầm access method, vì datafile phân mảnh, hoặc vì read-ahead của kernel bị đặt sai — mỗi nguyên nhân nằm ở một tầng khác nhau, và biết nó nằm ở đâu là nửa đường tới việc sửa nó.

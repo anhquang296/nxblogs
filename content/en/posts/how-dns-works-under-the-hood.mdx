@@ -16,7 +16,7 @@ Imagine the Internet as an enormous city with billions of houses. Each house has
 
 This article will peel back that layer: who holds the phone book, who looks things up for you, why resolving a single name goes through four different types of servers, and why the entire process still only takes a few milliseconds.
 
-> This article was referenced and expanded from the article *"How DNS Actually Works"* by **AlgoMaster**, with additional detailed explanations for each component.
+> This article was referenced and expanded from the article **"How DNS Actually Works"** by **AlgoMaster**, with additional detailed explanations for each component.
 
 ---
 
@@ -58,7 +58,7 @@ The stub resolver has its own cache, and more importantly, it reads the `hosts` 
 
 OS cache miss, the stub resolver sends the query out to a <Tooltip content="A DNS server that answers on a client's behalf: it takes one question, walks through root/TLD/authoritative servers itself, and returns the final IP.">**recursive resolver**</Tooltip> — this is the central character of the DNS system.
 
-A recursive resolver is like an **intermediary** you ask to look up the phone book for you. You don't personally go knocking on each tier of servers; you just ask the resolver one question: *"What's the IP of example.com?"* — and the resolver handles everything behind the scenes.
+A recursive resolver is like an **intermediary** you ask to look up the phone book for you. You don't personally go knocking on each tier of servers; you just ask the resolver one question: "What's the IP of example.com?" — and the resolver handles everything behind the scenes.
 
 Resolvers are typically operated by:
 
@@ -91,11 +91,11 @@ These organizations are collectively called **registries**, authorized by ICANN 
 
 **TLD servers** are the infrastructure operated by the registry.
 
-TLD servers also don't answer with the destination IP. They continue pointing the way: *"The authoritative servers for example.com are `ns1.example-host.com` and `ns2.example-host.com`, go ask them."*
+TLD servers also don't answer with the destination IP. They continue pointing the way: "The authoritative servers for example.com are `ns1.example-host.com` and `ns2.example-host.com`, go ask them."
 
 ### 2.6. Authoritative Name Server
 
-This is the **ultimate source of truth** for a specific domain. The authoritative server stores the actual **zone file** — the file containing all records for the domain (A, AAAA, CNAME, MX...). It's the only server with the authority to say: *"The IP of example.com is 93.184.216.34."*
+This is the **ultimate source of truth** for a specific domain. The authoritative server stores the actual **zone file** — the file containing all records for the domain (A, AAAA, CNAME, MX...). It's the only server with the authority to say: "The IP of example.com is 93.184.216.34."
 
 When you buy a domain from Namecheap, GoDaddy, or Cloudflare, and you go to the dashboard to edit DNS records — you're actually editing the zone file on their authoritative server.
 
@@ -123,8 +123,8 @@ The next query within the next few seconds? Browser cache hit — none of the st
 
 > **Recursive vs Iterative query.** There are two query types that are easy to confuse:
 >
-> - **Recursive query**: the client (stub resolver) tells the recursive resolver: *"Give me the final IP, no matter how many tiers you need to go through."* This is how the stub resolver queries a public resolver.
-> - **Iterative query**: the recursive resolver tells root/TLD/authoritative servers: *"You don't need to answer everything, just tell me where to go next."* This is how the resolver climbs through each tier.
+> - **Recursive query**: the client (stub resolver) tells the recursive resolver: "Give me the final IP, no matter how many tiers you need to go through." This is how the stub resolver queries a public resolver.
+> - **Iterative query**: the recursive resolver tells root/TLD/authoritative servers: "You don't need to answer everything, just tell me where to go next." This is how the resolver climbs through each tier.
 >
 > The same resolver plays both roles: receives recursive queries from clients, sends iterative queries out to the Internet.
 

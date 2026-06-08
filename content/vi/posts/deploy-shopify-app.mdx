@@ -8,7 +8,7 @@ enableComment: true
 
 # Deploy Shopify App: "Shopify không host app cho bạn" - Hành trình đưa ứng dụng lên kệ
 
-Bạn vừa hoàn thành code một Shopify App, chạy `shopify app dev` mượt mà trên local, mọi thứ đều hoạt động. Và rồi bạn tự hỏi: *"Giờ làm sao để deploy lên Shopify?"*
+Bạn vừa hoàn thành code một Shopify App, chạy `shopify app dev` mượt mà trên local, mọi thứ đều hoạt động. Và rồi bạn tự hỏi: "Giờ làm sao để deploy lên Shopify?"
 
 Đây là lúc mà nhiều developer mới bắt đầu bối rối. Bởi vì sự thật là: **Shopify không host ứng dụng của bạn**. Shopify không phải là một nền tảng PaaS như Heroku hay Vercel nơi bạn push code lên và nó tự chạy. Shopify chỉ quản lý app ở **mức logic** — scopes, permissions, app info, <Tooltip content="Giao thức ủy quyền cho phép app truy cập tài nguyên thay mặt người dùng mà không cần biết mật khẩu">OAuth</Tooltip> flow, billing, ... — còn phần "chạy thực sự" là việc của bạn.
 

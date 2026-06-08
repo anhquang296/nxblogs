@@ -10,7 +10,7 @@ enableComment: true
 
 You're running a storage cluster with 100TB of data. To keep it safe, the system uses **3-copy replication** — every byte is copied three times and placed on three different servers. Total disk needed: **300TB** — 200TB is pure overhead just for safety.
 
-Then one day the CFO asks: *"Can we cut storage costs by 60% without losing data durability?"*
+Then one day the CFO asks: "Can we cut storage costs by 60% without losing data durability?"
 
 The answer: **Erasure Coding**.
 
@@ -314,7 +314,7 @@ Erasure coding solves the **durability** problem (data survives hardware failure
 
 ## 7. Conclusion
 
-Back to the original question: *"Cut storage costs by 60% without losing durability?"*
+Back to the original question: "Cut storage costs by 60% without losing durability?"
 
 Erasure coding achieves this by **trading CPU and complexity for storage efficiency**. Instead of keeping 3 identical copies, it splits data into small fragments and creates a few redundant ones — saving hundreds of petabytes of disk at the scale of S3, Azure, or Google Cloud.
 

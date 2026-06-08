@@ -12,7 +12,7 @@ Một sáng thứ 2, dashboard báo P99 latency endpoint `/search` tăng **10×*
 
 Cái bạn cần lúc này là một thứ ngăn request đó **trước khi** nó chạm tới DB. Đó là **rate limiting**.
 
-Nhưng "rate limit" không phải _một_ thuật toán — có ít nhất **5 cách làm**, mỗi cách hợp với một tình huống. Chọn sai sẽ hoặc tốn tiền vô lý, hoặc reject oan client tốt, hoặc tệ hơn: tưởng đã chặn nhưng thực ra không. Bài này đi qua từng pattern, kèm code minh hoạ và đánh giá độ phức tạp khi đem ra production.
+Nhưng "rate limit" không phải **một** thuật toán — có ít nhất **5 cách làm**, mỗi cách hợp với một tình huống. Chọn sai sẽ hoặc tốn tiền vô lý, hoặc reject oan client tốt, hoặc tệ hơn: tưởng đã chặn nhưng thực ra không. Bài này đi qua từng pattern, kèm code minh hoạ và đánh giá độ phức tạp khi đem ra production.
 
 ---
 
@@ -171,7 +171,7 @@ async function slidingWindowCounter(userId: string, limit: number, windowSec: nu
 
 **Ưu điểm.** Memory `O(1)` như fixed window, độ chính xác **xấp xỉ ~99%** so với sliding log. Cloudflare publish bài giải thích họ dùng cái này ở edge ([blog.cloudflare.com/counting-things-a-lot-of-different-things](https://blog.cloudflare.com/counting-things-a-lot-of-different-things)).
 
-**Nhược điểm.** Là _xấp xỉ_ — giả định traffic phân bố đều trong window trước, điều không phải lúc nào cũng đúng. Nhưng sai số chấp nhận được cho hầu hết API.
+**Nhược điểm.** Là **xấp xỉ** — giả định traffic phân bố đều trong window trước, điều không phải lúc nào cũng đúng. Nhưng sai số chấp nhận được cho hầu hết API.
 
 **Biến thể.** Nhiều system chia thành nhiều window con (vd: 6 sub-window 10s mỗi cái cho window 60s) để tăng chính xác. Đây là trung gian giữa sliding log và sliding counter cổ điển.
 
@@ -212,7 +212,7 @@ async function tokenBucket(userId: string, capacity: number, refillPerSec: numbe
 }
 ```
 
-> **Lưu ý:** code trên _có race condition_ — đọc và ghi không atomic. Production phải bọc bằng <Tooltip content="Đoạn mã Lua chạy atomic bên trong Redis qua lệnh EVAL, cho phép nhiều thao tác đọc-ghi xảy ra như một bước duy nhất.">Lua script</Tooltip> (xem mục 4).
+> **Lưu ý:** code trên **có race condition** — đọc và ghi không atomic. Production phải bọc bằng <Tooltip content="Đoạn mã Lua chạy atomic bên trong Redis qua lệnh EVAL, cho phép nhiều thao tác đọc-ghi xảy ra như một bước duy nhất.">Lua script</Tooltip> (xem mục 4).
 
 **Ưu điểm.** **Cho phép burst** lên tới capacity. Phù hợp với traffic không đều: web/mobile thường yên lặng rồi bùng phát theo phiên user. <Tooltip content="Thuật toán rate limit giữ một 'xô' token được nạp đều đặn theo thời gian; mỗi request tiêu một token, hết token thì bị từ chối.">Token bucket</Tooltip> "thưởng" cho client tiết kiệm bằng cách cho phép họ tiêu nhiều khi cần.
 
@@ -351,7 +351,7 @@ Middleware này **không** care thuật toán bên trong là gì — nó chỉ g
 
 ## Kết
 
-Rate limit không phải _một_ thuật toán mà là một **bộ công cụ**. Chọn sai sẽ hoặc tốn tiền vô lý (sliding log cho limit 100k/phút), hoặc reject oan client tốt (fixed window khi traffic burst), hoặc tệ hơn là tưởng đã chặn nhưng thực ra thuật toán không phù hợp với pattern traffic.
+Rate limit không phải **một** thuật toán mà là một **bộ công cụ**. Chọn sai sẽ hoặc tốn tiền vô lý (sliding log cho limit 100k/phút), hoặc reject oan client tốt (fixed window khi traffic burst), hoặc tệ hơn là tưởng đã chặn nhưng thực ra thuật toán không phù hợp với pattern traffic.
 
 Quy tắc ngón tay cái: bắt đầu bằng **Sliding Window Counter** cho API public mặc định. Chuyển sang **Token Bucket** khi traffic burst là chuyện thường và bạn muốn cho phép nó. Dùng **Leaky Bucket** khi cần làm mượt outbound sang downstream khắt khe. Còn **Fixed Window** thì để dành cho quota dài (ngày, tháng) và **Sliding Log** cho những endpoint nhỏ-mà-nhạy-cảm.
 

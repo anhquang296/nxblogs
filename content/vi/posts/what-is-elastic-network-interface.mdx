@@ -34,11 +34,11 @@ Khi bạn di chuyển một ENI từ máy chủ này sang máy chủ khác, toà
 Khi làm việc với EC2, bạn sẽ gặp hai loại ENI:
 
 * **Primary ENI (eth0):** Đây là card mạng "xương sống", được sinh ra cùng lúc với EC2.
-* *Đặc điểm:* Gắn chết với vòng đời của EC2. Bạn **không thể tháo rời** nó. Nếu xóa EC2, card mạng này cũng biến mất.
+* **Đặc điểm:** Gắn chết với vòng đời của EC2. Bạn **không thể tháo rời** nó. Nếu xóa EC2, card mạng này cũng biến mất.
 
 
 * **Secondary ENI (eth1, eth2...):** Đây là các card mạng phụ bạn tạo thêm.
-* *Đặc điểm:* Hoạt động độc lập. Bạn có thể tạo nó riêng lẻ, tháo ra từ máy A và gắn vào máy B bất cứ lúc nào (Hot attach/detach).
+* **Đặc điểm:** Hoạt động độc lập. Bạn có thể tạo nó riêng lẻ, tháo ra từ máy A và gắn vào máy B bất cứ lúc nào (Hot attach/detach).
 
 Bản thân 1 EC2 instance chỉ là tài nguyên tính toán thuần túy (bao gồm CPU, RAM và Disk). Nó không hề có khái niệm về IP hay mạng.
 Vậy nên khi khởi tạo EC2 instance, nó được khởi tạo kèm với 1 ENI, đây mới là nơi chứa các thông tin mạng như Private IP, Public IP (hoặc Elastic IP), MAC Address và Security Groups.

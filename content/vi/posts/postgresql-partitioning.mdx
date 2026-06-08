@@ -1,12 +1,12 @@
 ---
-title: 'Deep Dive: PostgreSQL Partitioning — Khi 1 Bảng Lớn Trở Thành Nhiều Bảng Nhỏ'
+title: 'PostgreSQL Partitioning: Khi 1 Bảng Lớn Trở Thành Nhiều Bảng Nhỏ'
 date: '2026-05-26'
 tags: ['Database']
 description: 'PostgreSQL partitioning từ A đến Z — declarative partitioning, RANGE/LIST/HASH types, cơ chế partition pruning, và 2 use cases thực tế: time-series và multi-tenant SaaS.'
 enableComment: true
 ---
 
-# Deep Dive: PostgreSQL Partitioning — Khi 1 Bảng Lớn Trở Thành Nhiều Bảng Nhỏ
+# PostgreSQL Partitioning: Khi 1 Bảng Lớn Trở Thành Nhiều Bảng Nhỏ
 
 Có một thời điểm trong vòng đời của hầu hết hệ thống production: bảng `events` (hoặc `logs`, hoặc `orders`) chạm mốc nửa tỷ dòng. Mọi thứ bắt đầu trở nên... khó chịu. Query trả về sau 30 giây thay vì 30 mili-giây. `VACUUM` chạy 6 tiếng đồng hồ và vẫn chưa xong. Bạn muốn xoá dữ liệu cũ hơn 12 tháng để giải phóng dung lượng — nhưng câu `DELETE` lại sinh ra hàng triệu <Tooltip content="Các row đã bị xoá hoặc update nhưng vẫn chiếm chỗ trên đĩa cho đến khi VACUUM dọn dẹp — hệ quả của mô hình MVCC trong PostgreSQL.">dead tuples</Tooltip> (xem [Deep Dive về Table Bloat](/posts/table-bloat)) khiến tình hình tệ hơn lúc chưa xoá. Indexes phình to lên 50GB. Backup mất cả đêm.
 
@@ -432,7 +432,7 @@ Việc biết về partitioning là rất tốt, nhưng sự thật là **hầu 
 
 Không có con số chính xác tuyệt đối, nhưng cộng đồng PostgreSQL có vài rule-of-thumb đáng tham khảo:
 
-- **PostgreSQL official docs**: cân nhắc partition khi *kích thước bảng vượt RAM của database server*. Đây là ngưỡng cốt lõi — một khi index hot không còn fit trong `shared_buffers` (thường cấu hình 25–40% RAM), mỗi index probe sẽ trở thành random I/O xuống đĩa.
+- **PostgreSQL official docs**: cân nhắc partition khi kích thước bảng vượt RAM của database server. Đây là ngưỡng cốt lõi — một khi index hot không còn fit trong `shared_buffers` (thường cấu hình 25–40% RAM), mỗi index probe sẽ trở thành random I/O xuống đĩa.
 - **Practical "đau ngay" zone**: 100 GB – 1 TB. Dưới ngưỡng này, hầu hết vấn đề có thể giải quyết bằng tuning index, autovacuum, hoặc đơn giản là tăng RAM cho instance.
 - **Kích thước partition lý tưởng**: 1–100 GB mỗi partition. Nhỏ hơn → quá nhiều partition, planning overhead tăng. Lớn hơn → mất bớt lợi ích lifecycle (drop một partition vẫn release được nhiều dung lượng).
 - **Số partition khuyến nghị**: dưới 1.000 (ceiling thực tế khoảng 5.000). Vượt ngưỡng đó, planner bắt đầu chậm và relcache memory của mỗi connection phình to.

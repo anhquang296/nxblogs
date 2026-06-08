@@ -192,10 +192,10 @@ enableComment: true
 ```
 
 **Title conventions:**
-- Deep-dive: Include "Deep Dive" and a compelling metric or hook
-  - Example: `'Apache Kafka: Deep Dive kiến trúc Event Streaming Platform xử lý hàng triệu events/giây'`
-- Overview: Include a question or contrast that hooks the reader
-  - Example: `'Load Balancer: Chọn ALB "Thông Minh" hay NLB "Thần Tốc"?'`
+- Always lead with the article's topic — the first word(s) of every title MUST be the subject of the post (e.g., `Sequential Read`, `PostgreSQL Index`, `Apache Kafka`). Never start a title with a generic label like "Deep Dive:"
+- After the topic, add a colon followed by an engagement hook: a compelling metric, a question, or a contrast
+  - Deep-dive example: `'Sequential Read: Từ read() Xuống Đĩa, Và Vì Sao Postgres Đôi Khi Chọn Seq Scan Thay Vì Index'`
+  - Overview example: `'Load Balancer: Chọn ALB "Thông Minh" hay NLB "Thần Tốc"?'`
 
 **Tags:** Use 2-4 tags from existing taxonomy: `Backend`, `System Design`, `Devops`, `AWS`, `SAA`, `Redis`, `Kafka`, `Data Structures`, `Cache`, `Database`, etc.
 
@@ -253,22 +253,24 @@ Immediately after the opening hook paragraphs, before the first `## 1.` section:
        - After: `Broker coi message là <Tooltip content="Dữ liệu mờ — broker không hiểu nội dung bên trong">opaque bytes</Tooltip>, chỉ lưu và chuyển tiếp.`
      - **When NOT to tooltip:** illustrative asides that elaborate *why* something matters (rather than defining a term) read more naturally as parentheticals. E.g., keep `riêng tư (ID liên tiếp lộ thông tin business — đơn hàng số 7000 hôm nay tiết lộ doanh nghiệp xử lý 7000 đơn/ngày)` inline — it's elaborating context, not defining "riêng tư".
 
-2. **Use analogies for complex concepts**:
+2. **Emphasis: bold only, never italic.** Use `**text**` to emphasize a word or phrase. Never use italic — neither `*text*` nor `_text_`, and not bold-italic (`***text***` / `**_text_**`). If something needs emphasis, bold it; if bolding feels too heavy (e.g. a term already bolded on first mention), leave it as plain text.
+
+3. **Use analogies for complex concepts**:
    - Example: `Cache chính là cái bàn làm việc ngay trước mặt bạn (RAM). Database là thư viện khổng lồ nằm ở ngoại ô (Disk/SSD).`
 
-3. **Direct address**: Use "bạn" / "you", "imagine", "hãy tưởng tượng"
+4. **Direct address**: Use "bạn" / "you", "imagine", "hãy tưởng tượng"
 
-4. **Conversational but technical tone**: Accessible without being dumbed down
+5. **Conversational but technical tone**: Accessible without being dumbed down
 
-5. **Tables for comparisons**: Use markdown tables with clear headers
+6. **Tables for comparisons**: Use markdown tables with clear headers
    - Include emoji for yes/no columns where appropriate
 
-6. **Code examples**: Always Node.js + TypeScript
+7. **Code examples**: Always Node.js + TypeScript
    - No semicolons, single quotes, no comments
    - Use real libraries (e.g., `kafkajs`, `ioredis`, `@aws-sdk/*`)
    - Show practical, working code — not pseudocode
 
-7. **Conclusion**: Revisit the opening question, provide 4-6 bullet-point key takeaways
+8. **Conclusion**: Revisit the opening question, provide 4-6 bullet-point key takeaways
 
 #### Series posts
 

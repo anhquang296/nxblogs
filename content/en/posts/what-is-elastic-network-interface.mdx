@@ -34,11 +34,11 @@ When you move an ENI from one server to another, the entire "profile" above foll
 When working with EC2, you will encounter two types of ENI:
 
 * **Primary ENI (eth0):** This is the "backbone" network card, created at the same time as the EC2 instance.
-* *Characteristics:* Permanently tied to the EC2 lifecycle. You **cannot detach** it. If you delete the EC2 instance, this network card disappears as well.
+* **Characteristics:** Permanently tied to the EC2 lifecycle. You **cannot detach** it. If you delete the EC2 instance, this network card disappears as well.
 
 
 * **Secondary ENI (eth1, eth2...):** These are additional network cards that you create separately.
-* *Characteristics:* They operate independently. You can create one on its own, detach it from Machine A, and attach it to Machine B at any time (Hot attach/detach).
+* **Characteristics:** They operate independently. You can create one on its own, detach it from Machine A, and attach it to Machine B at any time (Hot attach/detach).
 
 An EC2 instance itself is purely a compute resource (consisting of CPU, RAM, and Disk). It has no concept of IP or networking.
 That is why when an EC2 instance is launched, it comes with an ENI attached, which is where all networking information such as Private IP, Public IP (or Elastic IP), MAC Address, and Security Groups actually resides.

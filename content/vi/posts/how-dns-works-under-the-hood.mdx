@@ -16,7 +16,7 @@ Hãy hình dung Internet là một thành phố khổng lồ với hàng tỷ ng
 
 Bài viết này sẽ bóc tách lớp vỏ ấy: ai giữ cuốn danh bạ, ai đi tra giùm bạn, vì sao tra một cái tên lại đi qua tới bốn loại server khác nhau, và vì sao toàn bộ quá trình đó vẫn chỉ tốn vài mili-giây.
 
-> Bài viết được tham khảo và mở rộng từ bài *"How DNS Actually Works"* của **AlgoMaster**, có bổ sung phần giải thích chi tiết khái niệm cho từng component.
+> Bài viết được tham khảo và mở rộng từ bài **"How DNS Actually Works"** của **AlgoMaster**, có bổ sung phần giải thích chi tiết khái niệm cho từng component.
 
 ---
 
@@ -58,7 +58,7 @@ Stub resolver có cache riêng, và quan trọng hơn, nó đọc file `hosts` (
 
 OS cache miss, stub resolver gửi query ra ngoài tới một <Tooltip content="DNS server đứng ra hỏi giùm client: nhận một câu hỏi duy nhất, tự đi qua root/TLD/authoritative và trả về kết quả cuối cùng.">**recursive resolver**</Tooltip> — đây là nhân vật trung tâm của hệ thống DNS.
 
-Recursive resolver giống như một **người trung gian** mà bạn nhờ đi tra danh bạ giùm. Bạn không trực tiếp đi gõ cửa từng tầng server, bạn chỉ hỏi resolver một câu duy nhất: *"IP của example.com là gì?"* — và resolver tự lo liệu mọi thứ phía sau.
+Recursive resolver giống như một **người trung gian** mà bạn nhờ đi tra danh bạ giùm. Bạn không trực tiếp đi gõ cửa từng tầng server, bạn chỉ hỏi resolver một câu duy nhất: "IP của example.com là gì?" — và resolver tự lo liệu mọi thứ phía sau.
 
 Resolver thường được vận hành bởi:
 
@@ -91,11 +91,11 @@ Các tổ chức này được gọi chung là **registry**, các registry này 
 
 Còn **TLD server** chính là cơ sở hạ tầng hệ thống được vận hành bởi registry.
 
-TLD server cũng không trả lời destination IP. Nó tiếp tục chỉ đường: *"Authoritative của example.com là `ns1.example-host.com` và `ns2.example-host.com`, hãy hỏi mấy ông đó."*
+TLD server cũng không trả lời destination IP. Nó tiếp tục chỉ đường: "Authoritative của example.com là `ns1.example-host.com` và `ns2.example-host.com`, hãy hỏi mấy ông đó."
 
 ### 2.6. Authoritative Name Server
 
-Đây là **nguồn sự thật** cuối cùng cho một domain cụ thể. Authoritative server lưu trữ **zone file** thực sự — file chứa tất cả records của domain (A, AAAA, CNAME, MX...). Nó là server duy nhất có quyền nói: *"IP của example.com là 93.184.216.34."*
+Đây là **nguồn sự thật** cuối cùng cho một domain cụ thể. Authoritative server lưu trữ **zone file** thực sự — file chứa tất cả records của domain (A, AAAA, CNAME, MX...). Nó là server duy nhất có quyền nói: "IP của example.com là 93.184.216.34."
 
 Khi bạn mua một domain ở Namecheap, GoDaddy, hay Cloudflare, và bạn vào dashboard chỉnh sửa DNS records — thực chất bạn đang chỉnh sửa zone file trên authoritative server của họ.
 
@@ -123,8 +123,8 @@ Lần truy vấn tiếp theo trong vài giây tới? Browser cache hit, không t
 
 > **Recursive vs Iterative query.** Có hai kiểu truy vấn dễ nhầm:
 >
-> - **Recursive query**: client (stub resolver) nói với recursive resolver: *"Hãy trả lời tôi IP cuối cùng, dù phải đi qua bao nhiêu tầng cũng được."* Đây là cách stub resolver hỏi public resolver.
-> - **Iterative query**: recursive resolver nói với root/TLD/authoritative: *"Bạn không cần trả lời hết, chỉ cần chỉ tôi đi tới đâu tiếp theo."* Đây là cách resolver leo qua từng tầng.
+> - **Recursive query**: client (stub resolver) nói với recursive resolver: "Hãy trả lời tôi IP cuối cùng, dù phải đi qua bao nhiêu tầng cũng được." Đây là cách stub resolver hỏi public resolver.
+> - **Iterative query**: recursive resolver nói với root/TLD/authoritative: "Bạn không cần trả lời hết, chỉ cần chỉ tôi đi tới đâu tiếp theo." Đây là cách resolver leo qua từng tầng.
 >
 > Cùng một resolver đóng cả hai vai trò: nhận recursive từ client, gửi iterative ra Internet.
 

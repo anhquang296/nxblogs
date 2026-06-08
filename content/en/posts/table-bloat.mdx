@@ -1,12 +1,12 @@
 ---
-title: 'Deep Dive: Table Bloat in PostgreSQL and Storage Optimization Strategies'
+title: 'Table Bloat in PostgreSQL: Storage Optimization Strategies'
 date: '2026-01-25'
 tags: ['Database']
 description: 'Understand PostgreSQL table bloat — MVCC dead tuples, VACUUM mechanics, bloat detection queries, and strategies to reclaim wasted storage and improve query performance.'
 enableComment: true
 ---
 
-# Deep Dive: Table Bloat in PostgreSQL and Storage Optimization Strategies
+# Table Bloat in PostgreSQL: Storage Optimization Strategies
 
 Recently I did a deep dive into how PostgreSQL manages storage and came across an extremely interesting topic: **Table Bloat**. For those working with large datasets, "scaling up" disk space is only a surface-level solution. To truly optimize infrastructure costs (especially on the Cloud with provisioned IOPS/storage models) and improve I/O performance, we must thoroughly understand how Postgres writes and deletes data at the physical level.
 

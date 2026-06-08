@@ -10,7 +10,7 @@ enableComment: true
 
 # Solving the "Just Wrote It, Can't Read It" Problem: Read-Your-Writes Consistency & Session Sticky
 
-You just set up Database Replication to offload your Primary DB and optimize latency for users across different geographic regions. Everything seems fine until users start complaining: *"I just saved my post, but when I refresh, I see the old content"*.
+You just set up Database Replication to offload your Primary DB and optimize latency for users across different geographic regions. Everything seems fine until users start complaining: "I just saved my post, but when I refresh, I see the old content".
 
 Welcome to the world of **Replication Lag**.
 
@@ -32,12 +32,12 @@ This is the most common approach. After a User performs a write operation, the s
 
 ### Approach 2: Bitbucket's Approach - Smart Routing Based on LSN
 
-While browsing the internet, I found a pretty clever solution from Bitbucket *[Link](https://ujjwal18.hashnode.dev/implementing-read-your-write-consistency-in-distributed-databases-a-deep-dive-into-bitbuckets-approach)*
+While browsing the internet, I found a pretty clever solution from Bitbucket **[Link](https://ujjwal18.hashnode.dev/implementing-read-your-write-consistency-in-distributed-databases-a-deep-dive-into-bitbuckets-approach)**
 
 Bitbucket solved this problem elegantly by tracking the <Tooltip content="Log Sequence Number — a unique identifier for each change in the database's write-ahead log">LSN</Tooltip> or **Timestamp**.
 
 * **Mechanism:** When a User writes data successfully, the Primary DB returns an identifier for that record (LSN). The application stores this LSN in the User's **Cookie** or **Session**.
-* **On Read:** The application sends this LSN along with the request. The system checks: *Has this Replica caught up to this LSN?*
+* **On Read:** The application sends this LSN along with the request. The system checks: Has this Replica caught up to this LSN?
 * **If yes:** Allow reading from the Replica.
 * **If no:** Route to the Primary or make the Replica wait until it catches up to that LSN.
 

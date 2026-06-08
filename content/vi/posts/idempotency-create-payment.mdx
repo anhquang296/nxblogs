@@ -49,7 +49,7 @@ Khi web nổi lên, IETF chuẩn hoá khái niệm này vào **HTTP semantics**.
 
 `POST` cố tình **không** idempotent vì nó được thiết kế để "tạo mới một resource" — mỗi lần POST tạo ra một entity mới.
 
-> Đây là **semantic contract**, không phải implementation guarantee. RFC chỉ nói rằng _nếu bạn implement đúng tinh thần_, các method này phải idempotent. Còn việc bug làm sai thì... vẫn sai.
+> Đây là **semantic contract**, không phải implementation guarantee. RFC chỉ nói rằng **nếu bạn implement đúng tinh thần**, các method này phải idempotent. Còn việc bug làm sai thì... vẫn sai.
 
 ### 1.3. Distributed systems era: Stripe và Idempotency-Key
 
@@ -57,7 +57,7 @@ Khi web nổi lên, IETF chuẩn hoá khái niệm này vào **HTTP semantics**.
 
 Năm 2015, **Stripe** publish một blog post nổi tiếng giới thiệu pattern **`Idempotency-Key`** — một HTTP header mà client gửi kèm để biến `POST` thành "an toàn khi retry". Pattern này nhanh chóng trở thành chuẩn ngầm: Square, PayPal, Shopify, AWS... đều adopt.
 
-> "Mạng không đáng tin. Mọi request đều có thể timeout, mọi response có thể bị mất. Idempotency chính là _hợp đồng_ giữa client và server: 'cứ retry đi, tôi sẽ không làm hỏng dữ liệu của anh'."
+> "Mạng không đáng tin. Mọi request đều có thể timeout, mọi response có thể bị mất. Idempotency chính là **hợp đồng** giữa client và server: 'cứ retry đi, tôi sẽ không làm hỏng dữ liệu của anh'."
 
 ---
 
@@ -72,7 +72,7 @@ Hãy liệt kê các kịch bản gây **double-charge** trong thực tế:
 3. **Mobile retry policy.** SDK của mobile (đặc biệt khi chuyển từ wifi sang 4G) tự động retry các failed request.
 4. **Proxy / Load Balancer retry.** Một số proxy được cấu hình retry khi upstream timeout. Client thậm chí không biết.
 
-Trong tất cả các kịch bản trên, **client không có cách nào biết server đã xử lý hay chưa**. Cách duy nhất an toàn là... hỏi server. Idempotency cho phép câu hỏi đó dưới dạng: _"Đây là retry của request X, đừng làm lại nha"_.
+Trong tất cả các kịch bản trên, **client không có cách nào biết server đã xử lý hay chưa**. Cách duy nhất an toàn là... hỏi server. Idempotency cho phép câu hỏi đó dưới dạng: "Đây là retry của request X, đừng làm lại nha".
 
 ### 2.2. Idempotent "tự nhiên" vs "nhân tạo"
 
@@ -86,7 +86,7 @@ Còn `POST /payments` thì **không** tự nhiên idempotent. Mỗi lần POST m
 
 ### 2.3. Sơ đồ luồng tổng quát
 
-1. **Client** sinh một `Idempotency-Key` duy nhất (UUID v4) cho mỗi _ý định_ tạo payment.
+1. **Client** sinh một `Idempotency-Key` duy nhất (UUID v4) cho mỗi **ý định** tạo payment.
 2. Client gửi request `POST /payments`, gắn key vào HTTP header.
 3. **Server** check key trong storage (Redis):
    - **Chưa tồn tại** → atomic acquire lock, đánh dấu `running`, xử lý business logic, lưu kết quả vào storage, trả response.
@@ -261,8 +261,8 @@ Hai dòng quan trọng nhất trong toàn bộ handler:
 
 1. **Áp dụng cho mọi `POST` quan trọng**: payment, order, refund, send-email, send-sms, transfer. Bất kỳ thao tác nào "làm 2 lần là sai" đều cần idempotency.
 2. **Đừng bắt đầu phức tạp.** Pattern `SET NX + TTL + request hash` ở trên đã bao phủ 90% use case. Lease, <Tooltip content="Giao thức điều phối phân tán gồm pha prepare và pha commit, đảm bảo tất cả node cùng commit hoặc cùng rollback">two-phase commit</Tooltip>, outbox pattern chỉ cần khi bạn ở quy mô như Stripe hay AWS.
-3. **Đặt vào API contract ngay từ đầu.** Thêm `Idempotency-Key` vào một API đã có 1000 client đang dùng là cực khổ — bạn phải migrate dần, hỗ trợ cả mode có và không có key. Cho nên: ngày đầu tiên thiết kế POST endpoint, hãy hỏi _"endpoint này có cần idempotency không?"_.
+3. **Đặt vào API contract ngay từ đầu.** Thêm `Idempotency-Key` vào một API đã có 1000 client đang dùng là cực khổ — bạn phải migrate dần, hỗ trợ cả mode có và không có key. Cho nên: ngày đầu tiên thiết kế POST endpoint, hãy hỏi "endpoint này có cần idempotency không?".
 4. **Document rõ behavior**: TTL bao lâu, response khi reuse key, response khi in-progress, format key cho phép. Client SDK sẽ implement retry logic dựa trên những gì bạn document.
 5. **Đo bằng metrics**: tỉ lệ retry hit cache, tỉ lệ 409, tỉ lệ 422. Spike 422 = client đang reuse key sai cách. Spike 409 = có thể có race condition phía client.
 
-Idempotency không phải là một tính năng "nice to have" — nó là **invariant** mà mọi hệ thống có giao dịch tiền bạc, đơn hàng, hoặc side-effect không reversible đều phải đảm bảo. Còn nếu bạn muốn đào sâu hơn về nhất quán dữ liệu trong hệ phân tán, có thể đọc tiếp [bài về Cache Consistency](/posts/cache-consistency) — cùng họ với idempotency, đều xoay quanh chuyện _"hai bên không tin nhau, làm sao đồng bộ"_.
+Idempotency không phải là một tính năng "nice to have" — nó là **invariant** mà mọi hệ thống có giao dịch tiền bạc, đơn hàng, hoặc side-effect không reversible đều phải đảm bảo. Còn nếu bạn muốn đào sâu hơn về nhất quán dữ liệu trong hệ phân tán, có thể đọc tiếp [bài về Cache Consistency](/posts/cache-consistency) — cùng họ với idempotency, đều xoay quanh chuyện "hai bên không tin nhau, làm sao đồng bộ".

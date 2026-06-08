@@ -10,7 +10,7 @@ enableComment: true
 
 Bạn đang vận hành một cụm lưu trữ 100TB dữ liệu. Để đảm bảo an toàn, hệ thống dùng **3-copy replication** (sao chép ba bản) — nghĩa là mỗi byte dữ liệu được copy ra 3 bản giống hệt nhau, đặt trên 3 server khác nhau. Tổng dung lượng thật sự cần: **300TB** — 200TB là overhead thuần tuý chỉ để "phòng thân".
 
-Rồi một ngày CFO hỏi: *"Có cách nào cắt 60% chi phí storage mà không mất độ bền dữ liệu không?"*
+Rồi một ngày CFO hỏi: "Có cách nào cắt 60% chi phí storage mà không mất độ bền dữ liệu không?"
 
 Câu trả lời: **Erasure Coding**.
 
@@ -314,7 +314,7 @@ Erasure coding giải quyết bài toán **durability** (dữ liệu không mấ
 
 ## 7. Kết
 
-Quay lại câu hỏi ban đầu: *"Cắt 60% chi phí storage mà không mất durability?"*
+Quay lại câu hỏi ban đầu: "Cắt 60% chi phí storage mà không mất durability?"
 
 Erasure coding làm được điều đó bằng cách **đánh đổi CPU và độ phức tạp lấy hiệu quả lưu trữ**. Thay vì giữ 3 bản sao giống hệt nhau, nó chia dữ liệu thành các mảnh nhỏ và tạo thêm vài mảnh dư thừa — tiết kiệm hàng trăm petabyte ổ cứng ở quy mô của S3, Azure hay Google Cloud.
 

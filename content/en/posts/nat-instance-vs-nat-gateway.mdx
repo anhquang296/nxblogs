@@ -10,7 +10,7 @@ enableComment: true
 
 You're reviewing this month's AWS bill. The **NAT Gateway** line item stands out — $0.045/hour plus $0.045/GB of data processed. With dev/staging environments running 24/7, NAT Gateway costs can reach hundreds of dollars per month just for EC2 instances in private subnets to download packages or call external APIs.
 
-A colleague suggests: _"Why not use a NAT Instance for dev? Run it on a `t3.micro` — costs just a few bucks."_
+A colleague suggests: "Why not use a NAT Instance for dev? Run it on a `t3.micro` — costs just a few bucks."
 
 NAT Instance — sounds familiar but you've never set one up. It's also NAT, but runs on EC2 instead of using a managed service. So how does it work? Why do you need to disable Source/Destination Check? And when should you use it instead of NAT Gateway?
 
@@ -59,7 +59,7 @@ This is the most interesting part of understanding NAT Instance. Before understa
 
 #### What Is Source/Destination Check?
 
-By default, AWS enables **Source/Destination Check** on every EC2 instance. This feature checks: _does the packet arriving at or leaving this instance have a source or destination IP that matches the instance's own IP?_ If not — the packet is **dropped** immediately.
+By default, AWS enables **Source/Destination Check** on every EC2 instance. This feature checks: does the packet arriving at or leaving this instance have a source or destination IP that matches the instance's own IP? If not — the packet is **dropped** immediately.
 
 #### Why Does AWS Enable It by Default?
 

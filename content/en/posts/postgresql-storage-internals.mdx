@@ -1,12 +1,12 @@
 ---
-title: 'Deep Dive: PostgreSQL Storage Internals — From Heap Files on Disk to Shared Buffers'
+title: 'PostgreSQL Storage Internals: From Heap Files on Disk to Shared Buffers'
 date: '2026-05-26'
 tags: ['Database']
 description: 'A byte-level tour of how PostgreSQL organises a table into heap files, pages, and tuples, and how the Shared Buffer Manager pulls them into RAM through its three-layer architecture and clock-sweep eviction.'
 enableComment: true
 ---
 
-# Deep Dive: PostgreSQL Storage Internals — From Heap Files on Disk to Shared Buffers
+# PostgreSQL Storage Internals: From Heap Files on Disk to Shared Buffers
 
 When you run `EXPLAIN (ANALYZE, BUFFERS) SELECT * FROM users WHERE id = 42;`, PostgreSQL prints something like `Buffers: shared hit=3 read=1`. What does that mean exactly? Why does the same `UPDATE` run in 2 ms one time and 80 ms the next, even though the table isn't being locked? Why doesn't your table get smaller after a big `DELETE`? And what does the **shared buffer** — the thing every tuning guide tells you to size — actually contain?
 
@@ -155,7 +155,7 @@ To support those three questions, the buffer manager is built from three paralle
 
 - **Buffer table** — a hash table that maps `BufferTag → buffer_id`. This is the index that tells you whether a given page is currently pooled.
 - **Buffer descriptor array** — a metadata array that runs parallel to the buffer pool; each entry describes one slot via `tag`, `buf_id`, `refcount` (pin count), `usage_count`, and a `state` word holding flags such as `BM_DIRTY`, `BM_VALID`, `BM_IO_IN_PROGRESS`.
-- **Buffer pool** — the array of 8 KB slots that actually holds page bytes. The `buffer_id` _is_ the index into this array. Crucially, descriptor `[i]` and pool slot `[i]` always describe the same page — they march in lockstep.
+- **Buffer pool** — the array of 8 KB slots that actually holds page bytes. The `buffer_id` **is** the index into this array. Crucially, descriptor `[i]` and pool slot `[i]` always describe the same page — they march in lockstep.
 
 <ExcalidrawDiagram
   src="/postgresql-shared-buffer-architecture.excalidraw"

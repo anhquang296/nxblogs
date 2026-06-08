@@ -1,12 +1,12 @@
 ---
-title: 'Deep Dive: PostgreSQL Storage Internals — Từ Heap File Trên Disk Đến Shared Buffer'
+title: 'PostgreSQL Storage Internals: Từ Heap File Trên Disk Đến Shared Buffer'
 date: '2026-05-26'
 tags: ['Database']
 description: 'Mổ xẻ cách PostgreSQL tổ chức bảng trên disk thành heap file, page và tuple, và cách Shared Buffer Manager load page lên RAM thông qua kiến trúc ba tầng và thuật toán clock-sweep.'
 enableComment: true
 ---
 
-# Deep Dive: PostgreSQL Storage Internals — Từ Heap File Trên Disk Đến Shared Buffer
+# PostgreSQL Storage Internals: Từ Heap File Trên Disk Đến Shared Buffer
 
 Khi bạn chạy `EXPLAIN (ANALYZE, BUFFERS) SELECT * FROM users WHERE id = 42;`, PostgreSQL trả về một dòng kiểu như `Buffers: shared hit=3 read=1`. Con số đó nghĩa là gì? Tại sao cùng một câu `UPDATE`, lần này chạy 2 ms, lần khác lại 80 ms — dù bảng không hề bị lock? Tại sao sau một câu `DELETE` thì dung lượng file của bảng vẫn không hề giảm? Và cụ thể thì "shared buffer" mà mọi tài liệu hướng dẫn tune luôn nhắc đến — bên trong nó thực sự chứa gì?
 

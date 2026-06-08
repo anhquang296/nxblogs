@@ -69,7 +69,7 @@ This technique is widely used in Nginx (`proxy_cache_lock`) and CDNs. The implem
 
 **Locking (Distributed Mutex):** When a Hot Key is missed, each request must attempt to acquire a **distributed mutex lock** (e.g., using `SETNX` in Redis). Only the request that acquires the lock is allowed to query the DB. Other requests sleep and retry reading from Cache.
 
-**Probabilistic Early Expiration (P.E.E):** Instead of waiting for a key to actually expire (TTL = 0), each time Cache is read, the system runs a **probability algorithm** to decide: *"Should we pretend the key has already expired and proactively fetch fresh data from DB?"*
+**Probabilistic Early Expiration (P.E.E):** Instead of waiting for a key to actually expire (TTL = 0), each time Cache is read, the system runs a **probability algorithm** to decide: "Should we pretend the key has already expired and proactively fetch fresh data from DB?"
 
 The algorithm is based on the **X-Fetch** formula. A key will be refreshed early if:
 
