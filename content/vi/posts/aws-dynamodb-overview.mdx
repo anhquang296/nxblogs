@@ -1,0 +1,311 @@
+---
+title: 'Amazon DynamoDB: Database NoSQL "Không Cần Quản Lý" Cho Hàng Triệu Request Mỗi Giây'
+date: '2026-06-08'
+tags: ['AWS', 'Database', 'System Design', 'SAA']
+description: 'Giới thiệu Amazon DynamoDB cho người mới với AWS — đặc điểm, các khái niệm cốt lõi (partition key, sort key, capacity mode), tính năng nổi bật, khi nào nên dùng và một ví dụ giỏ hàng thực tế với Node.js.'
+enableComment: true
+---
+
+# Amazon DynamoDB: Database NoSQL "Không Cần Quản Lý" Cho Hàng Triệu Request Mỗi Giây
+
+Bạn đang xây một website bán hàng. Giỏ hàng của người dùng được lưu trong MySQL — đơn giản, quen thuộc, chạy ngon trong suốt cả năm. Rồi đợt **sale Black Friday** ập tới.
+
+Lượng truy cập tăng gấp 50 lần chỉ trong vài phút. Mỗi lần khách thêm một món vào giỏ là một lần ghi xuống database. Connection pool cạn sạch. Query bắt đầu chậm, rồi timeout. Có khách bấm "Thêm vào giỏ" mà món hàng không xuất hiện — giỏ hàng "bốc hơi" ngay giữa lúc bạn cần bán nhất.
+
+Bạn thử nâng cấu hình server database lên gấp đôi (**vertical scaling** — tăng sức mạnh cho một máy duy nhất). Đỡ được một chút, nhưng đụng trần nhanh chóng và hóa đơn thì tăng vọt. Bạn nghĩ tới **sharding** (chia dữ liệu ra nhiều máy), nhưng tự làm thì cực kỳ phức tạp: phải tự định tuyến, tự cân bằng, tự lo khi một máy chết.
+
+Gốc rễ của vấn đề: database quan hệ truyền thống được thiết kế để chạy tốt trên **một máy mạnh**, chứ không phải để **scale ngang** (thêm máy) một cách tự động và mượt mà. Đây chính là bài toán mà **Amazon DynamoDB** sinh ra để giải quyết.
+
+Bài viết này sẽ giới thiệu DynamoDB từ con số 0 — dành cho người ít tiếp xúc với AWS: nó là gì, các khái niệm cốt lõi bạn bắt buộc phải nắm, những tính năng nổi bật, **khi nào nên (và không nên) dùng nó**, và cuối cùng là một ví dụ giỏ hàng thực tế bằng Node.js để bạn thấy nó hoạt động ra sao.
+
+<ExcalidrawDiagram
+  src="/dynamodb-overview.excalidraw"
+  alt="DynamoDB ecosystem overview — Application/SDK, DynamoDB Table with Partition Key and Sort Key, DAX cache, Streams to Lambda, Global Tables across regions, IAM authorization"
+/>
+
+---
+
+## 1. DynamoDB là gì?
+
+Amazon DynamoDB là một dịch vụ **database NoSQL** do AWS vận hành hoàn toàn.
+
+Hãy bóc tách định nghĩa đó thành ba ý cho người mới:
+
+**Fully managed** nghĩa là AWS lo toàn bộ phần "hạ tầng" giúp bạn: cài đặt máy chủ, vá lỗi bảo mật, sao lưu, thay ổ cứng hỏng, mở rộng khi tải tăng. Bạn không SSH vào server nào cả — bạn chỉ tạo bảng và đọc/ghi dữ liệu.
+
+Với MySQL tự host, bạn phải tự lo update phiên bản, tự backup, tự xử lý khi đĩa đầy.
+
+Với DynamoDB những việc đó biến mất.
+
+<Tooltip content="Mô hình mà bạn không quản lý hay nhìn thấy server nào — không có máy chủ để bật/tắt, bạn chỉ trả tiền cho lượng đọc/ghi và dung lượng thực dùng">Serverless</Tooltip> là hệ quả của điều trên: không có "instance" hay "cluster" nào để bạn chọn cấu hình CPU/RAM. Bảng DynamoDB tự co giãn
+theo nhu cầu.
+
+**NoSQL** (Not Only SQL) là nhóm database **không phải dạng quan hệ** — không có các bảng nối với nhau bằng khóa ngoại, không có câu lệnh `JOIN`, không bắt buộc mọi dòng phải cùng một cấu trúc cột. Đổi lại, NoSQL được thiết kế để **scale ngang** dễ dàng và đọc/ghi cực nhanh theo khóa. DynamoDB thuộc loại **key-value** kết hợp **document**: bạn tra cứu dữ liệu chủ yếu thông qua khóa, và mỗi bản ghi có thể chứa cấu trúc lồng nhau như một file JSON.
+
+### 1.1. Những đặc điểm khiến DynamoDB nổi bật
+
+- **Phân tán sẵn, độ sẵn sàng cao**: dữ liệu được tự động nhân bản (**replication**) trên nhiều <Tooltip content="Availability Zone — một hoặc nhiều trung tâm dữ liệu độc lập trong cùng một vùng AWS, có điện và mạng riêng để khi một AZ chết thì các AZ khác vẫn chạy">AZ</Tooltip> trong một region. Một trung tâm dữ liệu gặp sự cố thì dữ liệu của bạn vẫn an toàn và truy cập được.
+- **Hiệu năng ổn định ở mức mili-giây một chữ số** (single-digit millisecond): dù bảng có 1.000 hay 1 tỷ bản ghi, thời gian phản hồi cho một lần tra cứu theo khóa gần như không đổi.
+- **Quy mô khổng lồ**: phục vụ hàng triệu request mỗi giây, hàng nghìn tỷ bản ghi, hàng trăm TB dữ liệu.
+- **Bảo mật tích hợp**: kiểm soát truy cập bằng <Tooltip content="Identity and Access Management — dịch vụ của AWS để quản lý ai (user, service) được phép làm gì trên tài nguyên nào">IAM</Tooltip>, mã hóa dữ liệu mặc định.
+- **Không bảo trì, luôn sẵn sàng**: không có "cửa sổ bảo trì" làm gián đoạn dịch vụ.
+
+Tóm lại, DynamoDB hợp khi bạn cần một database **nhanh, ổn định, tự scale** và bạn không muốn tốn người để vận hành nó.
+
+---
+
+## 2. Các khái niệm cốt lõi
+
+Để dùng DynamoDB, bạn chỉ cần nắm vững một nhóm nhỏ khái niệm. Đây là phần quan trọng nhất của bài.
+
+### 2.1. Table, Item, Attribute
+
+- **Table** (bảng) là nơi chứa dữ liệu, tương đương khái niệm "table" trong SQL. Một bảng có thể chứa **số lượng item không giới hạn**.
+- **Item** là một bản ghi trong bảng, tương đương một row trong SQL.
+- **Attribute** là một trường dữ liệu của item, tương đương một column.
+
+Điểm khác biệt lớn: DynamoDB **không có schema cố định** — mỗi item trong cùng một bảng có thể có tập attribute khác nhau, và attribute có thể được thêm dần theo thời gian hoặc để trống. Nhờ vậy bạn **tiến hóa cấu trúc dữ liệu rất nhanh** mà không cần lệnh `ALTER TABLE` như SQL.
+
+### 2.2. Primary Key — trái tim của mọi bảng
+
+Mỗi bảng bắt buộc phải có một **Primary Key** (khóa chính), và **phải quyết định ngay lúc tạo bảng** — không đổi được về sau. Primary Key dùng để định danh duy nhất mỗi item. Có hai kiểu:
+
+**1. Chỉ Partition Key (Simple Primary Key)**
+
+**Partition Key** (còn gọi là **hash key**) là một attribute mà DynamoDB dùng để quyết định item được lưu vật lý ở đâu. DynamoDB băm (hash) giá trị này để chọn ra **partition** — một "ngăn lưu trữ" trên một máy cụ thể trong hệ thống phân tán. Cùng một partition key luôn rơi vào cùng một partition.
+
+**2. Partition Key + Sort Key (Composite Primary Key)**
+
+Khi Primary Key gồm hai attribute: attribute đầu là **Partition Key**, attribute thứ hai là **Sort Key** (còn gọi **range key**).
+
+- **Partition Key** quyết định **vị trí vật lý** của dữ liệu (item nằm ở partition nào).
+- **Sort Key** quyết định **thứ tự logic** của các item **bên trong cùng một partition**.
+
+Cách hiểu bằng analogy: hãy tưởng tượng một thư viện. **Partition Key** là số kệ sách — nó cho biết phải đi tới kệ nào. **Sort Key** là vị trí cuốn sách trên kệ đó, được sắp theo thứ tự — nhờ vậy bạn có thể lấy "tất cả sách trên kệ số 7" hoặc "các sách trên kệ số 7 có mã bắt đầu bằng CART#" chỉ trong một thao tác.
+
+Đây là điểm cực mạnh: với composite key, bạn có thể nhóm nhiều item liên quan vào **cùng một partition** (cùng partition key) rồi truy vấn cả nhóm trong một lần đọc — chính xác là thứ ta cần cho ví dụ giỏ hàng ở cuối bài.
+
+### 2.3. Kiểu dữ liệu & giới hạn
+
+DynamoDB hỗ trợ ba nhóm kiểu dữ liệu:
+
+- **Scalar** (giá trị đơn): String, Number, Binary, Boolean, Null.
+- **Document** (cấu trúc lồng nhau): List và Map — cho phép lưu cả một object JSON bên trong một attribute.
+- **Set** (tập hợp không trùng): String Set, Number Set, Binary Set.
+
+Một giới hạn quan trọng cần nhớ: **kích thước tối đa của một item là 400KB** (tính cả tên attribute lẫn giá trị). DynamoDB hợp để lưu nhiều bản ghi nhỏ, không hợp để nhét cả file ảnh/video vào — những thứ đó nên để trên S3 và chỉ lưu đường dẫn trong DynamoDB.
+
+---
+
+## 3. Capacity Modes: Provisioned vs On-Demand
+
+Capacity Mode (chế độ dung lượng) quyết định cách bạn **quản lý và trả tiền cho throughput** (lượng đọc/ghi mỗi giây) của bảng. Trước hết cần hiểu hai đơn vị đo:
+
+- **RCU** (<Tooltip content="Read Capacity Unit — đơn vị đo năng lực đọc">Read Capacity Unit</Tooltip>): 1 RCU = 1 lần đọc **strongly consistent** mỗi giây cho item tối đa 4KB. Nếu chấp nhận đọc **eventually consistent** thì 1 RCU cho **2 lần đọc/giây**.
+- **WCU** (<Tooltip content="Write Capacity Unit — đơn vị đo năng lực ghi">Write Capacity Unit</Tooltip>): 1 WCU = 1 lần ghi mỗi giây cho item tối đa 1KB.
+
+Bạn vừa thấy hai từ "strongly consistent" và "eventually consistent" trong định nghĩa RCU. Đây là chỗ người mới hay bối rối nhất, nên ta tách hẳn ra giải thích.
+
+### 3.1. Strongly consistent vs Eventually consistent — đọc "mới nhất" hay đọc "nhanh và rẻ"?
+
+Để hiểu hai khái niệm này, cần nhớ lại cách DynamoDB lưu dữ liệu: mỗi item được giữ thành **nhiều bản sao** trên các AZ khác nhau (thường là 3 bản) để an toàn. Khi bạn ghi, dữ liệu vào **bản chính** (gọi là **leader** — bản giữ phiên bản mới nhất) trước, rồi **lan dần** sang các **bản sao** (replica) còn lại. Quá trình lan này thường chỉ mất một phần nhỏ của giây — nhưng **không tức thời tuyệt đối**. Chính khoảng trễ tí xíu đó sinh ra hai kiểu đọc:
+
+**Eventually consistent read (mặc định)** — đọc nhanh, chấp nhận có thể hơi cũ
+
+DynamoDB trả kết quả từ **bất kỳ bản sao nào** (bản nào gần/rảnh nhất). Nếu chẳng may bạn đọc trúng một bản sao **chưa kịp** nhận thay đổi vừa ghi, bạn sẽ thấy **dữ liệu cũ** trong một khoảng rất ngắn (thường dưới 1 giây). Ngay sau đó mọi bản sao đồng bộ và bạn luôn thấy dữ liệu mới. Đây là kiểu mặc định vì nó **rẻ hơn** (chỉ tốn nửa RCU) và **nhanh hơn**.
+
+**Strongly consistent read** — luôn đọc được dữ liệu mới nhất
+
+DynamoDB đọc thẳng từ **bản chính** — nơi luôn có dữ liệu mới nhất. Bạn được đảm bảo thấy đúng kết quả của mọi lần ghi đã hoàn tất trước đó. Đổi lại có ba cái giá:
+
+- **Tốn gấp đôi capacity**: 1 lần đọc strongly consistent tốn 1 RCU, trong khi eventually consistent chỉ tốn 0.5 RCU.
+- **Độ trễ nhỉnh hơn một chút** và chịu lỗi kém hơn: nếu bản chính đang gặp sự cố mạng, lần đọc này có thể thất bại (trong khi eventually consistent vẫn đọc được từ bản sao khác).
+- **Không dùng được trên GSI** (Global Secondary Index — sẽ nói ở mục 4); index phụ này chỉ hỗ trợ eventually consistent.
+
+**Chuyện gì xảy ra trong thực tế?**
+
+Hãy lấy đúng ví dụ giỏ hàng. Người dùng bấm "Thêm AirPods vào giỏ", rồi ngay lập tức màn hình tải lại giỏ chỉ sau vài mili-giây:
+
+- Với **eventually consistent**: có một xác suất nhỏ lần đọc trúng bản sao chưa cập nhật → giỏ hàng rỗng hiện ra. Người dùng hoang mang, bấm "Thêm" lần nữa → giỏ bị nhân đôi món hàng. Đây là lỗi kinh điển mang tên **read-after-write** (đọc ngay sau khi ghi mà thấy dữ liệu chưa kịp cập nhật).
+- Với **strongly consistent**: lần đọc luôn lấy từ bản chính → AirPods **chắc chắn xuất hiện**. Đúng đắn, nhưng tốn gấp đôi RCU.
+
+### 3.2. Provisioned Mode (mặc định)
+
+Bạn **khai báo trước** số RCU và WCU mà bảng cần mỗi giây, và trả tiền cho phần năng lực đã khai báo đó — **dù có dùng hết hay không**.
+
+- Bạn cần **dự trù dung lượng trước** (capacity planning).
+- Rẻ nhất khi tải **ổn định, đoán được**.
+- Có thể bật thêm **Auto Scaling** để DynamoDB tự tăng/giảm RCU & WCU trong một khoảng bạn đặt, theo tải thực tế.
+
+### 3.3. On-Demand Mode
+
+Bạn **không khai báo gì cả**. DynamoDB tự co giãn theo tải, và bạn **trả tiền theo từng request** (đơn vị <Tooltip content="Read Request Unit và Write Request Unit — đơn vị tính tiền theo từng yêu cầu đọc/ghi trong chế độ On-Demand">RRU/WRU</Tooltip>).
+
+- Không cần dự trù dung lượng.
+- Tự hấp thụ các đợt **spike đột ngột** ngay lập tức.
+- Tuyệt vời cho tải **bất định, khó đoán**.
+- Đắt hơn tính trên mỗi request, nhưng bạn không trả cho năng lực nhàn rỗi.
+
+Hãy bắt đầu với on-demand mode cho hầu hết các trường hợp, khi bạn đã biết được pattern rõ ràng của traffic, spike thì chuyển sang provisioned mode là hợp lý
+
+---
+
+## 4. Các tính năng nổi bật
+
+Ngoài phần lõi, DynamoDB còn đi kèm một hệ sinh thái tính năng giúp nó mạnh hơn nhiều một key-value store thông thường.
+
+- **DAX** (<Tooltip content="DynamoDB Accelerator — một lớp cache in-memory đặt trước DynamoDB, giúp tăng tốc đọc">DynamoDB Accelerator</Tooltip>): một lớp cache trong bộ nhớ đặt phía trước bảng, hạ độ trễ đọc từ mili-giây xuống **micro-giây** cho dữ liệu được đọc nhiều lần. Hợp với tình huống "đọc rất nhiều, ghi ít".
+- **Global Tables**: nhân bản bảng theo kiểu **active-active** trên nhiều region khác nhau. Người dùng ở Mỹ và ở châu Âu đều đọc/ghi vào bản gần mình nhất, dữ liệu tự đồng bộ giữa các region — lý tưởng cho ứng dụng toàn cầu.
+- **DynamoDB Streams**: ghi lại **mọi thay đổi** (thêm/sửa/xóa item) thành một dòng sự kiện theo thứ tự thời gian. Đây là <Tooltip content="Change Data Capture — kỹ thuật bắt và phát đi mọi thay đổi dữ liệu để hệ thống khác phản ứng theo thời gian thực">CDC</Tooltip> tích hợp sẵn. Thường được nối với **AWS Lambda** để kích hoạt logic tự động: ví dụ mỗi khi có đơn hàng mới thì gửi email, cập nhật bảng thống kê, hoặc đẩy sang hệ thống tìm kiếm.
+- **TTL** (<Tooltip content="Time To Live — thời điểm hết hạn của một item, sau đó DynamoDB tự động xóa">Time To Live</Tooltip>): bạn đặt một attribute kiểu timestamp cho item; tới thời điểm đó DynamoDB **tự động xóa** item mà **không tốn write throughput** của bạn. Cực hợp để dọn session hết hạn, giỏ hàng bỏ quên, dữ liệu tạm.
+- **Secondary Indexes**: mặc định bạn chỉ truy vấn được theo Primary Key. Index phụ cho phép truy vấn theo attribute khác. Có hai loại: <Tooltip content="Global Secondary Index — index với partition/sort key khác hẳn bảng gốc, truy vấn trên toàn bảng">GSI</Tooltip> (linh hoạt, tạo lúc nào cũng được) và <Tooltip content="Local Secondary Index — index dùng chung partition key với bảng gốc nhưng sort key khác, phải tạo ngay khi tạo bảng">LSI</Tooltip>.
+- **Table Class**: DynamoDB có hai hạng bảng. **Standard** là mặc định, tối ưu cho dữ liệu truy cập thường xuyên. **Standard-IA** (<Tooltip content="Infrequent Access — hạng bảng cho dữ liệu ít được truy cập">Infrequent Access</Tooltip>) có chi phí **lưu trữ rẻ hơn** nhưng **chi phí mỗi thao tác đọc/ghi đắt hơn** — hợp cho dữ liệu cần giữ lâu nhưng hiếm khi đụng tới (log cũ, lịch sử đơn hàng).
+- **Bảo mật & sao lưu**: tích hợp IAM để phân quyền chi tiết, mã hóa khi lưu trữ, sao lưu liên tục với khả năng khôi phục về bất kỳ thời điểm nào (point-in-time recovery).
+
+---
+
+## 5. Khi nào nên — và KHÔNG nên — dùng DynamoDB
+
+Đây là câu hỏi quan trọng nhất với người mới. DynamoDB rất mạnh nhưng **không phải con dao đa năng** thay thế mọi database.
+
+### 5.1. Nên dùng khi
+
+- **Truy cập theo khóa, tốc độ cao, quy mô lớn**: bạn biết trước mình sẽ tra cứu dữ liệu bằng khóa nào (ví dụ: lấy giỏ hàng theo `userId`, lấy profile theo `userId`).
+- **Access pattern xác định trước**: bạn thiết kế bảng dựa trên các câu truy vấn đã biết, thay vì truy vấn tùy hứng. Đây là tư duy ngược với SQL và là chìa khóa dùng DynamoDB đúng.
+- **Tải lớn, dễ spike**: giỏ hàng mùa sale, session đăng nhập, leaderboard game, dữ liệu IoT.
+- **Muốn serverless, ít vận hành**: ghép cực hợp với AWS Lambda để xây backend không cần quản lý server nào.
+
+### 5.2. Không nên dùng khi
+
+- **Truy vấn ad-hoc, linh hoạt**: bạn cần lọc/nhóm/thống kê theo nhiều tiêu chí thay đổi liên tục mà không định trước — SQL với index linh hoạt sẽ hợp hơn.
+- **Quan hệ phức tạp giữa nhiều bảng**: cần nhiều `JOIN`, ràng buộc toàn vẹn tham chiếu — đây là sân nhà của database quan hệ.
+- **Phân tích dữ liệu lớn (analytics)**: quét toàn bảng để tính toán nặng nên dùng kho dữ liệu chuyên dụng (data warehouse) như Redshift, không phải DynamoDB.
+
+### 5.3. DynamoDB vs Database quan hệ
+
+| Tiêu chí        | DynamoDB (NoSQL)                  | RDBMS (MySQL, Postgres...)           |
+| --------------- | --------------------------------- | ------------------------------------ |
+| Mô hình dữ liệu | Key-value / document, schema-less | Bảng quan hệ, schema cố định         |
+| Cách scale      | Ngang, tự động, gần như vô hạn    | Chủ yếu dọc; scale ngang phức tạp    |
+| Truy vấn        | Theo khóa + index đã thiết kế     | SQL linh hoạt, JOIN tùy ý            |
+| Vận hành        | Fully managed, serverless         | Tự lo (hoặc dùng bản managed)        |
+| Hợp với         | Tải lớn, access pattern rõ ràng   | Quan hệ phức tạp, truy vấn linh hoạt |
+
+Một cách diễn đạt ngắn gọn: **RDBMS** linh hoạt khi truy vấn nhưng khó scale; **DynamoDB** đánh đổi sự linh hoạt đó để lấy khả năng scale gần như vô hạn và hiệu năng ổn định. Chọn cái nào tùy vào việc bài toán của bạn thiên về "truy vấn linh hoạt" hay "scale và tốc độ".
+
+---
+
+## 6. Ví dụ thực tế: Giỏ hàng cho website bán hàng
+
+Hãy quay lại đúng bài toán ở đầu bài và giải nó bằng DynamoDB.
+
+### 6.1. Thiết kế bảng
+
+Mỗi người dùng có một giỏ hàng gồm nhiều món. Ta dùng **composite primary key** để gom toàn bộ món của một user vào cùng một partition:
+
+- **Partition Key (`PK`)**: `USER#<userId>` — tất cả món của cùng một user nằm chung một chỗ.
+- **Sort Key (`SK`)**: `CART#<sku>` — mỗi món là một item riêng, sắp theo mã sản phẩm.
+- **Attributes**: `productName`, `qty`, `price`, và `expiresAt` (timestamp để **TTL** tự dọn giỏ hàng bị bỏ quên sau 7 ngày).
+
+| PK (Partition Key) | SK (Sort Key) | productName | qty | price | expiresAt  |
+| ------------------ | ------------- | ----------- | --- | ----- | ---------- |
+| USER#123           | CART#sku-1001 | AirPods Pro | 1   | 249   | 1718500000 |
+| USER#123           | CART#sku-2002 | Kindle      | 2   | 139   | 1718500000 |
+| USER#456           | CART#sku-1001 | AirPods Pro | 1   | 249   | 1719100000 |
+
+### 6.2. Code với Node.js + TypeScript
+
+Dùng AWS SDK v3. `DynamoDBDocumentClient` giúp ta làm việc với object JavaScript thuần thay vì cú pháp kiểu dữ liệu rườm rà của DynamoDB.
+
+```ts
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
+import { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb'
+
+const client = new DynamoDBClient({ region: 'us-east-1' })
+const db = DynamoDBDocumentClient.from(client)
+
+const TABLE = 'ShoppingCart'
+const SEVEN_DAYS = 60 * 60 * 24 * 7
+
+type CartItem = {
+  sku: string
+  name: string
+  qty: number
+  price: number
+}
+```
+
+**Thêm một món vào giỏ** — một thao tác ghi đúng theo Primary Key:
+
+```ts
+async function addToCart(userId: string, item: CartItem) {
+  await db.send(
+    new PutCommand({
+      TableName: TABLE,
+      Item: {
+        PK: `USER#${userId}`,
+        SK: `CART#${item.sku}`,
+        productName: item.name,
+        qty: item.qty,
+        price: item.price,
+        expiresAt: Math.floor(Date.now() / 1000) + SEVEN_DAYS,
+      },
+    })
+  )
+}
+```
+
+**Lấy toàn bộ giỏ hàng của một user** — đây là chỗ composite key tỏa sáng: chỉ cần một câu `Query` theo partition key là lấy về mọi món:
+
+```ts
+async function getCart(userId: string) {
+  const result = await db.send(
+    new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: 'PK = :pk and begins_with(SK, :prefix)',
+      ExpressionAttributeValues: {
+        ':pk': `USER#${userId}`,
+        ':prefix': 'CART#',
+      },
+    })
+  )
+  return result.Items ?? []
+}
+```
+
+**Lấy đúng một món cụ thể** — tra cứu trực tiếp bằng cả PK lẫn SK, nhanh nhất có thể:
+
+```ts
+async function getCartItem(userId: string, sku: string) {
+  const result = await db.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: { PK: `USER#${userId}`, SK: `CART#${sku}` },
+    })
+  )
+  return result.Item
+}
+```
+
+### 6.3. Vì sao DynamoDB hợp với bài toán này?
+
+- **Mỗi user là một partition độc lập**: thêm bao nhiêu user, DynamoDB tự rải tải ra nhiều máy. Black Friday tăng 50 lần lượng user? Bảng tự co giãn, không cần bạn động tay.
+- **Access pattern rõ ràng**: ta luôn thao tác giỏ hàng theo `userId` — đúng kiểu DynamoDB tối ưu, mỗi lần đọc/ghi chỉ vài mili-giây.
+- **TTL dọn rác miễn phí**: giỏ hàng bị bỏ quên tự biến mất sau 7 ngày, không tốn write throughput, không cần cron job.
+- **Ghép On-Demand**: bật On-Demand Mode cho mùa sale là bạn ngủ ngon — không lo nghẽn vì spike, chỉ trả tiền cho lượng request thực tế.
+
+---
+
+## Kết luận
+
+Quay lại câu chuyện giỏ hàng "bốc hơi" giữa đợt Black Friday: gốc rễ không phải do bạn viết code dở, mà do bạn đặt một bài toán **scale ngang, tải spike** lên vai một database vốn được sinh ra cho **một máy mạnh**. DynamoDB lật ngược bài toán đó — nó được thiết kế để scale ngang và hấp thụ spike như một lẽ tự nhiên.
+
+Những điều cốt lõi cần nhớ:
+
+- **DynamoDB là database NoSQL fully managed, serverless** — nhanh, ổn định ở mức mili-giây, tự scale tới hàng triệu request/giây, và bạn gần như không phải vận hành gì.
+- **Primary Key là tất cả**: Partition Key quyết định vị trí vật lý, Sort Key quyết định thứ tự logic trong partition. Thiết kế khóa tốt = dùng DynamoDB tốt.
+- **Hai capacity mode**: Provisioned (rẻ khi tải ổn định) và On-Demand (linh hoạt khi tải bất định). Người mới nên bắt đầu với On-Demand.
+- **Hệ sinh thái mạnh**: DAX để cache, Global Tables cho đa region, Streams + Lambda cho xử lý sự kiện, TTL để tự dọn dữ liệu hết hạn.
+- **Chọn đúng việc**: DynamoDB tỏa sáng với access pattern rõ ràng và tải lớn; nhưng với truy vấn linh hoạt, quan hệ phức tạp hay analytics, database quan hệ vẫn là lựa chọn đúng.
+
+Nếu bạn đang xây một backend trên AWS với access pattern rõ ràng và cần khả năng scale không phải lo nghĩ, DynamoDB xứng đáng là lựa chọn đầu tiên bạn cân nhắc.

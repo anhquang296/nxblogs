@@ -1,0 +1,311 @@
+---
+title: 'Amazon DynamoDB: The "Zero-Management" NoSQL Database for Millions of Requests Per Second'
+date: '2026-06-08'
+tags: ['AWS', 'Database', 'System Design', 'SAA']
+description: 'An introduction to Amazon DynamoDB for newcomers to AWS — its characteristics, core concepts (partition key, sort key, capacity mode), standout features, when to use it, and a real-world shopping cart example with Node.js.'
+enableComment: true
+---
+
+# Amazon DynamoDB: The "Zero-Management" NoSQL Database for Millions of Requests Per Second
+
+You're building an e-commerce website. User shopping carts are stored in MySQL — simple, familiar, running smoothly all year long. Then the **Black Friday sale** hits.
+
+Traffic jumps 50x in just a few minutes. Every time a customer adds an item to their cart, that's one write to the database. The connection pool drains dry. Queries start to slow down, then time out. Some customers click "Add to cart" but the item never appears — the cart "evaporates" at the exact moment you most need to sell.
+
+You try doubling the database server's specs (**vertical scaling** — giving a single machine more power). It helps a little, but you hit the ceiling fast and the bill skyrockets. You think about **sharding** (splitting data across multiple machines), but doing it yourself is extremely complex: you have to route requests, balance the load, and handle failures all on your own.
+
+The root of the problem: traditional relational databases are designed to run well on **one powerful machine**, not to **scale horizontally** (add machines) automatically and smoothly. This is exactly the problem **Amazon DynamoDB** was born to solve.
+
+This article introduces DynamoDB from scratch — for those with little exposure to AWS: what it is, the core concepts you absolutely must grasp, its standout features, **when you should (and shouldn't) use it**, and finally a real-world shopping cart example in Node.js so you can see how it works.
+
+<ExcalidrawDiagram
+  src="/dynamodb-overview.excalidraw"
+  alt="DynamoDB ecosystem overview — Application/SDK, DynamoDB Table with Partition Key and Sort Key, DAX cache, Streams to Lambda, Global Tables across regions, IAM authorization"
+/>
+
+---
+
+## 1. What is DynamoDB?
+
+Amazon DynamoDB is a **NoSQL database** service fully operated by AWS.
+
+Let's break that definition down into three points for newcomers:
+
+**Fully managed** means AWS handles the entire "infrastructure" side for you: installing servers, patching security holes, backups, replacing failed disks, scaling up when load increases. You don't SSH into any server — you just create a table and read/write data.
+
+With self-hosted MySQL, you have to handle version updates yourself, run your own backups, and deal with full disks.
+
+With DynamoDB, all of that disappears.
+
+<Tooltip content="A model where you don't manage or even see any server — there are no machines to turn on/off; you only pay for the reads/writes and storage you actually use">Serverless</Tooltip> is a consequence of the above: there are no "instances" or "clusters" for you to pick CPU/RAM configurations for. A DynamoDB table scales itself
+according to demand.
+
+**NoSQL** (Not Only SQL) is a family of databases that are **not relational** — no tables joined together by foreign keys, no `JOIN` statements, no requirement that every row share the same column structure. In exchange, NoSQL is designed to **scale horizontally** with ease and to read/write extremely fast by key. DynamoDB is a **key-value** store combined with **document** capabilities: you look up data primarily through a key, and each record can contain nested structures like a JSON file.
+
+### 1.1. What makes DynamoDB stand out
+
+- **Distributed by default, highly available**: data is automatically replicated (**replication**) across multiple <Tooltip content="Availability Zone — one or more independent data centers within the same AWS region, with their own power and networking so that when one AZ fails, the others keep running">AZ</Tooltip>s within a region. If one data center has an incident, your data is still safe and accessible.
+- **Consistent single-digit millisecond performance**: whether the table has 1,000 or 1 billion records, the response time for a key lookup is almost unchanged.
+- **Massive scale**: serves millions of requests per second, trillions of records, hundreds of TB of data.
+- **Built-in security**: access control via <Tooltip content="Identity and Access Management — AWS's service for managing who (user, service) is allowed to do what on which resources">IAM</Tooltip>, encryption of data by default.
+- **No maintenance, always available**: there's no "maintenance window" that interrupts your service.
+
+In short, DynamoDB is a good fit when you need a **fast, consistent, self-scaling** database and you don't want to spend people's time operating it.
+
+---
+
+## 2. Core Concepts
+
+To use DynamoDB, you only need to firmly grasp a small set of concepts. This is the most important part of the article.
+
+### 2.1. Table, Item, Attribute
+
+- A **Table** is where data lives, equivalent to the concept of a "table" in SQL. A table can hold an **unlimited number of items**.
+- An **Item** is a record in the table, equivalent to a row in SQL.
+- An **Attribute** is a data field of an item, equivalent to a column.
+
+The big difference: DynamoDB **has no fixed schema** — each item in the same table can have a different set of attributes, and attributes can be added gradually over time or left empty. Thanks to this, you can **evolve your data structure very quickly** without an `ALTER TABLE` statement like in SQL.
+
+### 2.2. Primary Key — the heart of every table
+
+Every table is required to have a **Primary Key**, and it **must be decided right when you create the table** — it cannot be changed later. The Primary Key uniquely identifies each item. There are two kinds:
+
+**1. Partition Key only (Simple Primary Key)**
+
+The **Partition Key** (also called the **hash key**) is an attribute that DynamoDB uses to decide where an item is physically stored. DynamoDB hashes this value to pick a **partition** — a "storage compartment" on a specific machine in the distributed system. The same partition key always lands in the same partition.
+
+**2. Partition Key + Sort Key (Composite Primary Key)**
+
+When the Primary Key consists of two attributes: the first attribute is the **Partition Key**, and the second is the **Sort Key** (also called the **range key**).
+
+- The **Partition Key** determines the **physical location** of the data (which partition the item lives in).
+- The **Sort Key** determines the **logical order** of items **within the same partition**.
+
+A way to understand it with an analogy: imagine a library. The **Partition Key** is the shelf number — it tells you which shelf to walk to. The **Sort Key** is the position of a book on that shelf, arranged in order — so you can grab "all the books on shelf number 7" or "the books on shelf number 7 whose code starts with CART#" in a single operation.
+
+This is an extremely powerful point: with a composite key, you can group many related items into the **same partition** (same partition key) and then query the whole group in a single read — exactly what we need for the shopping cart example at the end of the article.
+
+### 2.3. Data types & limits
+
+DynamoDB supports three groups of data types:
+
+- **Scalar** (single values): String, Number, Binary, Boolean, Null.
+- **Document** (nested structures): List and Map — letting you store an entire JSON object inside a single attribute.
+- **Set** (collections with no duplicates): String Set, Number Set, Binary Set.
+
+One important limit to remember: **the maximum size of an item is 400KB** (counting both attribute names and values). DynamoDB is good for storing many small records, not for stuffing in whole image/video files — those should live on S3, with only the path stored in DynamoDB.
+
+---
+
+## 3. Capacity Modes: Provisioned vs On-Demand
+
+The Capacity Mode determines how you **manage and pay for the throughput** (reads/writes per second) of a table. First you need to understand two units of measurement:
+
+- **RCU** (<Tooltip content="Read Capacity Unit — the unit for measuring read capacity">Read Capacity Unit</Tooltip>): 1 RCU = 1 **strongly consistent** read per second for an item up to 4KB. If you accept **eventually consistent** reads, then 1 RCU gives you **2 reads/second**.
+- **WCU** (<Tooltip content="Write Capacity Unit — the unit for measuring write capacity">Write Capacity Unit</Tooltip>): 1 WCU = 1 write per second for an item up to 1KB.
+
+You just saw the terms "strongly consistent" and "eventually consistent" in the definition of RCU. This is where newcomers get confused the most, so let's pull it out and explain it separately.
+
+### 3.1. Strongly consistent vs Eventually consistent — read the "latest" or read "fast and cheap"?
+
+To understand these two concepts, you need to recall how DynamoDB stores data: each item is kept as **multiple copies** across different AZs (usually 3 copies) for safety. When you write, the data goes to the **primary copy** (called the **leader** — the copy that holds the latest version) first, then **gradually propagates** to the remaining **replicas**. This propagation usually takes just a tiny fraction of a second — but it's **not absolutely instantaneous**. That tiny delay is exactly what gives rise to two kinds of reads:
+
+**Eventually consistent read (default)** — fast reads, accepting they may be slightly stale
+
+DynamoDB returns the result from **any copy** (whichever is nearest/freest). If you happen to read a replica that **hasn't yet** received the change you just wrote, you'll see **stale data** for a very short window (usually under 1 second). Right after that, all copies sync up and you always see the new data. This is the default kind because it's **cheaper** (only costs half an RCU) and **faster**.
+
+**Strongly consistent read** — always reads the latest data
+
+DynamoDB reads straight from the **primary copy** — where the latest data always is. You're guaranteed to see the correct result of every write that completed before. In exchange there are three costs:
+
+- **Costs double the capacity**: 1 strongly consistent read costs 1 RCU, while an eventually consistent read costs only 0.5 RCU.
+- **Slightly higher latency** and worse fault tolerance: if the primary copy is having a network issue, this read may fail (whereas an eventually consistent read can still read from another replica).
+- **Not usable on a GSI** (Global Secondary Index — covered in section 4); this secondary index only supports eventually consistent reads.
+
+**What happens in practice?**
+
+Let's take the exact shopping cart example. A user clicks "Add AirPods to cart," and then the screen immediately reloads the cart just a few milliseconds later:
+
+- With **eventually consistent**: there's a small chance the read hits a replica that hasn't updated → an empty cart appears. The user gets confused, clicks "Add" again → the cart now has the item duplicated. This is the classic bug called **read-after-write** (reading right after a write and seeing data that hasn't caught up yet).
+- With **strongly consistent**: the read always pulls from the primary copy → the AirPods **definitely appear**. Correct, but it costs double the RCU.
+
+### 3.2. Provisioned Mode (default)
+
+You **declare in advance** the number of RCUs and WCUs the table needs per second, and you pay for that declared capacity — **whether you use it all or not**.
+
+- You need to **plan capacity in advance** (capacity planning).
+- Cheapest when the load is **steady and predictable**.
+- You can enable **Auto Scaling** so DynamoDB raises/lowers RCU & WCU within a range you set, based on actual load.
+
+### 3.3. On-Demand Mode
+
+You **declare nothing**. DynamoDB scales itself with the load, and you **pay per request** (in units of <Tooltip content="Read Request Unit and Write Request Unit — the per-request billing units in On-Demand mode">RRU/WRU</Tooltip>).
+
+- No capacity planning needed.
+- Absorbs sudden **spikes** instantly.
+- Great for **unpredictable, hard-to-forecast** loads.
+- More expensive per request, but you don't pay for idle capacity.
+
+Start with On-Demand mode for most cases; once you know your traffic and spike patterns clearly, switching to Provisioned mode is a reasonable move.
+
+---
+
+## 4. Standout Features
+
+Beyond the core, DynamoDB comes with an ecosystem of features that make it far more powerful than an ordinary key-value store.
+
+- **DAX** (<Tooltip content="DynamoDB Accelerator — an in-memory cache layer placed in front of DynamoDB to speed up reads">DynamoDB Accelerator</Tooltip>): an in-memory cache layer placed in front of the table, dropping read latency from milliseconds to **microseconds** for frequently read data. A good fit for "read a lot, write a little" situations.
+- **Global Tables**: replicates a table in an **active-active** fashion across multiple regions. Users in the US and in Europe both read/write to the copy nearest them, and the data syncs automatically between regions — ideal for global applications.
+- **DynamoDB Streams**: records **every change** (adding/updating/deleting an item) into a time-ordered stream of events. This is built-in <Tooltip content="Change Data Capture — a technique for capturing and emitting every data change so other systems can react in real time">CDC</Tooltip>. It's commonly wired up to **AWS Lambda** to trigger automatic logic: for example, every time there's a new order, send an email, update a stats table, or push to a search system.
+- **TTL** (<Tooltip content="Time To Live — the expiration time of an item, after which DynamoDB automatically deletes it">Time To Live</Tooltip>): you set a timestamp-type attribute on an item; when that time arrives, DynamoDB **automatically deletes** the item **without consuming your write throughput**. Extremely handy for cleaning up expired sessions, abandoned carts, and temporary data.
+- **Secondary Indexes**: by default you can only query by the Primary Key. A secondary index lets you query by another attribute. There are two types: <Tooltip content="Global Secondary Index — an index with a partition/sort key entirely different from the base table, queried across the whole table">GSI</Tooltip> (flexible, can be created at any time) and <Tooltip content="Local Secondary Index — an index that shares the base table's partition key but has a different sort key, and must be created at table creation time">LSI</Tooltip>.
+- **Table Class**: DynamoDB has two table classes. **Standard** is the default, optimized for frequently accessed data. **Standard-IA** (<Tooltip content="Infrequent Access — a table class for data that is rarely accessed">Infrequent Access</Tooltip>) has **cheaper storage cost** but **more expensive cost per read/write operation** — a fit for data you need to keep for a long time but rarely touch (old logs, order history).
+- **Security & backup**: integrates with IAM for fine-grained permissions, encryption at rest, and continuous backups with the ability to restore to any point in time (point-in-time recovery).
+
+---
+
+## 5. When You Should — and SHOULDN'T — Use DynamoDB
+
+This is the most important question for newcomers. DynamoDB is very powerful but it's **not a Swiss Army knife** that replaces every database.
+
+### 5.1. Use it when
+
+- **Key-based access, high speed, large scale**: you know in advance which key you'll use to look up data (e.g., get a cart by `userId`, get a profile by `userId`).
+- **Predefined access patterns**: you design the table based on known queries, rather than ad-hoc querying. This is the reverse of the SQL mindset and is the key to using DynamoDB correctly.
+- **Large load, prone to spikes**: shopping carts during a sale, login sessions, game leaderboards, IoT data.
+- **You want serverless, low operations**: pairs extremely well with AWS Lambda to build a backend that requires managing no servers at all.
+
+### 5.2. Don't use it when
+
+- **Ad-hoc, flexible queries**: you need to filter/group/aggregate by many continuously changing criteria you didn't define ahead of time — SQL with flexible indexes will fit better.
+- **Complex relationships across many tables**: you need many `JOIN`s and referential integrity constraints — this is the home turf of relational databases.
+- **Big data analytics**: scanning an entire table for heavy computation should use a dedicated data warehouse like Redshift, not DynamoDB.
+
+### 5.3. DynamoDB vs Relational Database
+
+| Criteria      | DynamoDB (NoSQL)                    | RDBMS (MySQL, Postgres...)            |
+| ------------- | ----------------------------------- | ------------------------------------- |
+| Data model    | Key-value / document, schema-less   | Relational tables, fixed schema       |
+| How it scales | Horizontal, automatic, nearly infinite | Mostly vertical; horizontal is complex |
+| Querying      | By key + designed indexes           | Flexible SQL, arbitrary JOINs         |
+| Operations    | Fully managed, serverless           | DIY (or use a managed version)        |
+| Good for      | Large load, clear access patterns   | Complex relationships, flexible queries |
+
+A concise way to put it: **RDBMS** is flexible when querying but hard to scale; **DynamoDB** trades that flexibility for nearly infinite scalability and consistent performance. Which one you choose depends on whether your problem leans toward "flexible querying" or "scale and speed."
+
+---
+
+## 6. Real-World Example: A Shopping Cart for an E-commerce Site
+
+Let's go back to the exact problem from the start of the article and solve it with DynamoDB.
+
+### 6.1. Table design
+
+Each user has a cart with multiple items. We use a **composite primary key** to group all of a user's items into the same partition:
+
+- **Partition Key (`PK`)**: `USER#<userId>` — all items of the same user live in one place.
+- **Sort Key (`SK`)**: `CART#<sku>` — each item is a separate item, ordered by product code.
+- **Attributes**: `productName`, `qty`, `price`, and `expiresAt` (a timestamp for **TTL** to auto-clean abandoned carts after 7 days).
+
+| PK (Partition Key) | SK (Sort Key) | productName | qty | price | expiresAt  |
+| ------------------ | ------------- | ----------- | --- | ----- | ---------- |
+| USER#123           | CART#sku-1001 | AirPods Pro | 1   | 249   | 1718500000 |
+| USER#123           | CART#sku-2002 | Kindle      | 2   | 139   | 1718500000 |
+| USER#456           | CART#sku-1001 | AirPods Pro | 1   | 249   | 1719100000 |
+
+### 6.2. Code with Node.js + TypeScript
+
+Using AWS SDK v3. `DynamoDBDocumentClient` lets us work with plain JavaScript objects instead of DynamoDB's verbose data-type syntax.
+
+```ts
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
+import { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb'
+
+const client = new DynamoDBClient({ region: 'us-east-1' })
+const db = DynamoDBDocumentClient.from(client)
+
+const TABLE = 'ShoppingCart'
+const SEVEN_DAYS = 60 * 60 * 24 * 7
+
+type CartItem = {
+  sku: string
+  name: string
+  qty: number
+  price: number
+}
+```
+
+**Add an item to the cart** — a single write straight to the Primary Key:
+
+```ts
+async function addToCart(userId: string, item: CartItem) {
+  await db.send(
+    new PutCommand({
+      TableName: TABLE,
+      Item: {
+        PK: `USER#${userId}`,
+        SK: `CART#${item.sku}`,
+        productName: item.name,
+        qty: item.qty,
+        price: item.price,
+        expiresAt: Math.floor(Date.now() / 1000) + SEVEN_DAYS,
+      },
+    })
+  )
+}
+```
+
+**Get a user's entire cart** — this is where the composite key shines: a single `Query` by partition key fetches every item:
+
+```ts
+async function getCart(userId: string) {
+  const result = await db.send(
+    new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: 'PK = :pk and begins_with(SK, :prefix)',
+      ExpressionAttributeValues: {
+        ':pk': `USER#${userId}`,
+        ':prefix': 'CART#',
+      },
+    })
+  )
+  return result.Items ?? []
+}
+```
+
+**Get one specific item** — a direct lookup using both PK and SK, as fast as it gets:
+
+```ts
+async function getCartItem(userId: string, sku: string) {
+  const result = await db.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: { PK: `USER#${userId}`, SK: `CART#${sku}` },
+    })
+  )
+  return result.Item
+}
+```
+
+### 6.3. Why is DynamoDB a good fit for this problem?
+
+- **Each user is an independent partition**: add as many users as you want, and DynamoDB spreads the load across many machines on its own. Black Friday brings 50x more users? The table scales itself, no hands-on work from you.
+- **Clear access pattern**: we always operate on the cart by `userId` — exactly what DynamoDB optimizes for, with each read/write taking just a few milliseconds.
+- **TTL cleans up for free**: abandoned carts disappear automatically after 7 days, consuming no write throughput and needing no cron job.
+- **Pair with On-Demand**: turn on On-Demand Mode for the sale season and you can sleep soundly — no worries about congestion from spikes, and you only pay for the requests you actually make.
+
+---
+
+## Conclusion
+
+Back to the story of the cart "evaporating" during Black Friday: the root cause wasn't that you wrote bad code, but that you placed a **horizontal-scaling, spiky-load** problem on the shoulders of a database built for **one powerful machine**. DynamoDB flips that problem around — it's designed to scale horizontally and absorb spikes as a matter of course.
+
+The core things to remember:
+
+- **DynamoDB is a fully managed, serverless NoSQL database** — fast, consistent at the millisecond level, self-scaling to millions of requests/second, and you barely have to operate anything.
+- **The Primary Key is everything**: the Partition Key decides the physical location, the Sort Key decides the logical order within a partition. Good key design = good DynamoDB usage.
+- **Two capacity modes**: Provisioned (cheap for steady loads) and On-Demand (flexible for unpredictable loads). Newcomers should start with On-Demand.
+- **A strong ecosystem**: DAX for caching, Global Tables for multi-region, Streams + Lambda for event processing, TTL to auto-clean expired data.
+- **Pick the right job**: DynamoDB shines with clear access patterns and large loads; but for flexible queries, complex relationships, or analytics, a relational database is still the right choice.
+
+If you're building a backend on AWS with a clear access pattern and you need scalability you don't have to think about, DynamoDB deserves to be the first option you consider.
