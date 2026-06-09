@@ -23,19 +23,13 @@ Two very different questions, but one idea solves both: **quorum**. At its core,
 
 ## 1. How Quorum Works
 
-Before touching AWS, let's strip quorum away from any specific problem — because quorum itself is **not** about reading/writing or voting. It's just a counting principle.
-
 **Quorum** is originally a word from meetings: the **minimum number of members who must be present for a body to make a valid decision**. A 9-person board might set its quorum at 5 — with fewer than 5 present, any vote is void; but once 5 are there, their decision stands for the whole board, even if the 4 absentees would later object. The key idea: a large-enough agreeing group can represent the whole body — you don't need everyone.
 
-Carry that idea into distributed systems: the "members" are now nodes or data copies, and "making a decision" means performing an operation — a read, a write, or a leader election. The pure setup: you have a group of **N** members, and a **quorum** is the minimum number of members that must take part for an operation to be considered valid. You don't need to ask all N — one quorum is enough.
+So what is a quorum for? Quorum was created to solve the problem of making decisions by consensus.
 
-So what is a quorum for? It all comes down to a single property: **overlap**.
+You've almost certainly run into a very common form of quorum in real life before: if a decision is approved by more than 50% of the members of a group, that decision passes.
 
-Take any two quorums Q₁ and Q₂ drawn from the same group of N members. If **|Q₁| + |Q₂| > N**, the two sets **are guaranteed to share at least one member**. The reason is everyday math — the pigeonhole principle: if the two sets were completely disjoint, their total size could be at most N; but we assumed the total is greater than N, so they must overlap.
-
-That shared member is the **bridge**: it witnessed the first operation, so when the second operation reaches it, the information carries over. No operation can "slip past" and miss the one before it. With N = 3, two quorums of size 2 are enough: 2 + 2 = 4 > 3, so any two 2-member sets over 3 nodes always collide. Conversely, if each quorum had size 1, then 1 + 1 = 2 ≤ 3 — you could pick node A for one and node B for the other, two sets that slip right past each other with nothing in common; that's exactly why the **> N** threshold is the minimum, and below it nothing is guaranteed.
-
-The most widely used case is the **majority quorum** — a set larger than half, i.e. ⌊N/2⌋ + 1 (for example 2 of 3, or 3 of 5). Since every majority quorum is larger than N/2, any two majority quorums satisfy |Q₁| + |Q₂| > N — in other words, **any two majority groups always overlap**. This is the tightest form of quorum and the foundation of most consensus algorithms.
+That is exactly the **majority quorum** — a set larger than half, i.e. ⌊N/2⌋ + 1 (for example 2 of 3, or 3 of 5). Since every majority quorum is larger than N/2, any two majority quorums satisfy |Q₁| + |Q₂| > N — in other words, **any two majority groups always overlap**. This is the tightest form of quorum and the foundation of most consensus algorithms.
 
 The cost: the larger the quorum, the stronger the guarantee, but the more live members you need and the higher the latency of each operation, since you wait for more members to respond.
 
@@ -45,14 +39,21 @@ So far quorum is just an abstract inequality. The interesting part is that this 
 
 ## 2. Use Case 1 — Read/Write Consensus (DynamoDB & Aurora)
 
-<ExcalidrawDiagram
-  src="/quorum-read-write-aws.excalidraw"
-  alt="Quorum read/write consensus on AWS — DynamoDB with 3 replicas across 3 AZs and a write quorum of 2 of 3, strong reads from the leader and eventual reads from any replica; Aurora with 6 storage copies across 3 AZs, write quorum 4/6 and read quorum 3/6"
-/>
+The first problem: how does a distributed database guarantee a non-functional requirement — that a user can read the latest data right after writing it?
 
-The first problem: data is replicated into N copies for fault tolerance, but how do you make sure a read always sees the latest write?
+You'll run into this many times in practice: you've just added a product to an online shopping cart, you open the cart to check and see nothing, and after reloading the cart, the product shows up.
 
-This is where we assign the two quorums from Section 1 to concrete roles. The first quorum is the **write set (W)** — the number of copies that must confirm the write before it's reported successful. The second is the **read set (R)** — the number of copies you query on a read. The overlap constraint |Q₁| + |Q₂| > N becomes the classic formula:
+It occurs to you that if every read and write had to be agreed upon across all nodes of the distributed database, users would always be guaranteed the latest data.
+
+But that decision drives operation latency way up: instead of reading or writing just one node, every operation now has to wait for all nodes to respond.
+
+So you adjust it slightly: if only writes must be agreed upon across all nodes, then reading any single node always returns the latest data.
+
+But this change only solves the latency of read traffic.
+
+This is where quorum shows its power.
+
+We assign the two quorums from Section 1 to concrete roles. The first quorum is the **write set (W)** — the number of copies that must confirm the write before it's reported successful. The second is the **read set (R)** — the number of copies you query on a read. The overlap constraint |Q₁| + |Q₂| > N becomes the classic formula:
 
 **W + R > N**
 
@@ -80,11 +81,6 @@ Two services, two ways of realizing the same overlap math: DynamoDB uses **a sin
 ---
 
 ## 3. Use Case 2 — Leader Election
-
-<ExcalidrawDiagram
-  src="/quorum-leader-election.excalidraw"
-  alt="Leader election by majority quorum — a candidate needs a majority of votes to become leader, two majorities must share at least one voter so at most one leader exists per term, and leases prevent split-brain during handover"
-/>
 
 The second problem sounds entirely different: in a cluster, we need exactly one node to be the **leader** — the coordinating node, the only one allowed to write or make decisions. When the leader dies, the cluster must elect a replacement, but it must never elect two.
 
