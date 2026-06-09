@@ -1,0 +1,109 @@
+---
+title: 'Quorum: Một Nguyên Lý Giao Nhau, Hai Use Case Trên AWS'
+date: '2026-06-09'
+tags: ['AWS', 'System Design', 'Distributed Systems', 'SAA']
+description: 'Mô hình quorum — các tập con giao nhau và bỏ phiếu đa số — đứng sau hai use case của AWS: đồng thuận đọc/ghi trong DynamoDB và Aurora, và bầu leader không bị split-brain.'
+enableComment: true
+---
+
+# Quorum: Một Nguyên Lý Giao Nhau, Hai Use Case Trên AWS
+
+Bạn vận hành một datastore gồm 3 node — 3 bản sao của cùng một dữ liệu. Một ứng dụng vừa ghi một giá trị mới, rồi ngay sau đó một request khác đọc lại. Nhưng đúng lúc ấy, một node đang trễ nhịp đồng bộ, hoặc cả một <Tooltip content="Availability Zone — một hoặc nhiều trung tâm dữ liệu độc lập trong cùng một vùng AWS, có điện và mạng riêng để khi một AZ chết thì các AZ khác vẫn chạy">AZ</Tooltip> đang chập chờn. Làm sao bạn chắc chắn lần đọc đó trả về **bản ghi mới nhất** chứ không phải dữ liệu cũ?
+
+Và ở một bài toán nghe có vẻ chẳng liên quan: khi node đang điều phối cụm chết, làm sao cụm bầu ra **đúng một** node thay thế — chứ không phải hai node cùng tự nhận mình là sếp rồi ghi đè lên nhau?
+
+Hai câu hỏi rất khác nhau, nhưng cùng một ý tưởng giải quyết được cả hai: **quorum**. Cốt lõi của quorum chỉ là bắt các tập con phải **giao nhau** — để hai thao tác bất kỳ luôn "gặp nhau" trên ít nhất một thành viên chung.
+
+<ExcalidrawDiagram
+  src="/quorum-overview.excalidraw"
+  alt="The quorum principle — any two quorums of a group of N members must overlap when their sizes sum to more than N (W + R > N, 2 + 2 > 3), previewing two AWS use cases: consensus read/write and leader election"
+/>
+
+---
+
+## 1. Quorum hoạt động như thế nào
+
+**Quorum** vốn là một từ trong họp hành: đó là **số thành viên tối thiểu phải có mặt thì một tập thể mới ra được quyết định có hiệu lực**. Một hội đồng 9 người có thể quy định quorum là 5 — họp mà chưa đủ 5 người thì mọi biểu quyết đều vô giá trị; nhưng khi đã đủ 5, quyết định của nhóm đó có hiệu lực thay cho cả hội đồng, kể cả 4 người vắng mặt sau này có phản đối. Mấu chốt: chỉ cần một nhóm đủ lớn đồng thuận là đại diện được cho cả tập thể, không cần tất cả.
+
+Vậy quorum dùng để làm gì? Quorum được sinh ra để giải quyết bài toán ra quyết định đồng thuận.
+
+Chắc chắn bạn đã từng gặp 1 trường hợp rất phổ biến của quorum trong thực tế trong quá khứ, đó là nếu 1 quyết định được hơn 50% thành viên đồng thuận trong 1 tập thể, thì quyết định đó được thông qua.
+
+Đó chính là **quorum đa số (majority)** — tập có kích thước lớn hơn một nửa, tức ⌊N/2⌋ + 1 (ví dụ 2 trên 3, hoặc 3 trên 5). Vì mỗi quorum đa số đều lớn hơn N/2, hai quorum đa số bất kỳ luôn thỏa |Q₁| + |Q₂| > N — nói cách khác, **hai nhóm đa số bất kỳ luôn giao nhau**. Đây là dạng quorum chặt nhất và là nền cho phần lớn các thuật toán đồng thuận.
+
+Cái giá phải trả: quorum càng lớn thì đảm bảo càng mạnh, nhưng bạn cần càng nhiều thành viên còn sống và độ trễ mỗi thao tác càng cao, vì phải chờ nhiều thành viên trả lời hơn.
+
+Tới đây quorum vẫn chỉ là một bất đẳng thức trừu tượng. Điều thú vị là đúng bất đẳng thức **|Q₁| + |Q₂| > N** đó lại đứng sau hai bài toán tưởng chừng chẳng liên quan của AWS dưới đây. Mỗi bài toán chỉ là một cách **gán** Q₁ và Q₂ vào những vai cụ thể.
+
+---
+
+## 2. Use case 1 — Đọc/ghi đồng thuận (DynamoDB & Aurora)
+
+Bài toán thứ nhất: làm sao để 1 cơ sỡ dữ liệu phân tán đảm bảo được 1 non-functional requirement là người dùng có thể đọc được dữ liệu mới nhất sau khi ghi.
+
+Bạn sẽ gặp tình huống này rất nhiều lần trong thực tế, bạn vừa thêm 1 sản phẩm vào giỏ hàng điện tử, bạn vào giỏ hàng để kiểm tra nhưng không thấy gì, sau khi tải lại giỏ hàng, sản phẩm đó đã xuất hiện.
+
+Bạn chợt nghĩ rằng, chỉ cần thao tác đọc ghi được đồng thuận trên tất cả các node của cơ sỡ dữ liệu phân tán, thì sẽ đảm bảo được người dùng luôn được truy cập dữ liệu mới nhất.
+
+Nhưng quyết định này tăng latency của các thao tác lên rất cao, thay vì chỉ cần đọc ghi trên 1 node, giờ đây các thao tác phải chờ toàn bộ node phản hồi.
+
+Bạn sẽ thay đổi 1 chút, chỉ cần thao tác ghi được đồng thuận trên tất cả các node, thì chỉ cần đọc 1 node bất kỳ, dữ liệu mới nhất luôn được trả về.
+
+Nhưng thay đổi này cũng chỉ giải quyết được latency của read traffic.
+
+Đây là lúc quorum thể hiện sức mạnh của nó.
+
+Ta gán hai quorum ở phần 1 vào vai cụ thể. Quorum thứ nhất là **tập ghi (W)** — số bản sao phải xác nhận đã lưu trước khi báo ghi thành công. Quorum thứ hai là **tập đọc (R)** — số bản sao phải hỏi khi đọc. Ràng buộc giao nhau |Q₁| + |Q₂| > N trở thành công thức kinh điển:
+
+**W + R > N**
+
+Vì tập ghi và tập đọc bắt buộc chung ít nhất một bản sao, lần đọc luôn chạm tới một bản sao đang giữ bản ghi mới nhất. Thêm điều kiện **W > N/2** nữa để hai lần ghi không bao giờ hoàn tất trên hai tập tách rời, tránh ghi đè xung đột.
+
+### DynamoDB
+
+Amazon DynamoDB chia mỗi phần dữ liệu thành **3 bản sao** đặt trên 3 AZ khác nhau, trong đó một bản đóng vai **leader** (bản duy nhất nhận ghi trước rồi lan truyền cho các bản còn lại). Một lần ghi được xác nhận (ack) ngay khi <Tooltip content="Bản ghi nhật ký mô tả một thay đổi dữ liệu, được ghi tuần tự trước khi áp vào bản chính — cơ sở để các bản sao đồng bộ với nhau">log record</Tooltip> được lưu bền trên **2 trong 3** bản sao, tức leader cộng thêm một follower. Đó chính là W = 2 trên N = 3.
+
+Phần đọc có hai chế độ, và đây là điểm bạn cần phân biệt rõ:
+
+- **Strong read** (đọc nhất quán mạnh): luôn đọc từ leader, nên luôn thấy bản ghi mới nhất. Nếu leader không truy cập được thì lần đọc này thất bại.
+- **Eventual read** (đọc nhất quán cuối cùng): đọc từ bất kỳ bản sao nào, nhanh và rẻ hơn, nhưng có thể trả về dữ liệu cũ vài mili-giây nếu trúng bản sao chưa kịp cập nhật.
+
+Một điểm dễ bị hỏi trong kỳ thi: con số **2/3 là chi tiết nội bộ của DynamoDB, bạn không chỉnh được**. Khác với Cassandra hay bản Dynamo gốc (cho bạn tự đặt N, W, R), DynamoDB chỉ cho bạn đúng một công tắc — chọn strong hay eventual read mỗi khi gọi API.
+
+### Aurora
+
+Amazon Aurora đẩy ý tưởng này xa hơn ở tầng lưu trữ. Mỗi mẩu dữ liệu có **6 bản sao** trải trên 3 AZ, 2 bản mỗi AZ. Aurora đặt **write quorum Vw = 4** và **read quorum Vr = 3**, thỏa cả hai điều kiện ở trên: 4 + 3 > 6 và 4 > 6/2. Một lần ghi hoàn tất ngay khi **4/6** bản sao xác nhận. Nhờ vậy Aurora **chịu được mất nguyên một AZ** (2 bản) mà vẫn ghi được, và mất một AZ cộng thêm một bản mà vẫn không mất dữ liệu. Lưu ý Aurora chỉ gửi <Tooltip content="Nhật ký chỉ ghi thêm, mô tả từng thay đổi ở mức vật lý; tầng lưu trữ phát lại log này để tự dựng lại trang dữ liệu">redo log record</Tooltip> xuống 6 bản sao chứ không gửi nguyên trang dữ liệu.
+
+Có một hiểu lầm phổ biến cần đính chính ở đây: ở trạng thái bình thường, **Aurora không thật sự đọc theo quorum**. Con số Vr = 3 tồn tại để bất đẳng thức W + R > N luôn đúng — đó là một ràng buộc thiết kế để hệ thống vẫn an toàn sau sự cố. Nhưng trên đường đọc nóng, Aurora **không gom 3/6 bản sao**: node ghi (writer) biết chính xác bản sao nào đang giữ phiên bản mới nhất của từng block, nên nó đọc thẳng **một** bản sao đó. Read quorum 3/6 chỉ thực sự được dùng khi **phục hồi** — instance khởi động lại, replica được thăng cấp làm writer mới, hay khi cần dựng lại một bản sao đã mất.
+
+Hai dịch vụ, hai cách hiện thực hóa cùng một phép toán giao nhau: DynamoDB dùng **một leader** làm điểm đọc nhất quán; Aurora dùng **một writer + log** rồi đọc thẳng bản sao đã biết là mới nhất.
+
+---
+
+## 3. Use case 2 — Bầu chọn leader
+
+Bài toán thứ hai nghe khác hẳn: trong một cụm, ta cần đúng một node làm **leader** — node điều phối, nơi duy nhất được quyền ghi hoặc ra quyết định. Khi leader chết, cụm phải bầu người thay, nhưng tuyệt đối không được bầu ra hai.
+
+Ngạc nhiên là cùng nguyên lý ở phần 1 giải quyết luôn. Lần này **cả hai quorum là một** — đều là tập phiếu bầu. Một ứng viên chỉ trở thành leader khi gom đủ **đa số** phiếu. Đặt Q₁ = Q₂ = majority vào ràng buộc giao nhau, ta được **M + M > N**, tức mỗi leader cần **M > N/2** phiếu. Với cụm 3 node, ứng viên cần 2 phiếu: phiếu của chính nó cộng một phiếu nữa.
+
+Vì sao điều này chặn được hai leader? Vì hai tập đa số bất kỳ buộc phải chung ít nhất một voter — đúng tính chất giao nhau ở phần 1. Và mỗi voter chỉ bỏ **một phiếu cho mỗi <Tooltip content="Một khoảng thời gian logic có tối đa một leader; mỗi vòng bầu mới làm số term tăng đơn điệu, giúp phân biệt leader cũ và mới">term</Tooltip>**. Một thành viên không thể vừa bỏ phiếu cho ứng viên A vừa cho ứng viên B trong cùng một term; mà hai nhóm đa số lại buộc phải dùng chung ít nhất một voter — nên tối đa chỉ một ứng viên đạt đa số. **Tối đa một leader mỗi term.**
+
+Còn một khe hở thực tế: lúc chuyển giao. Leader cũ có thể chưa biết mình đã bị thay (do mạng trễ) trong khi leader mới vừa lên — trong khoảnh khắc đó, cả hai cùng tưởng mình là sếp. Đây chính là <Tooltip content="Tình huống cụm bị chia đôi và cả hai nửa đều tưởng mình là chính, mỗi nửa một leader cùng nhận ghi — dẫn tới dữ liệu phân kỳ không thể hợp nhất">split-brain</Tooltip>. Cách chặn là <Tooltip content="Quyền làm leader được cấp có thời hạn; phải gia hạn liên tục, hết hạn mà không gia hạn thì coi như mất quyền">lease</Tooltip>: quyền làm leader được cấp có thời hạn, và leader mới phải **chờ lease của leader cũ hết hạn** rồi mới bắt đầu phục vụ ghi. Nhờ vậy không bao giờ có cửa sổ thời gian mà hai leader cùng nhận ghi.
+
+Điều thú vị: đây không phải lý thuyết xa vời. Chính DynamoDB ở phần 2 cũng bầu leader cho mỗi nhóm 3 bản sao đúng theo cách này — leader giữ vai trò nhờ lease, làm tươi bằng heartbeat; khi heartbeat tắt, các bản sao còn lại bầu leader mới. Một nguyên lý quorum chạy cả hai use case.
+
+---
+
+## Kết luận
+
+Quay lại hai câu hỏi mở đầu. Lần đọc trả về đúng bản ghi mới nhất vì tập đọc và tập ghi buộc phải giao nhau. Và cụm không bao giờ có hai sếp vì hai nhóm đa số buộc phải chung ít nhất một lá phiếu. Cùng một nguyên lý giao nhau, hai bài toán.
+
+Những điểm nên ghim lại:
+
+- **Quorum là một nguyên lý trung lập**, không phải bài toán đọc/ghi hay bầu cử. Cốt lõi chỉ là: hai quorum với **|Q₁| + |Q₂| > N** thì luôn giao nhau. Đọc/ghi và bầu leader chỉ là hai cách ứng dụng.
+- **Quorum đa số (> N/2)** đảm bảo hai nhóm đa số bất kỳ luôn giao nhau — nền cho cả nhất quán dữ liệu lẫn bầu đúng một leader.
+- **Đọc/ghi**: gán vai thành **W + R > N**. DynamoDB dùng 3 bản sao, write quorum **2/3** (nội bộ, không chỉnh được), strong read từ leader, eventual read từ bất kỳ bản sao.
+- **Aurora**: write quorum **4/6**, read quorum **3/6**, chịu được một AZ cộng một bản — nhưng đọc thường là đọc thẳng một bản sao đã biết là mới nhất, không phải quorum read.
+- **Bầu leader**: gán vai thành **M + M > N** — đa số phiếu, một phiếu mỗi term, cộng lease để chống split-brain.
+
+Tóm lại, mục đích thật của quorum không phải để hệ thống "luôn sống", mà để **khi nó sống, chỉ có một sự thật duy nhất**.

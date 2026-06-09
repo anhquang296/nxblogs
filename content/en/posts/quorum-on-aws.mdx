@@ -1,0 +1,113 @@
+---
+title: 'Quorum: One Overlap Rule, Two AWS Use Cases'
+date: '2026-06-09'
+tags: ['AWS', 'System Design', 'Distributed Systems', 'SAA']
+description: 'The quorum model — overlapping subsets and majority voting — powers two AWS use cases: read/write consensus in DynamoDB and Aurora, and split-brain-free leader election.'
+enableComment: true
+---
+
+# Quorum: One Overlap Rule, Two AWS Use Cases
+
+You run a datastore of 3 nodes — 3 copies of the same data. An application just wrote a new value, and a moment later another request reads it back. But right then, one node is lagging behind on replication, or an entire <Tooltip content="Availability Zone — one or more independent data centers inside the same AWS region, with separate power and networking so that if one AZ dies the others keep running">AZ</Tooltip> is flickering. How can you be sure that read returns the **latest write** rather than stale data?
+
+And in a problem that sounds completely unrelated: when the node coordinating the cluster dies, how does the cluster elect **exactly one** replacement — and not two nodes both claiming to be in charge, overwriting each other?
+
+Two very different questions, but one idea solves both: **quorum**. At its core, a quorum just forces subsets to **overlap** — so that any two operations always "meet" on at least one shared member.
+
+<ExcalidrawDiagram
+  src="/quorum-overview.excalidraw"
+  alt="The quorum principle — any two quorums of a group of N members must overlap when their sizes sum to more than N (W + R > N, 2 + 2 > 3), previewing two AWS use cases: consensus read/write and leader election"
+/>
+
+---
+
+## 1. How Quorum Works
+
+Before touching AWS, let's strip quorum away from any specific problem — because quorum itself is **not** about reading/writing or voting. It's just a counting principle.
+
+**Quorum** is originally a word from meetings: the **minimum number of members who must be present for a body to make a valid decision**. A 9-person board might set its quorum at 5 — with fewer than 5 present, any vote is void; but once 5 are there, their decision stands for the whole board, even if the 4 absentees would later object. The key idea: a large-enough agreeing group can represent the whole body — you don't need everyone.
+
+Carry that idea into distributed systems: the "members" are now nodes or data copies, and "making a decision" means performing an operation — a read, a write, or a leader election. The pure setup: you have a group of **N** members, and a **quorum** is the minimum number of members that must take part for an operation to be considered valid. You don't need to ask all N — one quorum is enough.
+
+So what is a quorum for? It all comes down to a single property: **overlap**.
+
+Take any two quorums Q₁ and Q₂ drawn from the same group of N members. If **|Q₁| + |Q₂| > N**, the two sets **are guaranteed to share at least one member**. The reason is everyday math — the pigeonhole principle: if the two sets were completely disjoint, their total size could be at most N; but we assumed the total is greater than N, so they must overlap.
+
+That shared member is the **bridge**: it witnessed the first operation, so when the second operation reaches it, the information carries over. No operation can "slip past" and miss the one before it. With N = 3, two quorums of size 2 are enough: 2 + 2 = 4 > 3, so any two 2-member sets over 3 nodes always collide. Conversely, if each quorum had size 1, then 1 + 1 = 2 ≤ 3 — you could pick node A for one and node B for the other, two sets that slip right past each other with nothing in common; that's exactly why the **> N** threshold is the minimum, and below it nothing is guaranteed.
+
+The most widely used case is the **majority quorum** — a set larger than half, i.e. ⌊N/2⌋ + 1 (for example 2 of 3, or 3 of 5). Since every majority quorum is larger than N/2, any two majority quorums satisfy |Q₁| + |Q₂| > N — in other words, **any two majority groups always overlap**. This is the tightest form of quorum and the foundation of most consensus algorithms.
+
+The cost: the larger the quorum, the stronger the guarantee, but the more live members you need and the higher the latency of each operation, since you wait for more members to respond.
+
+So far quorum is just an abstract inequality. The interesting part is that this very inequality — **|Q₁| + |Q₂| > N** — sits behind two seemingly unrelated AWS problems below. Each problem is simply a way of **assigning** Q₁ and Q₂ to concrete roles.
+
+---
+
+## 2. Use Case 1 — Read/Write Consensus (DynamoDB & Aurora)
+
+<ExcalidrawDiagram
+  src="/quorum-read-write-aws.excalidraw"
+  alt="Quorum read/write consensus on AWS — DynamoDB with 3 replicas across 3 AZs and a write quorum of 2 of 3, strong reads from the leader and eventual reads from any replica; Aurora with 6 storage copies across 3 AZs, write quorum 4/6 and read quorum 3/6"
+/>
+
+The first problem: data is replicated into N copies for fault tolerance, but how do you make sure a read always sees the latest write?
+
+This is where we assign the two quorums from Section 1 to concrete roles. The first quorum is the **write set (W)** — the number of copies that must confirm the write before it's reported successful. The second is the **read set (R)** — the number of copies you query on a read. The overlap constraint |Q₁| + |Q₂| > N becomes the classic formula:
+
+**W + R > N**
+
+Because the write set and read set are forced to share at least one copy, a read always touches a copy holding the latest write. Add one more condition — **W > N/2** — so that two writes can never complete on two disjoint sets, preventing conflicting overwrites.
+
+### DynamoDB
+
+Amazon DynamoDB splits each piece of data into **3 replicas** placed across 3 different AZs, with one replica acting as the **leader** (the only copy that takes a write first, then propagates it to the others). A write is acknowledged as soon as the <Tooltip content="A log entry describing a data change, written sequentially before being applied to the main copy — the basis for keeping replicas in sync">log record</Tooltip> is durably stored on **2 of the 3** replicas, i.e. the leader plus one follower. That's W = 2 out of N = 3.
+
+Reads come in two modes, and this is the distinction you need to be clear on:
+
+- **Strong read** (strongly consistent): always served from the leader, so it always sees the latest write. If the leader is unreachable, this read fails.
+- **Eventual read** (eventually consistent): served from any replica, faster and cheaper, but may return data that is a few milliseconds stale if it hits a replica that hasn't caught up.
+
+A common exam point: the **2/3 figure is an internal detail of DynamoDB; you can't tune it**. Unlike Cassandra or the original Dynamo (which let you set N, W, R yourself), DynamoDB gives you exactly one switch — choosing strong vs eventual read on each API call.
+
+### Aurora
+
+Amazon Aurora pushes the same idea further at the storage layer. Each piece of data has **6 copies** spread across 3 AZs, 2 copies per AZ. Aurora sets a **write quorum Vw = 4** and a **read quorum Vr = 3**, satisfying both conditions above: 4 + 3 > 6 and 4 > 6/2. A write completes as soon as **4 of 6** copies confirm. As a result Aurora **survives the loss of an entire AZ** (2 copies) and still accepts writes, and survives an AZ plus one extra copy without losing data. Note that Aurora ships only <Tooltip content="An append-only log describing each change at the physical level; the storage layer replays this log to rebuild data pages on its own">redo log records</Tooltip> to the 6 copies rather than full data pages.
+
+There's a common misconception worth correcting here: in steady state, **Aurora doesn't really do quorum reads**. The Vr = 3 figure exists so that the inequality W + R > N always holds — a design constraint that keeps the system safe after failures. But on the hot read path, Aurora **doesn't gather 3 of 6 copies**: the writer knows exactly which copy holds the latest version of each block, so it reads straight from that **single** copy. The 3/6 read quorum only really kicks in during **recovery** — an instance restarting, a replica being promoted to a new writer, or a lost copy being rebuilt.
+
+Two services, two ways of realizing the same overlap math: DynamoDB uses **a single leader** as the consistent read point; Aurora uses **a single writer + log** and reads straight from the copy it already knows is current.
+
+---
+
+## 3. Use Case 2 — Leader Election
+
+<ExcalidrawDiagram
+  src="/quorum-leader-election.excalidraw"
+  alt="Leader election by majority quorum — a candidate needs a majority of votes to become leader, two majorities must share at least one voter so at most one leader exists per term, and leases prevent split-brain during handover"
+/>
+
+The second problem sounds entirely different: in a cluster, we need exactly one node to be the **leader** — the coordinating node, the only one allowed to write or make decisions. When the leader dies, the cluster must elect a replacement, but it must never elect two.
+
+Surprisingly, the same principle from Section 1 solves it. This time **both quorums are one and the same** — the set of votes. A candidate becomes leader only by collecting a **majority** of votes. Setting Q₁ = Q₂ = majority into the overlap constraint gives **M + M > N**, i.e. each leader needs **M > N/2** votes. In a 3-node cluster, a candidate needs 2 votes: its own plus one more.
+
+Why does this prevent two leaders? Because any two majority sets are forced to share at least one voter — exactly the overlap property from Section 1. And each voter casts **only one vote per <Tooltip content="A logical time period with at most one leader; each new election round increments the term monotonically, distinguishing old leaders from new ones">term</Tooltip>**. A member can't vote for both candidate A and candidate B in the same term; yet two majorities must share at least one voter — so at most one candidate can reach a majority. **At most one leader per term.**
+
+There's one practical gap left: the handover. The old leader may not yet know it's been replaced (due to network delay) while the new leader has just come up — in that instant, both think they're in charge. This is exactly <Tooltip content="A situation where the cluster splits in two and each half believes it is the primary, each with its own leader accepting writes — leading to diverging data that can't be reconciled">split-brain</Tooltip>. The fix is a <Tooltip content="A time-bounded grant of leadership; it must be continuously renewed, and if it expires without renewal the holder is considered to have lost leadership">lease</Tooltip>: leadership is granted for a limited time, and the new leader must **wait for the old leader's lease to expire** before it starts serving writes. That way there's never a window in which two leaders both accept writes.
+
+The interesting part: this isn't distant theory. DynamoDB from Section 2 elects a leader for each group of 3 replicas in exactly this way — the leader holds its role via a lease, refreshed by heartbeats; when the heartbeats stop, the remaining replicas elect a new leader. One quorum principle running both use cases.
+
+---
+
+## Conclusion
+
+Back to the two opening questions. The read returns the latest write because the read set and the write set are forced to overlap. And the cluster never has two bosses because any two majority groups are forced to share at least one vote. One overlap principle, two problems.
+
+Key takeaways:
+
+- **Quorum is a neutral principle**, not a read/write or voting problem. The core is simply: two quorums with **|Q₁| + |Q₂| > N** always overlap. Read/write and leader election are just two applications.
+- **A majority quorum (> N/2)** guarantees that any two majority groups always overlap — the foundation for both data consistency and electing exactly one leader.
+- **Read/write**: assign the roles as **W + R > N**. DynamoDB uses 3 replicas, a write quorum of **2/3** (internal, not tunable), strong reads from the leader, eventual reads from any replica.
+- **Aurora**: write quorum **4/6**, read quorum **3/6**, surviving an AZ plus one copy — but a normal read goes straight to a single copy it already knows is current, not a quorum read.
+- **Leader election**: assign the roles as **M + M > N** — majority votes, one vote per term, plus a lease to prevent split-brain.
+
+In short, the real purpose of a quorum isn't to keep the system "always alive," but to ensure that **when it's alive, there is exactly one truth**.
