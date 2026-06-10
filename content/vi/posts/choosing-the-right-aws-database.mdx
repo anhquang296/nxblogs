@@ -1,0 +1,232 @@
+---
+title: 'AWS Database: Chọn Đúng Loại Cho Kỳ Thi SAA'
+date: '2026-06-10'
+tags: ['AWS', 'Database', 'SAA']
+description: 'Nhận diện nhanh keyword trong đề thi SAA để chọn đúng database: RDS, Aurora, ElastiCache, DynamoDB, S3, DocumentDB, Neptune, Keyspaces, Timestream.'
+enableComment: true
+---
+
+# AWS Database: Chọn Đúng Loại Cho Kỳ Thi SAA
+
+Trong phòng thi SAA, một câu hỏi về database thường không kiểm tra bạn có cấu hình được service hay không — nó kiểm tra bạn có nhận ra đúng **hình dạng dữ liệu** mà đề đang mô tả hay không. Đề ném ra vài keyword — "đồ thị quan hệ", "sub-millisecond", "MongoDB", "dữ liệu IoT theo thời gian" — và gần như luôn có **đúng một service** là đáp án.
+
+Bạn chỉ có khoảng 90 giây mỗi câu, nên việc nhận diện phải gần như là phản xạ. Bài viết này là tấm bản đồ nhận diện đó: với mỗi service, mình tóm tắt feature cốt lõi, use case, và quan trọng nhất — các **keyword "tố cáo"** nó trong đề.
+
+> **Lưu ý quan trọng:** Đây chỉ là các nhận biết **cơ bản** để chọn nhanh đáp án trong phòng thi. Ngoài thực tế, việc chọn database cần cân nhắc kỹ hơn nhiều: bài toán thực sự đang giải quyết vấn đề gì (access pattern, yêu cầu về consistency / độ trễ / quy mô), **trade-off** giữa các phương án (chi phí, gánh nặng vận hành, lock-in, hiệu năng), và **sự phù hợp với nguồn lực của đội phát triển** (ai sẽ vận hành và bảo trì). Một keyword hiếm khi ánh xạ tới đúng một lựa chọn "chuẩn production" như cách nó ánh xạ trong đề thi.
+
+---
+
+## 1. Amazon RDS — Cơ sở dữ liệu quan hệ được quản lý
+
+Cơ sở dữ liệu quan hệ (relational database) tổ chức dữ liệu thành các bảng có schema cố định, các bảng liên kết với nhau qua khóa ngoại, truy vấn bằng SQL và đảm bảo tính <Tooltip content="Atomicity, Consistency, Isolation, Durability — bộ tính chất đảm bảo giao dịch chạy trọn vẹn hoặc không chạy gì cả, dữ liệu luôn nhất quán">ACID</Tooltip>. RDS là dịch vụ AWS quản lý sẵn các engine quan hệ phổ biến, bạn không phải tự cài đặt và vận hành.
+
+- Quản lý 6 engine: PostgreSQL, MySQL, MariaDB, Oracle, SQL Server, IBM DB2.
+- Chạy trên instance + EBS bạn tự chọn cấu hình, EBS **tự auto-scale** khi gần đầy.
+- <Tooltip content="Multi Availability Zone — bản sao đồng bộ ở một AZ khác, tự động failover khi primary chết, dùng cho tính sẵn sàng cao">Multi-AZ</Tooltip> cho High Available, và Read Replica cho mở rộng khả năng đọc (bản sao bất đồng bộ).
+- Bảo mật: IAM, Security Group, KMS, SSL/TLS; hỗ trợ IAM authentication và tích hợp Secrets Manager.
+- Sao lưu tự động + <Tooltip content="Point-in-time Restore — khôi phục dữ liệu về một thời điểm bất kỳ trong quá khứ, ở đây tối đa 35 ngày">PITR</Tooltip> tới 35 ngày, hoặc tạo snapshot thủ công cho lưu trữ dài hạn.
+- Bảo trì có lịch (có downtime)
+- RDS Custom cho phép truy cập OS bên dưới (Oracle & SQL Server).
+
+**Use case:** Lưu dữ liệu quan hệ, chạy SQL query, transaction — workload <Tooltip content="Online Transaction Processing — xử lý nhiều giao dịch nhỏ, đọc/ghi liên tục theo thời gian thực, ví dụ đặt hàng, thanh toán">OLTP</Tooltip> điển hình.
+
+**Keyword nhận diện:** `relational`, `SQL`, `transaction`, `ACID`, `join`, hoặc tên một engine cụ thể (MySQL / PostgreSQL / Oracle / SQL Server).
+
+---
+
+## 2. Amazon Aurora — Relational "đám mây hóa", hiệu năng cao
+
+Aurora cũng là database quan hệ và **tương thích API** với PostgreSQL/MySQL (code cũ chạy gần như không phải sửa), nhưng được AWS thiết kế lại cho cloud bằng cách **tách rời storage và compute**.
+
+- Tương thích PostgreSQL/MySQL; hiệu năng cao hơn RDS thường (AWS công bố ~5x MySQL, ~3x PostgreSQL).
+- Storage tự nhân thành **6 bản trên 3 AZ**, tự lành (self-healing), tự auto-scale (tới 128 TB) — không cần provision dung lượng trước.
+- Cluster có **writer endpoint** và **reader endpoint** (tự cân tải qua tối đa **15 read replica**).
+- <Tooltip content="Aurora Serverless — chế độ tự tăng/giảm compute theo tải, không cần ước lượng capacity trước, phù hợp tải thất thường">Aurora Serverless</Tooltip> cho workload thất thường, không cần ước lượng capacity.
+- **Aurora Global Database**: nhân bản sang region khác với độ trễ **< 1 giây** — phục vụ người dùng toàn cầu và giải quyết bài toán disaster recovery. Tối đa 16 read replicas trong 1 region, ngoại trừ primary region (đã mất 1 slot cho master instance).
+- Database Cloning (tạo cluster mới gần như tức thì), Backtrack (tua ngược thời gian).
+
+**Use case:** Giống RDS, nhưng khi cần hiệu năng cao hơn, ít vận hành hơn, HA mạnh hơn, hoặc quy mô global.
+
+**Keyword nhận diện:** `tương thích MySQL/PostgreSQL`, `hiệu năng cao / 5x`, `global database`, `cross-region < 1s`, `serverless relational`, `15 read replica`, `auto-scaling storage`.
+
+---
+
+## 3. Amazon ElastiCache — Cache trong bộ nhớ
+
+<Tooltip content="In-memory data store — lưu dữ liệu trong RAM thay vì ổ đĩa, nên truy xuất cực nhanh nhưng đắt và kém bền vững hơn">Kho dữ liệu in-memory</Tooltip> lưu dữ liệu trong RAM thay vì ổ đĩa, nên đọc/ghi cực nhanh (sub-millisecond) nhưng dung lượng đắt và không bền vững như đĩa. ElastiCache là dịch vụ quản lý cho Redis và Memcached.
+
+- Managed Redis / Memcached, độ trễ **sub-millisecond**.
+- Redis hỗ trợ clustering, Multi-AZ, read replica (sharding).
+- Bảo mật: IAM, Security Group, KMS, Redis Auth.
+- Backup / snapshot / PITR (với Redis).
+- **Cần sửa code ứng dụng** mới tận dụng được (app phải chủ động đọc/ghi cache).
+
+**Use case:** Cache kết quả query DB tốn kém, lưu session, key/value đọc nhiều ghi ít, bảng xếp hạng (Redis sorted set), pub/sub.
+
+**Keyword nhận diện:** "in-memory", "sub-millisecond", "cache", "giảm tải cho DB", "session store", "Redis / Memcached", "leaderboard".
+
+---
+
+## 4. Amazon DynamoDB — NoSQL key-value serverless
+
+<Tooltip content="NoSQL — nhóm database không theo mô hình bảng quan hệ, thường hy sinh join/transaction phức tạp để đổi lấy khả năng mở rộng ngang và hiệu năng cao">NoSQL</Tooltip> dạng key-value lưu dữ liệu thành cặp khóa–giá trị, không có schema cố định, đánh đổi join phức tạp để lấy khả năng mở rộng ngang gần như vô hạn. DynamoDB là NoSQL độc quyền của AWS, hoàn toàn **serverless**.
+
+- Serverless
+- Độ trễ **single-digit millisecond** ở mọi quy mô dữ liệu.
+- Hai chế độ capacity: provisioned with auto-scaling hoặc on-demand.
+- Multi-AZ mặc định
+- Hỗ trợ transaction
+- Tách biệt đọc và ghi.
+- <Tooltip content="DynamoDB Accelerator — lớp cache trong bộ nhớ đặt trước DynamoDB, đẩy độ trễ đọc xuống mức micro-giây">DAX</Tooltip> — cache trong bộ nhớ, đẩy độ trễ đọc xuống **micro-giây**.
+- DynamoDB Streams (kích hoạt Lambda / Kinesis), natural CDC.
+- Global Tables (active-active đa region).
+- **TTL** tự xóa item hết hạn
+- Backup PITR 35 ngày + on-demand
+- Export/Import S3.
+
+**Use case:** Ứng dụng serverless quy mô lớn, key/value, lưu session (dùng TTL), cache phân tán, document nhỏ (vài trăm KB), schema thay đổi nhanh.
+
+**Keyword nhận diện:** "serverless NoSQL", "key-value", "single-digit millisecond", "hàng triệu request / massive scale", "không quản lý server", "global table active-active", "micro-giây → DAX", "schemaless".
+
+---
+
+## 5. Amazon S3 — Lưu trữ đối tượng (object storage)
+
+<Tooltip content="Object storage — lưu mỗi file như một đối tượng gồm dữ liệu + metadata, định danh bằng key và truy cập qua API/HTTP, khác với block storage hay file storage">Object storage</Tooltip> lưu mỗi file như một "đối tượng" (dữ liệu + metadata) định danh bằng key, truy cập qua API/HTTP. S3 mở rộng gần như vô hạn.
+
+- Kho key/value cho object (khái niệm folder chỉ là visualize)
+- Độ bền cao **11 số 9** (99.999999999%)
+- Kích thước object tối đa **5 TB**.
+- Nhiều storage class (Standard, Standard-IA, Intelligent-Tiering, Glacier...) + lifecycle policy tự chuyển tầng (chỉ 1 chiều từ tier cao xuống tier thấp).
+- Versioning, mã hóa (SSE-S3/KMS/C, client-side, TLS), replication, MFA-Delete, access log.
+- Bảo mật: IAM, Bucket Policy, ACL, Access Points, Object Lock, CORS.
+- Multipart upload
+- Transfer Acceleration
+- S3 Select
+- Event Notification (SNS/SQS/Lambda/EventBridge)
+- Static web hosting
+
+**Use case:** File tĩnh, object lớn, data lake, backup, hosting website tĩnh, media. **Không** hợp với hàng triệu object siêu nhỏ cần tra cứu kiểu key-value độ trễ thấp (dùng DynamoDB).
+
+**Keyword nhận diện:** "object / file", "static asset", "data lake", "lưu file lớn", "website tĩnh", "lưu trữ không giới hạn", "độ bền cao".
+
+---
+
+## 6. Amazon DocumentDB — Cơ sở dữ liệu document (tương thích MongoDB)
+
+<Tooltip content="Document database — lưu dữ liệu thành các document dạng JSON linh hoạt, có thể lồng nhau và không cần schema cố định, hợp với dữ liệu bán cấu trúc">Document database</Tooltip> lưu dữ liệu thành các document dạng JSON linh hoạt (lồng nhau, không schema cố định) — hợp với dữ liệu bán cấu trúc. DocumentDB là dịch vụ quản lý **tương thích MongoDB**, với kiến trúc storage kiểu Aurora.
+
+- Tương thích MongoDB (chạy app/driver MongoDB hiện có).
+- Storage tự nhân 6 bản trên 3 AZ, auto-scale theo bước 10 GB tới 64 TB.
+- Fully managed: backup, PITR, read replica.
+- Tự động scale tới workload **hàng triệu request/giây**.
+
+**Use case:** Workload MongoDB, dữ liệu JSON / bán cấu trúc, catalog sản phẩm, hồ sơ người dùng, hệ quản trị nội dung (CMS).
+
+**Keyword nhận diện:** "MongoDB", "document", "JSON", "BSON".
+
+---
+
+## 7. Amazon Neptune — Cơ sở dữ liệu đồ thị (graph)
+
+<Tooltip content="Graph database — lưu dữ liệu thành các node (thực thể) và edge (quan hệ), tối ưu cho việc duyệt qua dữ liệu liên kết chằng chịt, nơi bản thân quan hệ là thứ cần truy vấn nhanh">Graph database</Tooltip> lưu dữ liệu thành các **node** (thực thể) và **edge** (quan hệ), tối ưu cho việc duyệt dữ liệu liên kết chằng chịt — nơi bản thân "quan hệ" mới là thứ cần truy vấn nhanh. Neptune là graph DB được AWS quản lý.
+
+- Hỗ trợ Property Graph (truy vấn bằng <Tooltip content="Gremlin / openCypher — các ngôn ngữ truy vấn đồ thị dùng để duyệt node và edge theo quan hệ">Gremlin / openCypher</Tooltip>) và RDF (truy vấn bằng SPARQL).
+- Storage 6 bản trên 3 AZ, tối đa 15 read replica; HA cao.
+- Lưu tới **hàng tỷ quan hệ (relationships)**, truy vấn đồ thị với độ trễ **mili-giây**.
+- Fully managed.
+
+**Use case:** Mạng xã hội, gợi ý (recommendation), phát hiện gian lận (fraud detection), knowledge graph, bản đồ quan hệ mạng/hạ tầng.
+
+**Keyword nhận diện:** "graph", "quan hệ / relationships", "social network", "recommendation engine", "fraud detection", "dữ liệu liên kết chằng chịt", "knowledge graph".
+
+---
+
+## 8. Amazon Keyspaces — Wide-column (tương thích Cassandra)
+
+<Tooltip content="Wide-column store — tổ chức dữ liệu thành bảng có hàng và các cột động (column family), thiết kế cho throughput ghi cực lớn và mở rộng ngang">Wide-column store</Tooltip> tổ chức dữ liệu thành bảng có hàng và các cột động (column family), thiết kế cho throughput ghi cực lớn và mở rộng ngang. Keyspaces là dịch vụ quản lý **tương thích Apache Cassandra**.
+
+- Tương thích Apache Cassandra, truy vấn bằng <Tooltip content="Cassandra Query Language — ngôn ngữ truy vấn của Cassandra, cú pháp giống SQL nhưng dành cho mô hình wide-column">CQL</Tooltip>.
+- Serverless, auto-scaling; nhân bản 3 AZ; on-demand hoặc provisioned.
+- Độ trễ **single-digit millisecond** ở mọi quy mô, hàng nghìn request/giây.
+- PITR; fully managed (không phải tự vận hành cụm Cassandra).
+
+**Use case:** Workload Cassandra, dữ liệu ghi khối lượng lớn (IoT, dữ liệu time-series, quản lý đội xe/fleet, log, messaging).
+
+**Keyword nhận diện:** "Cassandra", "CQL", "wide-column", "managed Apache Cassandra".
+
+---
+
+## 9. Amazon Timestream — Cơ sở dữ liệu chuỗi thời gian (time-series)
+
+<Tooltip content="Time-series database — tối ưu cho dữ liệu gắn mốc thời gian (giá trị đo theo thời gian), ghi nối đuôi cực nhanh và truy vấn theo khoảng thời gian hiệu quả">Time-series database</Tooltip> tối ưu cho dữ liệu gắn mốc thời gian (giá trị đo theo thời gian) — ghi nối đuôi (append) cực nhanh, truy vấn theo khoảng thời gian và gộp mẫu (downsampling) hiệu quả. Timestream là time-series DB serverless của AWS.
+
+- Serverless, auto-scaling; nạp được hàng nghìn tỷ sự kiện mỗi ngày.
+- Nhanh hơn ~**1000x** và chi phí chỉ ~**1/10** so với relational database.
+- Tự phân tầng: dữ liệu gần đây ở tầng bộ nhớ, dữ liệu cũ ở tầng tối ưu chi phí (cấu hình retention).
+- Hàm phân tích time-series tích hợp (nội suy, làm mượt); truy vấn bằng SQL.
+
+**Use case:** Dữ liệu cảm biến IoT, metric vận hành/ứng dụng, phân tích thời gian thực theo thời gian.
+
+**Keyword nhận diện:** "time series", "dữ liệu IoT", "metric theo thời gian", "sensor / telemetry".
+
+---
+
+## Bảng so sánh nhanh 9 service
+
+| Service     | Mô hình dữ liệu | Điểm nhận diện cốt lõi                      | Use case chính                       |
+| ----------- | --------------- | ------------------------------------------ | ------------------------------------ |
+| RDS         | Quan hệ (SQL)   | Relational managed, đa engine              | OLTP, transaction, SQL               |
+| Aurora      | Quan hệ (SQL)   | Cloud-native, hiệu năng cao, global        | OLTP cần hiệu năng / HA / global     |
+| ElastiCache | In-memory cache | Sub-millisecond, Redis/Memcached           | Cache, session, leaderboard          |
+| DynamoDB    | NoSQL key-value | Serverless, single-digit ms, massive scale | App serverless quy mô lớn            |
+| S3          | Object storage  | Object tới 5 TB, độ bền 11 số 9            | File/object lớn, data lake, web tĩnh |
+| DocumentDB  | Document        | Tương thích MongoDB                         | Dữ liệu JSON / bán cấu trúc          |
+| Neptune     | Graph           | Node + edge, Gremlin/SPARQL                | Quan hệ chằng chịt, fraud, gợi ý     |
+| Keyspaces   | Wide-column     | Tương thích Cassandra, CQL                  | Ghi khối lượng lớn                   |
+| Timestream  | Time-series     | Dữ liệu theo thời gian, serverless         | IoT, metric                          |
+
+---
+
+## Tips & Tricks — Nhận diện keyword và chọn service
+
+Đây là phần quan trọng nhất khi đi thi. Đọc đề, bắt keyword, ánh xạ thẳng sang service.
+
+### Theo mô hình dữ liệu
+
+| Đề nhắc tới...                                                  | Chọn               |
+| -------------------------------------------------------------- | ------------------ |
+| Quan hệ, SQL, transaction, join, ACID                          | RDS (hoặc Aurora)  |
+| Tương thích MySQL/PostgreSQL + hiệu năng cao / global / serverless | Aurora         |
+| Document, JSON, MongoDB                                         | DocumentDB         |
+| Key-value, NoSQL, serverless, schemaless                       | DynamoDB           |
+| Graph, quan hệ, social network, recommendation, fraud detection| Neptune            |
+| Cassandra, CQL, wide-column                                    | Keyspaces          |
+| Time-series, IoT, metric/sensor theo thời gian                 | Timestream         |
+| Object, file, static asset, data lake, file lớn, web tĩnh      | S3                 |
+
+### Theo hiệu năng / độ trễ
+
+| Đề nhắc tới...                                  | Chọn              |
+| ---------------------------------------------- | ----------------- |
+| In-memory, sub-millisecond, cache kết quả SQL   | ElastiCache       |
+| Độ trễ đọc micro-giây (microsecond)             | DynamoDB + DAX    |
+| Single-digit millisecond ở quy mô cực lớn       | DynamoDB          |
+
+### Theo vận hành
+
+| Đề nhắc tới...                                              | Chọn        |
+| ---------------------------------------------------------- | ----------- |
+| Relational nhưng serverless / global / 15 read replica / 5x | Aurora      |
+| MongoDB được quản lý                                       | DocumentDB  |
+| Cassandra được quản lý                                     | Keyspaces   |
+
+---
+
+## Kết lại
+
+Một câu để nhớ:
+
+> **Nhận ra hình dạng dữ liệu trước, service sẽ tự lộ ra.**
+
+Trong phòng thi, phản xạ keyword → service giúp bạn tiết kiệm thời gian quý giá. Nhưng đừng mang nguyên phản xạ đó ra đời thực — ở đó, câu hỏi đúng không phải "service nào khớp keyword", mà "đánh đổi nào chấp nhận được cho bài toán và cho đội của mình".

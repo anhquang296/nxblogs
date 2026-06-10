@@ -1,0 +1,232 @@
+---
+title: 'AWS Databases: Picking the Right One for the SAA Exam'
+date: '2026-06-10'
+tags: ['AWS', 'Database', 'SAA']
+description: 'Recognize the keywords in SAA exam questions to pick the right database fast: RDS, Aurora, ElastiCache, DynamoDB, S3, DocumentDB, Neptune, Keyspaces, Timestream.'
+enableComment: true
+---
+
+# AWS Databases: Picking the Right One for the SAA Exam
+
+In the SAA exam, a database question usually isn't testing whether you can configure a service — it's testing whether you can recognize the **shape of the data** the question describes. The prompt drops a few keywords — "graph of relationships", "sub-millisecond", "MongoDB", "time-series IoT data" — and almost always there's **exactly one service** that's the intended answer.
+
+You get roughly 90 seconds per question, so recognition has to be nearly reflexive. This article is that recognition map: for each service I summarize the core features, the use case, and most importantly — the **keywords that give it away** in the prompt.
+
+> **Important note:** These are only **basic** cues for quickly picking an answer under exam pressure. In the real world, choosing a database demands far more thought: what problem you're actually solving (access patterns, consistency / latency / scale requirements), the **trade-offs** between candidates (cost, operational burden, lock-in, performance), and the **fit with your team's resources** (who will operate and maintain it). A keyword rarely maps to exactly one production-correct choice the way it does on the exam.
+
+---
+
+## 1. Amazon RDS — Managed Relational Database
+
+A relational database organizes data into tables with a fixed schema, links tables via foreign keys, queries with SQL, and guarantees <Tooltip content="Atomicity, Consistency, Isolation, Durability — the set of properties ensuring a transaction either runs completely or not at all, keeping data consistent">ACID</Tooltip> transactions. RDS is AWS's managed offering for the popular relational engines, so you don't install and operate them yourself.
+
+- Manages 6 engines: PostgreSQL, MySQL, MariaDB, Oracle, SQL Server, IBM DB2.
+- Runs on an instance + EBS volume you size yourself; the EBS volume **auto-scales** as it fills up.
+- <Tooltip content="Multi Availability Zone — a synchronous copy in another AZ that auto-fails-over when the primary dies, used for high availability">Multi-AZ</Tooltip> for high availability, and Read Replicas for read scaling (asynchronous copies).
+- Security: IAM, Security Groups, KMS, SSL/TLS; supports IAM authentication and Secrets Manager integration.
+- Automated backups + <Tooltip content="Point-in-time Restore — restore data to any moment in the past, here up to 35 days back">PITR</Tooltip> up to 35 days, or manual snapshots for long-term retention.
+- Managed, scheduled maintenance (with downtime).
+- RDS Custom gives OS-level access to the underlying instance (Oracle & SQL Server).
+
+**Use case:** Store relational data, run SQL queries and transactions — the classic <Tooltip content="Online Transaction Processing — handling many small transactions with continuous real-time reads/writes, e.g. orders, payments">OLTP</Tooltip> workload.
+
+**Keywords:** `relational`, `SQL`, `transaction`, `ACID`, `join`, or a specific engine name (MySQL / PostgreSQL / Oracle / SQL Server).
+
+---
+
+## 2. Amazon Aurora — Cloud-Native Relational, High Performance
+
+Aurora is also a relational database and is **API-compatible** with PostgreSQL/MySQL (existing code runs with almost no changes), but AWS re-engineered it for the cloud by **separating storage from compute**.
+
+- PostgreSQL/MySQL-compatible; higher performance than standard RDS (AWS claims ~5x MySQL, ~3x PostgreSQL).
+- Storage is replicated into **6 copies across 3 AZs**, self-healing, and auto-scaling (up to 128 TB) — no need to provision capacity up front.
+- The cluster exposes a **writer endpoint** and a **reader endpoint** (load-balanced across up to **15 read replicas**).
+- <Tooltip content="Aurora Serverless — automatically scales compute up and down with load, no need to estimate capacity in advance, ideal for unpredictable traffic">Aurora Serverless</Tooltip> for unpredictable workloads, no capacity planning.
+- **Aurora Global Database**: replicates to another region with **< 1 second** lag — serve global users and solve disaster recovery. Up to 16 read replicas per region, except the primary region (which gives up one slot to the master instance).
+- Database Cloning (a near-instant new cluster), Backtrack (rewind in time).
+
+**Use case:** Same as RDS, but when you need higher performance, less operational overhead, stronger HA, or global scale.
+
+**Keywords:** `MySQL/PostgreSQL-compatible`, `high performance / 5x`, `global database`, `cross-region < 1s`, `serverless relational`, `15 read replicas`, `auto-scaling storage`.
+
+---
+
+## 3. Amazon ElastiCache — In-Memory Cache
+
+An <Tooltip content="In-memory data store — keeps data in RAM instead of on disk, so access is extremely fast but more expensive and less durable">in-memory data store</Tooltip> keeps data in RAM instead of on disk, so reads/writes are extremely fast (sub-millisecond) but capacity is expensive and not as durable as disk. ElastiCache is the managed service for Redis and Memcached.
+
+- Managed Redis / Memcached, **sub-millisecond** latency.
+- Redis supports clustering, Multi-AZ, read replicas (sharding).
+- Security: IAM, Security Groups, KMS, Redis Auth.
+- Backup / snapshot / PITR (with Redis).
+- **Requires application code changes** to leverage (the app must actively read/write the cache).
+
+**Use case:** Cache the results of expensive DB queries, store sessions, key/value with frequent reads and few writes, leaderboards (Redis sorted sets), pub/sub.
+
+**Keywords:** "in-memory", "sub-millisecond", "cache", "offload the DB", "session store", "Redis / Memcached", "leaderboard".
+
+---
+
+## 4. Amazon DynamoDB — Serverless NoSQL Key-Value
+
+A <Tooltip content="NoSQL — a family of databases that don't follow the relational table model, usually trading complex joins/transactions for horizontal scalability and high performance">NoSQL</Tooltip> key-value store keeps data as key–value pairs with no fixed schema, trading complex joins for near-unlimited horizontal scale. DynamoDB is AWS's proprietary NoSQL database, fully **serverless**.
+
+- Serverless.
+- **Single-digit millisecond** latency at any data scale.
+- Two capacity modes: provisioned with auto-scaling, or on-demand.
+- Multi-AZ by default.
+- Supports transactions.
+- Reads and writes are decoupled.
+- <Tooltip content="DynamoDB Accelerator — an in-memory cache layer in front of DynamoDB that drops read latency to the microsecond range">DAX</Tooltip> — an in-memory cache that drops read latency to **microseconds**.
+- DynamoDB Streams (trigger Lambda / Kinesis), a natural CDC.
+- Global Tables (active-active, multi-region).
+- **TTL** auto-deletes expired items.
+- PITR backups for 35 days + on-demand.
+- Export/Import to S3.
+
+**Use case:** Serverless apps at large scale, key/value, session storage (via TTL), distributed cache, small documents (hundreds of KB), rapidly evolving schemas.
+
+**Keywords:** "serverless NoSQL", "key-value", "single-digit millisecond", "millions of requests / massive scale", "no servers to manage", "global table active-active", "microsecond → DAX", "schemaless".
+
+---
+
+## 5. Amazon S3 — Object Storage
+
+<Tooltip content="Object storage — stores each file as an object made of data + metadata, identified by a key and accessed over an API/HTTP, unlike block storage or file storage">Object storage</Tooltip> stores each file as an "object" (data + metadata) identified by a key, accessed over an API/HTTP. S3 scales virtually infinitely.
+
+- A key/value store for objects (the "folder" concept is just a visualization).
+- **Eleven 9s** of durability (99.999999999%).
+- Max object size **5 TB**.
+- Multiple storage classes (Standard, Standard-IA, Intelligent-Tiering, Glacier...) + lifecycle policies for automatic tiering (one-way only — from a higher tier down to a lower tier).
+- Versioning, encryption (SSE-S3/KMS/C, client-side, TLS), replication, MFA-Delete, access logs.
+- Security: IAM, Bucket Policies, ACLs, Access Points, Object Lock, CORS.
+- Multipart upload.
+- Transfer Acceleration.
+- S3 Select.
+- Event Notifications (SNS/SQS/Lambda/EventBridge).
+- Static website hosting.
+
+**Use case:** Static files, large objects, data lakes, backups, static website hosting, media. **Not** a good fit for millions of tiny objects needing low-latency key-value lookups (use DynamoDB).
+
+**Keywords:** "object / file", "static asset", "data lake", "store large files", "static website", "unlimited storage", "high durability".
+
+---
+
+## 6. Amazon DocumentDB — Document Database (MongoDB-Compatible)
+
+A <Tooltip content="Document database — stores data as flexible JSON-like documents that can be nested and need no fixed schema, well suited to semi-structured data">document database</Tooltip> stores data as flexible JSON-like documents (nested, no fixed schema) — ideal for semi-structured data. DocumentDB is AWS's managed, **MongoDB-compatible** service, with an Aurora-style storage architecture.
+
+- MongoDB-compatible (run your existing MongoDB apps/drivers).
+- Storage replicates 6 copies across 3 AZs, auto-scaling in 10 GB increments up to 64 TB.
+- Fully managed: backups, PITR, read replicas.
+- Automatically scales to workloads with millions of requests per second.
+
+**Use case:** MongoDB workloads, JSON / semi-structured data, product catalogs, user profiles, content management (CMS).
+
+**Keywords:** "MongoDB", "document", "JSON", "BSON".
+
+---
+
+## 7. Amazon Neptune — Graph Database
+
+A <Tooltip content="Graph database — stores data as nodes (entities) and edges (relationships), optimized for traversing highly connected data where the relationships themselves are what you query">graph database</Tooltip> stores data as **nodes** (entities) and **edges** (relationships), optimized for traversing highly connected data — where the "relationships" are exactly what you need to query fast. Neptune is AWS's managed graph database.
+
+- Supports Property Graph (queried with <Tooltip content="Gremlin / openCypher — graph query languages used to traverse nodes and edges along their relationships">Gremlin / openCypher</Tooltip>) and RDF (queried with SPARQL).
+- Storage 6 copies across 3 AZs, up to 15 read replicas; highly available.
+- Stores up to **billions of relationships** and queries the graph with **millisecond** latency.
+- Fully managed.
+
+**Use case:** Social networks, recommendation engines, fraud detection, knowledge graphs, network/infrastructure topology maps.
+
+**Keywords:** "graph", "relationships", "social network", "recommendation engine", "fraud detection", "highly connected data", "knowledge graph".
+
+---
+
+## 8. Amazon Keyspaces — Wide-Column (Cassandra-Compatible)
+
+A <Tooltip content="Wide-column store — organizes data into tables with rows and dynamic columns (column families), designed for very high write throughput and horizontal scale">wide-column store</Tooltip> organizes data into tables with rows and dynamic columns (column families), designed for very high write throughput and horizontal scale. Keyspaces is AWS's managed, **Apache Cassandra-compatible** service.
+
+- Apache Cassandra-compatible, queried with <Tooltip content="Cassandra Query Language — Cassandra's query language, SQL-like syntax but for the wide-column model">CQL</Tooltip>.
+- Serverless, auto-scaling; 3-AZ replication; on-demand or provisioned.
+- **Single-digit millisecond** latency at any scale, thousands of requests per second.
+- PITR; fully managed (no Cassandra cluster to operate yourself).
+
+**Use case:** Cassandra workloads, high-volume write data (IoT, time-series data, fleet management, logs, messaging).
+
+**Keywords:** "Cassandra", "CQL", "wide-column", "managed Apache Cassandra".
+
+---
+
+## 9. Amazon Timestream — Time-Series Database
+
+A <Tooltip content="Time-series database — optimized for time-stamped data (values measured over time), with very fast appends and efficient range queries over time">time-series database</Tooltip> is optimized for time-stamped data (values measured over time) — extremely fast appends, efficient time-range queries, and downsampling. Timestream is AWS's serverless time-series database.
+
+- Serverless, auto-scaling; ingests trillions of events per day.
+- Roughly **1000x faster** and **~1/10th the cost** of relational databases.
+- Auto-tiering: recent data in a memory tier, older data in a cost-optimized tier (configurable retention).
+- Built-in time-series analytics functions (interpolation, smoothing); SQL queries.
+
+**Use case:** IoT sensor data, operational/application metrics, real-time analytics over time.
+
+**Keywords:** "time series", "IoT data", "metrics over time", "sensor / telemetry".
+
+---
+
+## Quick Comparison of the 9 Services
+
+| Service     | Data model      | Core identifier                            | Primary use case                     |
+| ----------- | --------------- | ------------------------------------------ | ------------------------------------ |
+| RDS         | Relational (SQL)| Managed relational, multi-engine           | OLTP, transactions, SQL              |
+| Aurora      | Relational (SQL)| Cloud-native, high performance, global     | OLTP needing performance / HA / global |
+| ElastiCache | In-memory cache | Sub-millisecond, Redis/Memcached           | Cache, sessions, leaderboards        |
+| DynamoDB    | NoSQL key-value | Serverless, single-digit ms, massive scale | Large-scale serverless apps          |
+| S3          | Object storage  | Objects up to 5 TB, eleven 9s durability   | Large files/objects, data lake, static web |
+| DocumentDB  | Document        | MongoDB-compatible                         | JSON / semi-structured data          |
+| Neptune     | Graph           | Nodes + edges, Gremlin/SPARQL              | Connected data, fraud, recommendations |
+| Keyspaces   | Wide-column     | Cassandra-compatible, CQL                  | High-volume writes                   |
+| Timestream  | Time-series     | Time-stamped data, serverless              | IoT, metrics                         |
+
+---
+
+## Tips & Tricks — Recognize the Keyword and Pick the Service
+
+This is the most important part for the exam. Read the prompt, catch the keyword, map it straight to a service.
+
+### By data model
+
+| When the prompt says...                                            | Pick               |
+| ------------------------------------------------------------------ | ------------------ |
+| Relational, SQL, transaction, join, ACID                           | RDS (or Aurora)    |
+| MySQL/PostgreSQL-compatible + high performance / global / serverless | Aurora           |
+| Document, JSON, MongoDB                                             | DocumentDB         |
+| Key-value, NoSQL, serverless, schemaless                           | DynamoDB           |
+| Graph, relationships, social network, recommendation, fraud detection | Neptune         |
+| Cassandra, CQL, wide-column                                        | Keyspaces          |
+| Time-series, IoT, metrics/sensors over time                        | Timestream         |
+| Object, file, static asset, data lake, large files, static website | S3                 |
+
+### By performance / latency
+
+| When the prompt says...                          | Pick              |
+| ------------------------------------------------ | ----------------- |
+| In-memory, sub-millisecond, cache SQL results    | ElastiCache       |
+| Microsecond read latency                         | DynamoDB + DAX    |
+| Single-digit millisecond at massive scale        | DynamoDB          |
+
+### By operations
+
+| When the prompt says...                                       | Pick        |
+| ------------------------------------------------------------- | ----------- |
+| Relational but serverless / global / 15 read replicas / 5x    | Aurora      |
+| Managed MongoDB                                               | DocumentDB  |
+| Managed Cassandra                                            | Keyspaces   |
+
+---
+
+## Wrapping Up
+
+One line to remember:
+
+> **Recognize the shape of the data first, and the service falls out.**
+
+In the exam, the keyword → service reflex saves you precious time. But don't carry that reflex straight into real life — there, the right question isn't "which service matches the keyword", but "which trade-off is acceptable for this problem and for my team".
