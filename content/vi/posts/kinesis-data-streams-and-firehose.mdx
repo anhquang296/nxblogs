@@ -182,7 +182,7 @@ Thanh toán theo **stream-hour** + **per GB** dữ liệu ingested và retrieved
 
 Kinesis Data Streams giải quyết bài toán **ingestion** — nhận và lưu trữ luồng dữ liệu real-time. Nhưng bước tiếp theo — **đưa dữ liệu từ stream xuống storage** (S3, Redshift, OpenSearch) — vẫn cần bạn tự viết consumer code: poll data, transform, batch, ghi xuống, xử lý lỗi, retry...
 
-**Amazon Data Firehose** loại bỏ hoàn toàn phần consumer code đó. Đây là một dịch vụ **fully managed delivery pipeline** — bạn chỉ cần cấu hình source và destination, Firehose tự động nhận data, transform (nếu cần), buffer, và ghi xuống storage. Không cần viết code, không cần quản lý server, không cần lo scaling.
+**Amazon Data Firehose** loại bỏ hoàn toàn phần consumer code đó. Đây là một dịch vụ **fully managed data delivery pipeline** — bạn chỉ cần cấu hình source và destination, Firehose tự động nhận data, transform (nếu cần), buffer, và ghi xuống storage. Không cần viết code, không cần quản lý server, không cần lo scaling.
 
 Nếu hình dung Kinesis Data Streams như một **đường cao tốc** nơi dữ liệu chạy qua liên tục, thì Data Firehose là **đội xe tải** được cử ra để thu gom hàng từ cao tốc, đóng gói lại cho gọn gàng (transform, convert format), rồi chở đến kho đích (S3, Redshift, OpenSearch).
 
@@ -386,7 +386,7 @@ Kinesis Data Streams và Data Firehose giải quyết hai bài toán khác nhau 
 
 - **Kinesis Data Streams** — real-time ingestion layer. Kiến trúc tương tự Kafka với shard ≈ partition, nhưng shard limits cố định (1 MB/s write, 2 MB/s read per shard). Scale bằng cách thêm shard (Provisioned) hoặc để AWS tự scale (On-Demand). Enhanced Fan-Out cung cấp 2 MB/s per consumer với ~70ms latency khi cần nhiều consumer độc lập.
 
-- **Data Firehose** — managed delivery pipeline. Nhận data từ KDS, Direct PUT, hoặc CloudWatch Logs. Tự động transform (Lambda), convert format (JSON → Parquet/ORC via Glue), buffer (1–128 MB / 0–900s), và ghi xuống S3, Redshift, OpenSearch, hoặc 3rd-party destinations. Near real-time vì cần buffer — và buffering là có chủ đích: giảm chi phí API, tăng hiệu quả nén, tránh small file problem, tối ưu columnar format.
+- **Data Firehose** — managed data delivery pipeline. Nhận data từ KDS, Direct PUT, hoặc CloudWatch Logs. Tự động transform (Lambda), convert format (JSON → Parquet/ORC via Glue), buffer (1–128 MB / 0–900s), và ghi xuống S3, Redshift, OpenSearch, hoặc 3rd-party destinations. Near real-time vì cần buffer — và buffering là có chủ đích: giảm chi phí API, tăng hiệu quả nén, tránh small file problem, tối ưu columnar format.
 
 - **Combo KDS + Firehose** — pattern phổ biến nhất. KDS làm ingestion và real-time processing, Firehose tự động delivery xuống storage. Hai service bổ trợ nhau — KDS giỏi ở real-time và replay, Firehose giỏi ở automated delivery và zero-code operation.
 

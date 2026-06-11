@@ -182,7 +182,7 @@ Billing is per **stream-hour** + **per GB** of data ingested and retrieved.
 
 Kinesis Data Streams solves the **ingestion** problem — receiving and storing real-time data streams. But the next step — **delivering data from the stream to storage** (S3, Redshift, OpenSearch) — still requires you to write consumer code: poll data, transform, batch, write, handle errors, retry...
 
-**Amazon Data Firehose** eliminates all that consumer code. It's a **fully managed delivery pipeline** — you just configure the source and destination, and Firehose automatically receives data, transforms it (if needed), buffers, and writes to storage. No code to write, no servers to manage, no scaling to worry about.
+**Amazon Data Firehose** eliminates all that consumer code. It's a **fully managed data delivery pipeline** — you just configure the source and destination, and Firehose automatically receives data, transforms it (if needed), buffers, and writes to storage. No code to write, no servers to manage, no scaling to worry about.
 
 If you think of Kinesis Data Streams as a **highway** where data flows continuously, then Data Firehose is the **fleet of trucks** dispatched to collect goods from the highway, repack them neatly (transform, convert format), and deliver them to the destination warehouse (S3, Redshift, OpenSearch).
 
@@ -386,7 +386,7 @@ Kinesis Data Streams and Data Firehose solve two different problems in a streami
 
 - **Kinesis Data Streams** — real-time ingestion layer. Architecture similar to Kafka with shard ≈ partition, but shard limits are fixed (1 MB/s write, 2 MB/s read per shard). Scale by adding shards (Provisioned) or let AWS auto-scale (On-Demand). Enhanced Fan-Out provides 2 MB/s per consumer with ~70ms latency when multiple independent consumers are needed.
 
-- **Data Firehose** — managed delivery pipeline. Receives data from KDS, Direct PUT, or CloudWatch Logs. Automatically transforms (Lambda), converts format (JSON → Parquet/ORC via Glue), buffers (1–128 MB / 0–900s), and writes to S3, Redshift, OpenSearch, or 3rd-party destinations. Near real-time because of buffering — and buffering is intentional: reduces API costs, improves compression efficiency, avoids the small file problem, and optimizes columnar format conversion.
+- **Data Firehose** — managed data delivery pipeline. Receives data from KDS, Direct PUT, or CloudWatch Logs. Automatically transforms (Lambda), converts format (JSON → Parquet/ORC via Glue), buffers (1–128 MB / 0–900s), and writes to S3, Redshift, OpenSearch, or 3rd-party destinations. Near real-time because of buffering — and buffering is intentional: reduces API costs, improves compression efficiency, avoids the small file problem, and optimizes columnar format conversion.
 
 - **The KDS + Firehose combo** — the most common pattern. KDS handles ingestion and real-time processing, Firehose handles automated delivery to storage. The two services complement each other — KDS excels at real-time and replay, Firehose excels at automated delivery and zero-code operation.
 
