@@ -119,6 +119,12 @@ Comprehend Medical is a version of Comprehend specialized for clinical text, und
 - Extracts medical entities: conditions, medications, dosages, symptoms.
 - Links to standard medical coding systems (ICD-10-CM for diagnoses, RxNorm for medications).
 
+**Typical flow — feeding Comprehend Medical:**
+
+<ExcalidrawDiagram src="/comprehend-medical-flow.excalidraw" alt="Amazon Comprehend Medical ingestion paths: clinical documents in S3 (batch), streaming data via Kinesis Data Firehose (real-time), and audio via Amazon Transcribe (speech to text) all converge on Comprehend Medical, which extracts medical entities and PHI" />
+
+Comprehend Medical has three common ingestion paths. Clinical documents are kept in the Amazon S3 object store and submitted for batch analysis (**documents**). Continuously generated data is streamed through <Tooltip content="Amazon Data Firehose / Kinesis Data Firehose — a fully managed streaming-data delivery pipeline that lands data at its destination in near real time">Kinesis Data Firehose</Tooltip> for near-real-time processing (**real-time**). And spoken input — a doctor dictating notes, or a patient conversation — is first run through Amazon Transcribe to turn it into text (**text**). All three converge on Comprehend Medical, which extracts the medical entities and PHI (**extract**).
+
 **Use case:** Extract structured information from doctor's notes, patient records, and prescriptions.
 
 **Keywords:** `medical / clinical text`, `PHI`, `healthcare NLP`, `doctor's notes / patient records`.

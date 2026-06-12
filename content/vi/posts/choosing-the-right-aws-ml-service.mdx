@@ -119,6 +119,12 @@ Comprehend Medical là phiên bản Comprehend chuyên cho văn bản y khoa, hi
 - Trích xuất thực thể y tế: bệnh lý, thuốc, liều lượng, triệu chứng.
 - Liên kết với hệ thống mã chuẩn y khoa (ICD-10-CM cho chẩn đoán, RxNorm cho thuốc).
 
+**Flow điển hình — nạp dữ liệu vào Comprehend Medical:**
+
+<ExcalidrawDiagram src="/comprehend-medical-flow.excalidraw" alt="Các đường nạp dữ liệu của Amazon Comprehend Medical: tài liệu lâm sàng lưu trong S3 (theo lô), dữ liệu streaming qua Kinesis Data Firehose (thời gian thực), và âm thanh qua Amazon Transcribe (chuyển thành văn bản) đều hội tụ về Comprehend Medical để trích xuất thực thể y tế và PHI" />
+
+Comprehend Medical có ba đường nạp dữ liệu phổ biến. Tài liệu lâm sàng được lưu trong kho object Amazon S3 rồi đưa vào phân tích theo lô (**documents**). Dữ liệu phát sinh liên tục thì stream qua <Tooltip content="Amazon Data Firehose / Kinesis Data Firehose — pipeline phân phối dữ liệu streaming được quản lý hoàn toàn, đưa dữ liệu tới đích gần thời gian thực">Kinesis Data Firehose</Tooltip> để xử lý gần thời gian thực (**real-time**). Còn lời nói — ví dụ bác sĩ đọc ghi chú hay hội thoại với bệnh nhân — thì cho qua Amazon Transcribe để chuyển thành văn bản trước (**text**). Cả ba đều hội tụ về Comprehend Medical để trích xuất thực thể y tế và PHI (**extract**).
+
 **Use case:** Rút trích thông tin có cấu trúc từ ghi chú của bác sĩ, hồ sơ bệnh án, đơn thuốc.
 
 **Keyword nhận diện:** `văn bản y tế / lâm sàng`, `PHI`, `NLP cho y khoa`, `ghi chú bác sĩ / bệnh án`.
