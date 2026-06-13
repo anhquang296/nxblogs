@@ -1,0 +1,339 @@
+---
+title: 'AWS Disaster Recovery & Migration: Backup, DRS, DMS, MGN, DataSync & Snow Family'
+date: '2026-06-13'
+tags: ['AWS', 'SAA', 'Devops']
+description: 'Tổng quan các service disaster recovery và migration cho kỳ thi SAA — RPO/RTO và 4 chiến lược DR, AWS Backup, Elastic Disaster Recovery (DRS), Application Migration Service (MGN), Database Migration Service (DMS + SCT), DataSync, Snow Family, và VMware Cloud on AWS: mỗi cái làm gì, dùng khi nào, và cách phân biệt chúng.'
+enableComment: true
+---
+
+# AWS Disaster Recovery & Migration: Backup, DRS, DMS, MGN, DataSync & Snow Family
+
+Hãy tưởng tượng bạn là Solutions Architect, và trong cùng một quý có **hai bài toán** lớn đáp xuống bàn làm việc:
+
+1. **Thảm họa ập đến.** Một sáng, toàn bộ data center on-premises (hoặc một region AWS) sập. CEO hỏi đúng hai câu: "Chúng ta **mất bao nhiêu dữ liệu**?" và "**Bao lâu** thì hệ thống chạy lại?".
+2. **Cả công ty dọn nhà lên cloud.** Ban lãnh đạo quyết định trong 6 tháng phải đưa **toàn bộ** on-premises lên AWS: hàng trăm server, một mớ database đủ thể loại, và hàng trăm TB file. "Làm sao chuyển hết mà **downtime tối thiểu**?".
+
+Hai bài toán này được AWS gom vào **cùng một chương** không phải ngẫu nhiên — chúng chia sẻ chung "DNA". Ví dụ rõ nhất: dịch vụ phục hồi thảm họa (**DRS**) và dịch vụ di chuyển server (**MGN**) thực ra dùng **chung một engine nhân bản** bên dưới, chỉ khác mục đích. Và đây cũng chính là cái bẫy yêu thích của đề thi SAA: nó tả một tình huống rồi hỏi bạn chọn service nào — trong khi ba đáp án còn lại đều "nghe có vẻ đúng".
+
+Bài viết này là tấm bản đồ giúp bạn vẽ ranh giới rõ ràng giữa các service trong hai "họ": **Disaster Recovery** (phục hồi một hệ thống đang chạy sau thảm họa) và **Migration** (đưa workload/dữ liệu **vào** AWS). Với mỗi service ta sẽ đi qua: nó **làm gì**, **tính năng** cốt lõi, **use case** thực tế, và — quan trọng nhất cho phòng thi — những **keyword "tố cáo"** nó trong câu hỏi.
+
+> **Note:** Đây là bài tổng quan để dựng mental model và giúp bạn nhận ra đáp án đúng thật nhanh trong phòng thi. Mỗi service ở đây xứng đáng có một bài deep-dive riêng; bài này tập trung vào **ranh giới giữa chúng** và những con số hay bị hỏi.
+
+---
+
+## 1. Bức tranh lớn: hai "họ" và hai thước đo trị vì DR (RPO & RTO)
+
+Trước khi vào chi tiết, hãy ghim hai ý.
+
+**Ý thứ nhất — phân biệt hai họ:**
+
+- **Disaster Recovery (DR):** hệ thống của bạn **đang chạy** trên AWS thì thảm họa xảy ra (region/AZ sập, dữ liệu hỏng, bị ransomware...). Câu hỏi là: phục hồi **nhanh đến đâu** và **mất bao nhiêu dữ liệu**.
+- **Migration:** workload của bạn **đang ở ngoài** AWS (on-premises, cloud khác) và bạn muốn **đưa nó vào** AWS. Câu hỏi là: di chuyển **cái gì** (server, database, file) và **downtime** bao lâu.
+
+**Ý thứ hai — hai thước đo quyết định mọi chiến lược DR.** Bất kỳ câu hỏi DR nào cũng xoay quanh hai con số này:
+
+- <Tooltip content="Recovery Point Objective — điểm phục hồi, tính NGƯỢC về quá khứ tính từ thời điểm thảm họa">RPO</Tooltip> là **lượng dữ liệu tối đa bạn chấp nhận mất**. Nó là khoảng thời gian giữa bản backup/replica gần nhất và thời điểm thảm họa. RPO = 1 giờ nghĩa là bạn chấp nhận mất tối đa 1 giờ dữ liệu. Con số này thể hiện tần suất backup.
+- <Tooltip content="Recovery Time Objective — thời gian phục hồi, tính XUÔI về tương lai tính từ thời điểm thảm họa">RTO</Tooltip> là **thời gian downtime tối đa chấp nhận được** để đưa hệ thống chạy lại. RTO = 10 phút nghĩa là sau thảm họa, trong vòng 10 phút hệ thống phải hoạt động. con số này quyết định **chiến lược DR** bạn chọn.
+
+RPO trả lời cho câu hỏi "Mình sẽ mất bao nhiêu dữ liệu sau khi recovery?".
+
+RTO trả lời cho câu hỏi "Mình sẽ mất bao lâu để recovery thành công/ Downtime là bao nhiêu?".
+
+Quy luật vàng: **RPO/RTO càng nhỏ thì càng tốn tiền.** Muốn "không mất dữ liệu, không downtime" thì phải trả giá bằng hạ tầng luôn chạy song song. Cả phần DR của bài này thực chất là tìm điểm cân bằng giữa **tiền** và **RPO/RTO**.
+
+---
+
+## 2. Bốn chiến lược Disaster Recovery
+
+Đây là phần "khái niệm" quan trọng nhất của cả chương, và đề thi hỏi rất nhiều. AWS không có một "nút DR" — thay vào đó có **4 chiến lược**, xếp từ rẻ-chậm đến đắt-nhanh. Bạn chọn chiến lược dựa trên RPO/RTO mục tiêu.
+
+**1. Backup & Restore (RPO/RTO cao, rẻ nhất).** Bạn chỉ **backup** dữ liệu định kỳ (EBS snapshot, RDS snapshot, đẩy lên S3, hoặc dùng AWS Backup) và cất ở nơi an toàn. Khi thảm họa xảy ra, bạn mới **dựng lại** hạ tầng từ con số 0 rồi restore dữ liệu vào. Vì không có gì chạy sẵn nên cực rẻ, phần lớn thuộc về chi phí lưu trữ, nhưng RTO tính bằng **giờ**. Phù hợp khi hệ thống chấp nhận chết vài giờ.
+
+<ExcalidrawDiagram
+  src="/aws-dr-backup-and-restore.excalidraw"
+  alt="Backup and Restore strategy: on-premises servers and database back up to Amazon S3 via AWS Storage Gateway and AWS Snowball, with an S3 lifecycle policy tiering to Glacier; AWS-native resources (EBS, Redshift, RDS) take scheduled regular snapshots; after a disaster, data is restored into Amazon EC2 launched from an AMI and Amazon RDS"
+/>
+
+**2. Pilot Light (RPO/RTO thấp hơn, vẫn rẻ).** Hình dung ngọn lửa nhỏ ("đèn báo") luôn cháy âm ỉ: bạn giữ cho **phần lõi quan trọng nhất** — thường là **database** — luôn chạy và **liên tục replicate** sang region DR, còn phần application/web thì **tắt** (chỉ chuẩn bị sẵn AMI/cấu hình). Khi thảm họa xảy ra, bạn chỉ cần "thắp" phần còn lại lên (bật server app, đấu vào database đã có sẵn dữ liệu). Nhanh hơn Backup & Restore nhiều vì dữ liệu đã nóng sẵn.
+
+<ExcalidrawDiagram
+  src="/aws-dr-pilot-light.excalidraw"
+  alt="Pilot Light strategy: the on-premises database continuously replicates to an always-running Amazon RDS, while the EC2 application tier stays stopped (not running); Route 53 routes traffic to the primary site and can fail over to the standby EC2 when disaster strikes"
+/>
+
+**3. Warm Standby (RPO/RTO thấp).** Một bản sao **đầy đủ** của hệ thống đã chạy ở region DR nhưng ở **quy mô tối thiểu** (instance nhỏ, ít node). Khi thảm họa xảy ra, bạn chỉ việc **scale up** lên kích thước production và chuyển traffic sang. Vì mọi thành phần đã chạy sẵn (chỉ là nhỏ), RTO rất ngắn — chỉ tốn thời gian phóng to.
+
+<ExcalidrawDiagram
+  src="/aws-dr-warm-standby.excalidraw"
+  alt="Warm Standby strategy: a full but minimally-sized copy runs on AWS (ELB in front of an EC2 Auto Scaling group at minimum capacity, plus an RDS Secondary). The on-premises primary database continuously replicates to the RDS Secondary; Route 53 actively routes traffic to the on-premises primary and keeps AWS on standby. On disaster, the EC2 fleet scales up and fails over to the RDS Secondary"
+/>
+
+**4. Multi-Site / Hot Site (RPO/RTO gần 0, đắt nhất).** Chạy hệ thống **full-scale ở cả hai (hoặc nhiều) nơi cùng lúc** theo kiểu <Tooltip content="Cả hai site đều nhận và xử lý traffic thật cùng lúc, không có site nào nằm chờ">active-active</Tooltip>. Traffic được chia cho cả hai; nếu một site chết, site kia gánh toàn bộ gần như tức thì. RPO/RTO gần như bằng 0, nhưng bạn trả tiền cho **hai hệ thống production song song**.
+
+<ExcalidrawDiagram
+  src="/aws-dr-multi-site.excalidraw"
+  alt="Multi-Site (Hot Site) strategy: both the on-premises data center and AWS run at full production scale in active-active mode. Route 53 actively routes traffic to both sites (ELB plus an EC2 Auto Scaling group at production capacity on AWS). The primary database continuously replicates to the RDS Secondary, which the AWS fleet fails over to if the primary is lost"
+/>
+
+> **Exam tip:** Đề sẽ cho bạn một ràng buộc về RTO/RPO **và** ngân sách, rồi hỏi chọn chiến lược nào. Quy tắc: thấy **"rẻ nhất / chấp nhận downtime nhiều giờ"** → Backup & Restore; thấy **"giữ database luôn sẵn sàng nhưng tắt phần còn lại"** → Pilot Light; thấy **"chạy bản thu nhỏ rồi scale up"** → Warm Standby; thấy **"không downtime / active-active / RTO gần 0"** → Multi-Site.
+
+**Keyword:** `RPO`, `RTO`, `backup and restore`, `pilot light`, `warm standby`, `multi-site`, `active-active`, `cheapest DR`, `lowest RTO`.
+
+---
+
+## 3. AWS Backup — backup tập trung, có quản trị
+
+**AWS Backup** là dịch vụ **backup tập trung, được quản lý hoàn toàn (fully managed)**, cho phép bạn tạo, quản lý và tự động hóa backup cho **rất nhiều service** từ một nơi duy nhất — thay vì phải tự viết script snapshot riêng cho từng service.
+
+Nó hỗ trợ một danh sách dài: **EC2, EBS, EFS, FSx, RDS, Aurora, DynamoDB, DocumentDB, Neptune, S3, Storage Gateway**, và cả workload **VMware** on-premises... Điểm hay là bạn có **một bảng điều khiển** cho toàn bộ backup, thay vì mỗi service một kiểu.
+
+Các thành phần và tính năng cần nhớ:
+
+- **Backup Plan:** "công thức" backup — định nghĩa **tần suất** (theo cron/rate), **cửa sổ backup** (backup window), **thời gian giữ** (retention), và **lifecycle** tự động chuyển backup cũ sang **cold storage** cho rẻ. Bạn cũng có thể backup **on-demand** thủ công bất cứ lúc nào.
+- **Tag-based selection:** chọn tài nguyên cần backup theo **tag**, nên khi tạo resource mới có đúng tag là nó tự được đưa vào lịch backup.
+- **Backup Vault:** "két" chứa các bản backup (recovery point). Bạn quản lý quyền truy cập trên vault này.
+- **Cross-Region backup:** sao backup sang **region khác** — nền tảng cho DR cấp region.
+- **Cross-Account backup:** sao backup sang **account khác** (thông qua AWS Organizations) — để cô lập backup khỏi account production, phòng khi account đó bị xâm nhập.
+- <Tooltip content="Point-In-Time Recovery — khôi phục về một thời điểm bất kỳ trong quá khứ, không chỉ về các mốc snapshot rời rạc">PITR</Tooltip> cho các service hỗ trợ (như RDS, Aurora, S3...).
+
+Tính năng "ăn điểm" nhất trong đề thi là **AWS Backup Vault Lock**:
+
+- Nó áp mô hình <Tooltip content="Write Once Read Many — ghi một lần, đọc nhiều lần; sau khi ghi thì không thể sửa hay xóa trong thời hạn quy định">WORM</Tooltip> lên vault: backup trở thành **bất biến (immutable)** — không ai xóa hay sửa được trong thời gian giữ, kể cả khi tài khoản bị chiếm. Đây là lá chắn kinh điển chống **ransomware** và **xóa nhầm/xóa ác ý**.
+- Có **hai chế độ**:
+  - **Governance mode:** khóa backup, nhưng user có **quyền IAM đặc biệt** vẫn được phép bỏ qua khóa (override). Phù hợp khi muốn kỷ luật nội bộ nhưng vẫn chừa "cửa thoát" cho admin.
+  - **Compliance mode:** khóa **cứng**. Sau khi qua thời gian "cooling-off", **không ai** xóa hay đổi cấu hình khóa được nữa — kể cả **root user** lẫn **AWS Support**. Dùng cho yêu cầu tuân thủ pháp lý nghiêm ngặt.
+
+> **Trap:** Câu hỏi nhắc đến **"backup không thể bị xóa kể cả bởi root / chống ransomware / yêu cầu tuân thủ bất biến"** → đáp án là **AWS Backup Vault Lock (Compliance mode)**, không phải IAM policy thông thường (IAM có thể bị chính kẻ tấn công thay đổi).
+
+**Use case:** thống nhất chính sách backup cho toàn tổ chức, đáp ứng audit/tuân thủ, backup chéo region/account cho DR, và bảo vệ backup khỏi bị xóa bằng Vault Lock.
+
+**Keyword:** `centralized backup`, `manage backups across services`, `backup plan`, `cross-region / cross-account backup`, `PITR`, `immutable backup`, `WORM`, `ransomware protection`, `Vault Lock`.
+
+---
+
+## 4. AWS Elastic Disaster Recovery (DRS) — nhân bản liên tục để failover
+
+**AWS Elastic Disaster Recovery (DRS)** — tên cũ là **CloudEndure Disaster Recovery** — là dịch vụ DR cấp **toàn bộ server**. Thay vì chỉ backup dữ liệu, DRS **liên tục nhân bản (replicate) ở mức block** toàn bộ server của bạn — cả hệ điều hành, ứng dụng, lẫn dữ liệu — vào một **vùng staging chi phí thấp** trong AWS.
+
+Cơ chế "liên tục nhân bản ở mức block" này cho RPO rất nhỏ (tính bằng **giây**) vì mọi thay đổi trên đĩa được sao gần như tức thì. Vùng staging chỉ tốn tài nguyên tối thiểu (đĩa lưu bản nhân + vài instance nhỏ), nên rẻ. Khi thảm họa xảy ra, DRS **phóng** các server đầy đủ kích thước từ bản nhân và bạn failover sang — RTO tính bằng **phút**.
+
+<ExcalidrawDiagram
+  src="/aws-dr-elastic-disaster-recovery.excalidraw"
+  alt="AWS Elastic Disaster Recovery (DRS): the AWS Replication Agent on each source server (OS, apps, DB disks) in a corporate data center or any cloud performs continuous block-level replication (seconds) into a low-cost Staging area in AWS (minimal EC2 instances and EBS volumes); on disaster, DRS fails over (minutes) by launching full-size target EC2 instances and EBS volumes in Production, and can fail back to the source afterward"
+/>
+
+Điểm mạnh:
+
+- Nguồn có thể là server **vật lý, ảo, hoặc trên cloud khác** — không chỉ EC2.
+- Hỗ trợ failover và **failback** (quay về sau khi sự cố qua đi).
+- Cho phép **drill** (diễn tập DR) mà không ảnh hưởng production.
+
+**Use case:** DR cho server on-premises hoặc giữa các region AWS với RPO/RTO thấp mà không phải trả tiền cho một bản sao full-scale luôn chạy (rẻ hơn Multi-Site nhưng vẫn nhanh).
+
+**Keyword:** `continuous block-level replication`, `disaster recovery for servers`, `fast failover`, `low RPO/RTO DR`, `CloudEndure Disaster Recovery`.
+
+---
+
+## 5. AWS Application Migration Service (MGN) — lift-and-shift lên AWS
+
+**AWS Application Migration Service (MGN)** là dịch vụ **di chuyển (migration)** chủ lực của AWS theo kiểu <Tooltip content="Lift-and-shift / rehost — bê nguyên server hiện có lên cloud mà không sửa đổi ứng dụng">lift-and-shift</Tooltip>. Nó **thay thế** dịch vụ cũ **AWS Server Migration Service (SMS)** đã ngừng.
+
+Và đây là chỗ "aha": MGN dùng **đúng cơ chế nhân bản block liên tục giống DRS**. Nó liên tục sao server nguồn (vật lý/ảo/cloud) vào vùng staging trong AWS; đến khi bạn sẵn sàng thì thực hiện **cutover** — MGN tự **chuyển đổi** bản nhân thành **EC2 instance chạy native** và bật lên. Vì nhân bản chạy ngầm từ trước, **downtime lúc cutover cực ngắn**.
+
+Vậy **DRS và MGN khác gì nhau?** Cùng một engine, khác **mục đích**:
+
+| Tiêu chí       | **DRS** (Disaster Recovery)                     | **MGN** (Migration)                               |
+| -------------- | ----------------------------------------------- | ------------------------------------------------- |
+| Mục đích       | Phòng thảm họa cho hệ thống đang chạy           | Dọn server lên AWS một lần                         |
+| Tính liên tục  | Nhân bản **mãi mãi**, chỉ failover khi có sự cố | Nhân bản đến khi **cutover** rồi dừng              |
+| Sau khi xong   | Server nguồn vẫn là production, AWS là DR        | Server nguồn được **gỡ bỏ (decommission)**, AWS là production |
+| Câu hỏi gợi ý  | "failover", "recovery", "DR"                     | "migrate", "lift-and-shift", "rehost"             |
+
+> **Exam tip:** Thấy **"di chuyển/lift-and-shift hàng loạt server lên AWS"** → **MGN**. Thấy **"liên tục nhân bản để phòng thảm họa / failover"** → **DRS**. Cùng công nghệ, đừng để đề lừa.
+
+**Use case:** di chuyển hàng loạt server on-premises (hoặc từ cloud khác) lên EC2 với downtime tối thiểu, không phải cài lại ứng dụng từ đầu.
+
+**Keyword:** `lift-and-shift`, `rehost`, `migrate servers to AWS`, `minimal downtime cutover`, `replaces Server Migration Service (SMS)`.
+
+---
+
+## 6. AWS Database Migration Service (DMS) — di chuyển database, nguồn vẫn chạy
+
+**AWS Database Migration Service (DMS)** chuyên di chuyển **database** vào AWS. Điểm bán hàng cốt lõi: trong suốt quá trình di chuyển, **database nguồn vẫn hoạt động bình thường** — ứng dụng không phải tắt.
+
+Cách hoạt động:
+
+- DMS chạy trên một **replication instance** (một EC2 instance do DMS quản lý) đứng giữa nguồn và đích.
+- Nó hỗ trợ **migrate một lần** (full load) và/hoặc **nhân bản liên tục** bằng <Tooltip content="Change Data Capture — bắt các thay đổi (insert/update/delete) phát sinh ở nguồn và áp liên tục sang đích để hai bên đồng bộ">CDC</Tooltip>. Nhờ CDC, bạn có thể full load trước rồi để DMS bắt kịp các thay đổi mới, đến khi hai bên gần như đồng bộ thì cắt sang đích với downtime tí xíu.
+- Bản thân DMS **kháng lỗi (resilient)**.
+
+Có hai kiểu di chuyển, và đây là phần đề thi hay xoáy:
+
+### 6.1. Homogeneous vs Heterogeneous + Schema Conversion Tool
+
+- **Homogeneous migration** — **cùng một loại engine** (ví dụ Oracle → Oracle, PostgreSQL → PostgreSQL). Vì cấu trúc schema tương thích, bạn **chỉ cần DMS** để chuyển dữ liệu.
+- **Heterogeneous migration** — **khác loại engine** (ví dụ Microsoft SQL Server → Aurora, Oracle → PostgreSQL). Lúc này schema và mã (stored procedure, kiểu dữ liệu...) **không tương thích**, nên cần thêm <Tooltip content="AWS Schema Conversion Tool — công cụ chuyển đổi schema và mã database từ engine này sang engine khác trước khi DMS chuyển dữ liệu">SCT</Tooltip>: dùng để **chuyển đổi schema** sang engine đích trước, **rồi** mới dùng DMS để chuyển dữ liệu.
+
+DMS hỗ trợ rất nhiều nguồn và đích: nguồn có thể là database on-premises, trên EC2, RDS, Aurora, S3, Azure SQL...; đích có thể là RDS, Aurora, Redshift, DynamoDB, S3, OpenSearch, Kinesis, Kafka...
+
+### 6.2. Di chuyển RDS & Aurora
+
+Khi câu hỏi xoay quanh chuyển dữ liệu **giữa các database AWS**, có vài đường quen thuộc ngoài DMS:
+
+- **Snapshot & restore:** chụp snapshot rồi restore sang instance mới — đơn giản nhưng có downtime.
+- **DMS:** khi cần di chuyển **không/ít downtime** (điều kiện là cả instance mới và cũ chạy đồng thời).
+- **MySQL/MariaDB:** dùng **Percona XtraBackup** đẩy file backup lên **S3** rồi restore vào RDS/Aurora MySQL — nhanh hơn `mysqldump` với khối dữ liệu lớn.
+- **RDS → Aurora:** tạo **Aurora Read Replica** từ RDS instance rồi **promote** nó thành cluster Aurora độc lập khi `replication lag = 0`, hoặc restore từ snapshot.
+- **Cross-region:** **copy snapshot** sang region khác, hoặc dùng **read replica** xuyên region.
+
+**Use case:** di chuyển database lên AWS hoặc đổi engine với downtime tối thiểu; đồng bộ liên tục giữa hai database; gom dữ liệu nhiều nguồn về một kho phân tích.
+
+**Keyword:** `migrate database`, `source database stays available`, `continuous replication / CDC`, `homogeneous vs heterogeneous`, `different database engine → SCT`, `Oracle to Aurora / SQL Server to PostgreSQL`.
+
+---
+
+## 7. Chiến lược di chuyển từ On-Premises
+
+Khi đề nói về việc đưa cả một data center on-premises lên AWS, ngoài MGN và DMS ở trên, có thêm vài công cụ trong "bộ đồ nghề" cần biết:
+
+- **AWS Application Discovery Service:** thu thập thông tin về server on-premises trước khi di chuyển — cấu hình, mức sử dụng, và **mối phụ thuộc (dependency)** giữa các server — để **lập kế hoạch** migration. Có hai kiểu: **Agentless Discovery** (dành cho môi trường **VMware vCenter**) và **Agent-based Discovery** (cài agent để lấy chi tiết hơn). Dữ liệu thu được hiển thị trong **AWS Migration Hub** — nơi theo dõi tiến độ di chuyển tập trung.
+- **VM Import/Export:** **import** image của máy ảo on-premises hiện có thành **EC2 AMI/instance** (và export ngược lại nếu cần). Hữu ích khi bạn đã có sẵn VM được "đóng băng" theo chuẩn nội bộ.
+- **Tải Amazon Linux 2 dưới dạng VM:** AWS cho phép tải Amazon Linux 2 (và các bản mới hơn) dưới dạng image VM để **chạy on-premises** (trên VMware, VirtualBox, Hyper-V, KVM) — tiện cho việc phát triển/kiểm thử cho môi trường giống AWS ngay tại chỗ.
+- **AWS Storage Gateway** (đề cập nhanh): cây cầu **hybrid** nối hạ tầng on-premises với storage trên AWS — cho phép ứng dụng on-premises dùng S3/cloud storage như storage cục bộ, thường xuất hiện trong các kiến trúc lai trong lúc chuyển đổi dần lên cloud.
+
+**Use case:** giai đoạn **đánh giá & lập kế hoạch** trước khi di chuyển (Discovery + Migration Hub), import VM có sẵn, và duy trì mô hình hybrid trong lúc chuyển dịch.
+
+**Keyword:** `discover on-premises servers and dependencies`, `plan migration`, `Migration Hub`, `import existing VM to EC2`, `VM Import/Export`, `hybrid (Storage Gateway)`.
+
+---
+
+## 8. Chuyển khối dữ liệu lớn vào AWS — online vs offline
+
+Khi cần đưa **một khối dữ liệu lớn** (file/object) vào AWS, lựa chọn cốt lõi là **online (qua mạng)** hay **offline (gửi thiết bị vật lý)**.
+
+### 8.1. AWS DataSync — chuyển online, theo lịch
+
+**AWS DataSync** là dịch vụ chuyển dữ liệu **online** ở quy mô lớn: di chuyển file/object giữa **on-premises ↔ AWS** và cả **AWS ↔ AWS**.
+
+- Để chuyển từ on-premises, bạn cài một **DataSync Agent** (một VM) tại chỗ; nó đọc dữ liệu rồi đẩy lên AWS.
+- Nguồn rất đa dạng: **NFS, SMB, HDFS**, self-managed object storage (và cả cloud khác như Azure, Google Cloud). Đích phía AWS: **S3, EFS, và các loại FSx** (Windows File Server, Lustre, OpenZFS, NetApp ONTAP).
+- Chạy **theo lịch** (giờ/ngày/tuần) và **incremental** — chỉ chuyển phần thay đổi sau lần đầu.
+- **Bảo toàn metadata** (quyền, timestamp...) — quan trọng khi di chuyển file system.
+
+> **Note:** DataSync **không** đồng bộ thời gian thực liên tục; nó chạy theo **lịch**. Nếu cần cầu nối hybrid thường trực giữa on-premises và cloud thì đó là việc của **Storage Gateway**, không phải DataSync.
+
+### 8.2. AWS Snow Family — chuyển offline bằng thiết bị vật lý
+
+Khi mạng **quá chậm hoặc quá đắt** để đẩy hàng chục TB/PB qua đường truyền, AWS gửi cho bạn **thiết bị vật lý** để bạn chép dữ liệu vào rồi gửi trả — gọi là **Snow Family**. Theo cách kỳ thi SAA quen mô tả, họ này gồm:
+
+- **AWS Snowcone:** thiết bị nhỏ nhất, di động (vài TB), hợp với môi trường khắc nghiệt/không gian hẹp; có thể chạy DataSync sẵn để đẩy dữ liệu khi có mạng.
+- **AWS Snowball Edge:** thiết bị cỡ vali, quy mô tới **hàng petabyte** (gom nhiều thiết bị). Có hai biến thể: **Storage Optimized** (thiên về dung lượng) và **Compute Optimized** (thiên về tính toán). Snowball Edge còn chạy được **edge computing** (EC2/Lambda) ngay trên thiết bị khi ở nơi không có mạng.
+- **AWS Snowmobile:** xe container chở dữ liệu quy mô **exabyte** (tới ~100PB mỗi xe) — dành cho việc dọn cả data center khổng lồ.
+
+> **Trap (cập nhật thực tế):** Đề thi vẫn có thể nhắc tới cả ba, nhưng ngoài đời AWS đã **khai tử Snowmobile (2024)** và **ngừng cả hai dòng Snowcone (HDD & SSD) từ 11/2024** (hỗ trợ khách cũ đến 11/2025). Nên Snow Family **hiện tại** thực chất chỉ còn **Snowball Edge** thế hệ mới. Trong phòng thi cứ chọn theo mô tả kinh điển; ngoài đời thì nhớ thực tế này.
+
+### 8.3. Chọn cái nào?
+
+Quy tắc ngón tay cái của AWS: ước lượng thời gian chuyển qua mạng — **nếu mất hơn ~1 tuần** thì dùng **Snow Family** sẽ nhanh hơn là đẩy online.
+
+| Tiêu chí          | **DataSync**                              | **Snow Family**                          |
+| ----------------- | ----------------------------------------- | ---------------------------------------- |
+| Kênh              | Online (qua mạng)                         | Offline (thiết bị vật lý)                |
+| Quy mô hợp lý     | Khi đường truyền đủ tốt                    | Khi mạng chậm/đắt, hoặc dữ liệu rất lớn   |
+| Cách chạy         | Theo lịch, incremental                     | Chép vào thiết bị rồi gửi về AWS         |
+| Đích AWS          | S3, EFS, FSx                               | Chủ yếu vào S3                            |
+| Điểm cộng         | Tự động, bảo toàn metadata                 | Không phụ thuộc băng thông; có edge compute |
+
+**Keyword:** `transfer large data online / scheduled` → **DataSync**; `network too slow / petabytes / offline` → **Snowball Edge**; `exabyte / 100PB` → **Snowmobile** (theo đề kinh điển).
+
+---
+
+## 9. VMware Cloud on AWS
+
+**VMware Cloud on AWS** cho phép bạn chạy môi trường **VMware vSphere** (một <Tooltip content="Software-Defined Data Center — data center định nghĩa bằng phần mềm, gồm compute/storage/network ảo hóa theo bộ công cụ VMware">SDDC</Tooltip> đầy đủ: vSphere, vSAN, NSX) **trên hạ tầng bare-metal của AWS**.
+
+Đối tượng của nó rất cụ thể: các doanh nghiệp **đang dùng VMware on-premises** và muốn **mở rộng hoặc di chuyển** lên AWS mà **không phải refactor/đổi nền tảng** ứng dụng. Họ giữ nguyên công cụ, kỹ năng và quy trình VMware quen thuộc, nhưng chạy trên cloud.
+
+**Use case:** di chuyển workload VMware vSphere lên AWS theo kiểu "y nguyên"; dùng on-premises làm site chính và VMware Cloud on AWS làm site DR; hoặc mở rộng dung lượng data center on-premises ra cloud khi cần.
+
+**Keyword:** `run VMware vSphere on AWS`, `migrate VMware workloads without re-platforming`, `vSphere / vSAN / NSX on AWS`, `extend on-premises VMware to cloud`.
+
+---
+
+## 10. Phân biệt cho rốt ráo — bảng so sánh
+
+Đây là phần dễ rối nhất, vì nhiều service "nghe đều giống nhau là di chuyển/sao chép". Hãy nhìn qua **bốn lăng kính**: di chuyển **cái gì**, **một lần hay liên tục**, **online hay offline**, và **mục đích**.
+
+| Tiêu chí          | **DRS**                | **MGN**                  | **DMS**                       | **DataSync**          | **Snow Family**       | **AWS Backup**         |
+| ----------------- | ---------------------- | ------------------------ | ----------------------------- | --------------------- | --------------------- | ---------------------- |
+| Mục đích          | DR (failover)          | Migration server         | Migration database            | Chuyển file/object    | Chuyển dữ liệu lớn    | Backup tập trung       |
+| Di chuyển cái gì  | Toàn bộ server (block) | Toàn bộ server (block)   | Database (data + schema)      | File / object         | File / object         | Recovery points        |
+| Một lần / liên tục| Liên tục               | Một lần (cutover)        | Một lần **hoặc** liên tục (CDC) | Theo lịch (incremental) | Một lần             | Theo lịch + on-demand  |
+| Online / Offline  | Online                 | Online                   | Online                        | Online                | **Offline**           | Online                 |
+| Khác engine?      | —                      | —                        | Cần **SCT** nếu khác engine    | —                     | —                     | —                      |
+
+Câu thần chú để nhớ:
+
+- **DRS = phòng thảm họa** cho server (nhân bản mãi, failover khi sự cố).
+- **MGN = dọn server** lên AWS (nhân bản đến cutover rồi thôi).
+- **DMS = dọn database** (nguồn vẫn chạy; khác engine thì thêm SCT).
+- **DataSync = chuyển file online** theo lịch.
+- **Snow Family = chuyển dữ liệu offline** bằng thiết bị vật lý.
+- **AWS Backup = backup tập trung** (Vault Lock cho bất biến).
+
+---
+
+## 11. Tips & Tricks: bắt keyword trong câu hỏi SAA
+
+Trong phòng thi bạn chỉ có khoảng 90 giây mỗi câu. Bảng dưới ánh xạ keyword hay gặp sang đáp án:
+
+| Keyword/tình huống trong câu hỏi                                                  | Đáp án                                          |
+| --------------------------------------------------------------------------------- | ----------------------------------------------- |
+| "Chấp nhận **mất bao nhiêu dữ liệu**", data loss tolerance                          | **RPO**                                          |
+| "Chấp nhận **downtime** bao lâu", thời gian phục hồi                               | **RTO**                                          |
+| DR **rẻ nhất**, chấp nhận downtime nhiều giờ                                       | **Backup & Restore**                             |
+| Giữ **database luôn chạy & replicate**, phần còn lại dựng khi failover             | **Pilot Light**                                  |
+| Bản sao **đầy đủ chạy thu nhỏ**, scale up khi thảm họa                             | **Warm Standby**                                 |
+| **Active-active**, không downtime, RTO gần 0                                        | **Multi-Site / Hot Site**                        |
+| **Backup tập trung** nhiều service từ một nơi                                       | **AWS Backup**                                   |
+| Backup **bất biến / chống ransomware / không xóa được kể cả root**                 | **AWS Backup Vault Lock** (Compliance mode)      |
+| Backup sang **region khác / account khác**                                          | **AWS Backup** cross-region/cross-account        |
+| **Liên tục nhân bản server** để **failover nhanh** khi thảm họa                    | **Elastic Disaster Recovery (DRS)**              |
+| **Lift-and-shift / rehost** hàng loạt server lên AWS                                | **Application Migration Service (MGN)**          |
+| Di chuyển **database**, **nguồn vẫn chạy**, ít downtime                            | **Database Migration Service (DMS)**             |
+| Di chuyển database **khác engine** (Oracle→Aurora...)                              | **DMS + Schema Conversion Tool (SCT)**           |
+| **Khám phá server on-premises & dependency** để lập kế hoạch                       | **Application Discovery Service** (+ Migration Hub) |
+| **Import VM** on-premises có sẵn thành EC2                                          | **VM Import/Export**                             |
+| Chuyển **file lớn online**, theo lịch, vào S3/EFS/FSx                              | **DataSync**                                     |
+| Mạng **quá chậm**, chuyển **petabyte offline**                                     | **Snowball Edge**                                |
+| Chuyển **exabyte / ~100PB** (theo đề kinh điển)                                    | **Snowmobile**                                   |
+| Chạy **VMware vSphere** trên AWS, không re-platform                                | **VMware Cloud on AWS**                          |
+
+Vài "tie-breaker" nhanh khi phân vân:
+
+- Thấy **"failover / recovery / phòng thảm họa"** cho server → **DRS** (đừng nhầm với MGN).
+- Thấy **"migrate / lift-and-shift / rehost"** server → **MGN**.
+- Thấy hai **engine database khác tên** → **DMS + SCT**.
+- Thấy **"không xóa được / bất biến / chống ransomware"** → **Backup Vault Lock** (không phải IAM).
+- Thấy **"mạng quá chậm / dữ liệu quá lớn / chuyển offline"** → **Snow Family**.
+- Thấy **"rẻ nhất"** trong các lựa chọn DR → nghiêng về **Backup & Restore**; thấy **"RTO gần 0"** → **Multi-Site**.
+
+---
+
+## Kết luận
+
+Quay lại hai bài toán đầu bài, giờ mỗi câu hỏi đã có địa chỉ rõ ràng:
+
+- **"Mất bao nhiêu dữ liệu? Bao lâu phục hồi?"** → đo bằng **RPO/RTO**, và bạn chọn một trong **4 chiến lược** (Backup & Restore → Pilot Light → Warm Standby → Multi-Site) để cân bằng tiền với tốc độ.
+- **"Dọn cả công ty lên AWS thế nào?"** → **MGN** cho server, **DMS (+SCT)** cho database, **DataSync/Snow Family** cho khối dữ liệu, **VMware Cloud on AWS** cho workload VMware.
+
+Những điều cần khắc cốt cho kỳ thi SAA:
+
+- **RPO = mất bao nhiêu dữ liệu** (quyết định tần suất backup); **RTO = downtime bao lâu** (quyết định chiến lược DR). Càng nhỏ càng đắt.
+- **4 chiến lược DR** theo trục tiền ↔ tốc độ: Backup & Restore (rẻ, chậm) → Pilot Light → Warm Standby → Multi-Site (đắt, nhanh nhất).
+- **AWS Backup** = backup tập trung; nhớ **cross-region/cross-account** và **Vault Lock** (WORM, chống ransomware, Compliance mode khóa cứng).
+- **DRS vs MGN**: cùng engine nhân bản block; **DRS** để **phòng thảm họa** (liên tục), **MGN** để **lift-and-shift một lần**.
+- **DMS** di chuyển database mà nguồn vẫn chạy; **khác engine → cần SCT**.
+- **DataSync** (online, theo lịch) vs **Snow Family** (offline, mạng chậm/dữ liệu lớn); **VMware Cloud on AWS** để bê nguyên VMware lên cloud.
+
+Nắm vững ranh giới giữa các service này, bạn sẽ không còn bị "bốn đáp án đều nghe đúng" đánh lừa trong phòng thi nữa.
