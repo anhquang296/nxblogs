@@ -1,0 +1,382 @@
+---
+title: 'AWS Monitoring & Auditing: CloudWatch, CloudTrail, Config'
+date: '2026-06-12'
+tags: ['AWS', 'SAA', 'Devops']
+description: 'An overview of AWS monitoring services for the SAA exam — CloudWatch (Metrics, Logs, Alarms, Synthetics, Insights), EventBridge, CloudTrail, and AWS Config: what each one watches, their features, use cases, and how to tell them apart for good.'
+enableComment: true
+---
+
+# AWS Monitoring & Auditing: CloudWatch, CloudTrail, Config
+
+It's 3 a.m. and your phone buzzes. Production is unusually slow, and a few APIs are returning 500s. You open your laptop, and over the next few minutes you'll have to answer **four completely different questions**:
+
+1. "How is the system **performing**? What's the CPU, when did latency start climbing, what's the error rate?"
+2. "At 2 a.m., **who** modified that Security Group? From which IP?"
+3. "Are the resources still **compliant** with the rules right now, and how has their configuration changed over time?"
+4. "Next time the exact same event happens, how do I make the system **react automatically** without waking me at 3 a.m.?"
+
+Here's the interesting part: each question maps to a **different AWS service**. Question 1 is **CloudWatch**, question 2 is **CloudTrail**, question 3 is **AWS Config**, question 4 is **EventBridge**. These four are often lumped together under "monitoring," and that's exactly the SAA exam's favorite trap: it describes a scenario and asks which service you should use — while the other three options all "sound plausible."
+
+This article is a map to help you draw a sharp line between those four "eyes." For each service we'll go through: what it **observes**, its **core features**, real-world **use cases**, and — most importantly for the exam — the **keywords that "give it away"** in a question.
+
+> **Note:** This is an overview meant to build a mental model and let you recognize the right answer quickly in the exam room. Each service here deserves its own deep-dive; this post focuses on the boundaries between them and the numbers that get asked.
+
+---
+
+## 1. The big picture: 4 questions, 4 services
+
+Before the details, pin down this mental framework. All four services "look at" your system, but each looks at a **different aspect**:
+
+| Question                       | Service         | What it is                                                | Analogy                                                |
+| ------------------------------ | --------------- | --------------------------------------------------------- | ------------------------------------------------------ |
+| "How is the system running?"   | **CloudWatch**  | Performance & operational monitoring (metrics, logs, alarms) | A car's dashboard — speed, RPM, temperature         |
+| "Who did what?"                | **CloudTrail**  | Records the history of API calls (audit trail)            | A security camera — who came in, when, and did what    |
+| "Is the configuration compliant?" | **AWS Config** | Tracks resource configuration & evaluates compliance     | An inspector — photographs the state, checks the rules |
+| "React when something happens?" | **EventBridge** | Routes events to automated actions                       | A nervous system — an event triggers a reflex          |
+
+The first three answer **"what is/was happening"** at three different layers: performance (CloudWatch), human/system behavior via API (CloudTrail), and configuration state (Config). The fourth — EventBridge — isn't about **observing** but about **acting**: it's the glue that ties the others together, turning an event into an automated reaction.
+
+Keep this framework in mind, and let's dig into each service.
+
+---
+
+## 2. Amazon CloudWatch — the eyes that watch performance
+
+**Amazon CloudWatch** is AWS's central monitoring service: it collects **metrics** (quantitative measurements), **logs** (text records), and creates **alarms** and **dashboards** for almost every AWS service. If you need to know "how is this thing running," the answer almost always starts with CloudWatch.
+
+CloudWatch is a big "umbrella" of many sub-components. Let's go through them one by one.
+
+### 2.1. Metrics — measurements of everything
+
+**A metric** is a time-ordered series of data points — for example, the CPU utilization of an EC2 instance measured every minute. A few concepts to know:
+
+- **Namespace** is the "folder" that groups a service's metrics. AWS-generated metrics live in namespaces like `AWS/EC2`, `AWS/RDS`, `AWS/Lambda`...
+- <Tooltip content="A name/value pair that identifies a metric, e.g. InstanceId=i-1234. It distinguishes this instance's CPU metric from another's">Dimension</Tooltip> is an attribute of a metric (instance id, environment...) that lets you filter to the right resource. A metric can have **up to 30 dimensions**.
+- Every data point carries a **timestamp** — a metric is essentially time-series data.
+- **Custom metrics**: you push your own metrics via the `PutMetricData` API — orders per minute, an app's queue length, or **RAM usage** itself (which CloudWatch can't see on its own — more in section 2.4).
+- From metrics you build a **CloudWatch Dashboard** to visualize many metrics on one screen, including metrics from multiple regions/accounts.
+
+Two classic numbers that get asked:
+
+- **Resolution:** By default a metric is **standard resolution = 1 minute**. You can enable **high resolution = 1 second** for custom metrics when you need very fine-grained tracking.
+- **Retention:** CloudWatch automatically "rolls up" older data into coarser resolution and eventually deletes it:
+  - Data under 60 seconds: kept **3 hours**
+  - 1-minute data: kept **15 days**
+  - 5-minute data: kept **63 days**
+  - 1-hour data: kept **455 days (15 months)**
+
+  You can't delete metrics manually — they expire on the schedule above.
+
+**Detailed Monitoring:** For EC2, the default is **basic monitoring**, with metrics every **5 minutes** (free). **Enabling detailed monitoring** brings metrics every **1 minute** (charged).
+
+**About the metrics CloudWatch CAN'T see:** By default, CloudWatch only sees what's at the hypervisor level: CPU utilization, network in/out, disk I/O. It **cannot see**:
+
+- **Memory (RAM) utilization**
+- **Disk space used**
+
+That's because these live inside the guest OS, and AWS doesn't "peek" inside your instance. To get them, you must install the **CloudWatch Agent**.
+
+### 2.2. Metric Streams — push metrics out in near real time
+
+By default, getting metrics out of CloudWatch means **pulling** them via the API. **CloudWatch Metric Streams** flips that: it **pushes** metrics to an external destination **continuously, near real time** with low latency. Think of it as the **metric** counterpart of the subscription filter idea (which is for **logs**, coming in section 2.3).
+
+<ExcalidrawDiagram
+  src="/aws-monitoring-metric-streams.excalidraw"
+  alt="CloudWatch Metric Streams flow — CloudWatch Metrics streamed near-real-time through Kinesis Data Firehose to Amazon S3, Redshift, and OpenSearch; S3 queried by Athena"
+/>
+
+Common destinations:
+
+- **Kinesis Data Firehose** — and from Firehose onward to its destinations: **S3**, **Redshift**, **OpenSearch**.
+- **Third-party monitoring tools**: Datadog, Dynatrace, New Relic, Splunk, Sumo Logic...
+
+You can **filter** to stream only a subset of metrics instead of all of them, saving cost.
+
+**Use case:** feed metrics into a centralized analytics store (an S3 data lake, or a third-party <Tooltip content="Application Performance Monitoring — monitoring of application performance, e.g. Datadog, New Relic">APM</Tooltip> tool) in real time, instead of polling the API periodically.
+
+Keyword: "stream metrics in near-real-time to a data lake / third-party tool".
+
+### 2.3. Logs — where every record lands
+
+**CloudWatch Logs** stores text logs. The hierarchy:
+
+- **Log group**: the logs of one application/service (e.g. all logs of a Lambda function).
+- **Log stream**: a sub-stream within a group (e.g. logs from one specific instance/container).
+
+Sources are diverse: Lambda, VPC Flow Logs, API Gateway, Elastic Beanstalk, CloudTrail, Route 53, ECS, and EC2 (via the agent).
+
+**Retention** is configurable per log group, from 1 day to 10 years, or **never expire** (the default).
+
+> Unlike CloudWatch metrics, which expire on a fixed schedule.
+
+Two "turn logs into action" features that get asked a lot:
+
+- **Metric filter**: scans logs for a pattern (e.g. the word `ERROR` or `404`), counts occurrences, and turns that into a metric. From that metric you can create an alarm. This is how you "alert when an error shows up in the logs."
+- **Logs subscriptions**: push logs in real time to another destination — **Kinesis Data Streams**, **Kinesis Data Firehose**, **Lambda**, or **OpenSearch**. You can apply a **subscription filter** to filter logs before pushing them out.
+- **S3 export**: export logs to S3 in batches, which can take up to 12 hours to become available.
+- **Live Tail**: watch logs flow in real time right in the console while debugging.
+
+> A metric filter only applies to logs **arriving after** the filter is created; it doesn't retroactively filter the past.
+
+A classic exam pattern is **centralizing logs from many accounts/regions into a single "data lake" in one account**. Each account/region attaches a **subscription filter** that pushes logs in real time to a shared **Kinesis Data Streams** in a central account, then through **Firehose** into **S3** for long-term storage and analysis (queried with Athena). This gives you organization-wide observability without logging into each account individually.
+
+<ExcalidrawDiagram
+  src="/aws-monitoring-centralized-logging.excalidraw"
+  alt="Centralized logging pattern — CloudWatch Logs in multiple accounts and regions, each with a Subscription Filter, converging into a central Kinesis Data Streams, then Firehose into an S3 data lake"
+/>
+
+### 2.4. CloudWatch Agent — the extended arm into EC2
+
+As noted, to get **memory** and **disk usage** from EC2 (or on-premises servers), you need to install extra software.
+
+**The Unified CloudWatch Agent** is the current agent for this: it collects **both OS-level metrics (memory, disk, swap, per-process) and logs** and pushes them to CloudWatch. It used to be called the **CloudWatch Logs Agent**, which only pushed logs to CloudWatch (no metrics).
+
+A few things to remember:
+
+- The agent needs an **IAM role** attached to the instance (usually `CloudWatchAgentServerRole`) for permission to push data.
+- The agent's configuration can be stored in the SSM Parameter Store.
+
+### 2.5. Alarms — alerting and automated actions
+
+**A CloudWatch Alarm** watches a metric and changes state when it crosses a threshold. An alarm has three states:
+
+- **OK** — the metric is within normal range.
+- **ALARM** — the metric has crossed the threshold.
+- **INSUFFICIENT_DATA** — not enough data to decide.
+
+When it goes into ALARM, the alarm can trigger several kinds of **action**:
+
+- **SNS** — send a notification.
+- **EC2 Action** — stop / terminate / reboot / **recover** the instance.
+- **Auto Scaling Action** — scale an Auto Scaling Group out/in.
+- **Systems Manager Action** — create an OpsItem.
+
+A few exam-worthy details:
+
+- **EC2 Auto Recovery**: an alarm on the `StatusCheckFailed_System` metric can **recover** an instance when the underlying physical hardware fails — the instance moves to new hardware while **keeping** its private IP, public IP (if Elastic IP), instance ID, and metadata.
+- **Composite Alarm**: combine multiple alarms with **AND/OR** logic to reduce noise — only alarm when several conditions are true at once (e.g. high CPU **AND** high latency).
+- **Billing Alarm**: alerts when your bill crosses a threshold.
+
+> Trap: billing metrics **only exist in the us-east-1 (N. Virginia) region**, so a billing alarm must be created there.
+
+### 2.6. Synthetics Canaries and the Insights family
+
+Two more advanced feature groups, still within SAA scope:
+
+- **CloudWatch Synthetics (Canary)**: scripts that run on a schedule to **simulate a user accessing your site/API from the outside** — checking whether the endpoint is alive, how fast it responds, whether links are broken. This is "outside-in" monitoring, unlike internal metrics. Keyword: "monitor endpoint/API availability from a user's perspective".
+
+- The **Insights** family — deeper analysis tools:
+  - **CloudWatch Logs Insights**: a query language to search and analyze logs quickly.
+  - **Container Insights**: collects metrics & logs for ECS, EKS, Kubernetes.
+  - **Lambda Insights**: deep monitoring for Lambda functions.
+  - **Contributor Insights**: finds the "top contributors" to a metric.
+  - **Application Insights**: automatically sets up monitoring for an entire **application stack** (web tier, .NET, Microsoft SQL Server, SAP HANA...) — picking the right metrics/logs/alarms and using automated analysis to point at the **root cause** of a problem, instead of you configuring each piece by hand. (Powered by SageMaker.)
+
+**CloudWatch's overall use cases:** operational dashboards, alerting when CPU/latency/error crosses a threshold, triggering Auto Scaling, centralizing logs, analyzing logs, monitoring endpoint uptime.
+
+**Keywords:** `CPU utilization`, `latency`, `error rate`, `metric`, `alarm`, `dashboard`, `log`. And especially: whenever you see "**EC2 memory / disk usage**" → immediately think **CloudWatch Agent**.
+
+---
+
+## 3. Amazon EventBridge — the nervous system that reacts to events
+
+**Amazon EventBridge** (formerly **CloudWatch Events**) is a <Tooltip content="A central bus that receives events from many sources and routes them to many destinations, without the parties needing to know about each other">serverless event bus</Tooltip> — think of it as a "switchboard" that receives events from everywhere and routes them to wherever they need to be handled. This is the most different service in the group: it doesn't **measure** or **record**, it helps the system **react**.
+
+Main components:
+
+- **Event Bus** — the pipe that receives events. Three kinds:
+  - **Default event bus**: receives events from AWS services (e.g. EC2 state change, a new S3 object).
+  - **Custom event bus**: for events from your own applications.
+  - **Partner event bus**: for events from third-party SaaS (Datadog, Zendesk, Auth0...).
+- **Rule** — the routing rule. A rule matches events by **event pattern** (e.g. "any EC2 event transitioning to `terminated`") or by **schedule** (cron/rate), then sends them to targets.
+- **Target** — the handler. EventBridge supports **over 200 targets**: Lambda, SQS, SNS, Step Functions, Kinesis, ECS task...
+
+> An event bus can be accessed by another AWS account via a resource-based policy.
+
+A few advanced features worth knowing:
+
+- **Schedule:** use a cron rule to run periodic tasks — replacing a traditional cron server. (AWS also has the newer **EventBridge Scheduler**, built for scheduling at the scale of millions of tasks.)
+- **Schema Registry:** EventBridge can infer the structure (schema) of events and generate code bindings for your application.
+- **Archive & Replay:** store events and **replay** them later — handy for debugging or reprocessing after a failure.
+- **EventBridge Pipes:** point-to-point connections from a single source (SQS, Kinesis, DynamoDB Streams, Kafka...) through a filter/enrich step to a single target.
+
+**Use case:** automatically react to state changes in AWS (e.g. "when an instance is terminated, send an alert"), run cron-style periodic tasks, and **decouple** microservices in an event-driven architecture.
+
+One especially important use case here: **EventBridge is the bridge for reacting in real time to CloudTrail and Config** — we'll see this in the next two sections.
+
+**Keywords:** `react to an event`, `event-driven`, `trigger Lambda when...`, `schedule` / `cron`, `route events`, `decouple`.
+
+---
+
+## 4. AWS CloudTrail — the security camera that records "who did what"
+
+If CloudWatch cares about "how is the system running," then **AWS CloudTrail** cares about **"who did what."**
+
+Every time there's an API call to AWS — via Console, CLI, SDK, or from another AWS service — CloudTrail records an entry: **who** did it (identity), **what** (action), **when** (timestamp), **from where** (source IP), and on which resource.
+
+This is a service for **governance, audit, and compliance** — answering investigative questions.
+
+CloudTrail is **enabled by default** on every account. You can use **Event History** to view the records of the **last 90 days** of events, searchable and downloadable right in the console, **for free**. But there's an important limit: Event History **only contains management events**, and only 90 days.
+
+For more than that, you create a **Trail**:
+
+- A trail enables **long-term storage** by delivering logs to an **S3 bucket**, readable with AWS Athena.
+- It can be a **multi-region trail** (gathering events from every region) and an **organization trail** (gathering every account in AWS Organizations).
+- It can simultaneously deliver logs to **CloudWatch Logs** to create metric filters and alarms on API behavior.
+
+<ExcalidrawDiagram
+  src="/aws-monitoring-cloudtrail-events.excalidraw"
+  alt="CloudTrail event types — Management, Data, and Insights events flow into CloudTrail (90-day history), then to an S3 bucket for long-term retention, queried with Athena"
+/>
+
+CloudTrail distinguishes **three types of events** — this is a favorite trap:
+
+| Event type            | What it is                                  | Default |
+| --------------------- | ------------------------------------------- | ------- |
+| **Management events** | Control-plane operations (managing resources) | On      |
+| **Data events**       | Data-plane operations (very high volume)    | Off     |
+| **Insights events**   | Detecting unusual activity                  | Off     |
+
+Two features to remember:
+
+- **CloudTrail Insights**: automatically detects **unusual API activity** (spikes in call rate or error rate) compared to the normal baseline.
+- **Log file integrity validation**: legal-grade proof that logs haven't been tampered with — critical for audits.
+
+**EventBridge integration:** CloudTrail can pair with EventBridge to **react almost instantly** to a specific API call. This is the "detect and auto-remediate" pattern that shows up a lot in the exam.
+
+The key point is that **CloudTrail records EVERY API call**, so any sensitive action — deleting a DynamoDB table (`DeleteTable`), opening a Security Group (`AuthorizeSecurityGroupIngress`)... — can become an event for **EventBridge** to catch and fire an alert via **SNS** (or trigger a Lambda to auto-remediate):
+
+<ExcalidrawDiagram
+  src="/aws-monitoring-cloudtrail-eventbridge.excalidraw"
+  alt="CloudTrail + EventBridge pattern — a user's DeleteTable call on DynamoDB and AuthorizeSecurityGroupIngress call on a Security Group are both logged by CloudTrail, which emits an event to EventBridge, which alerts via SNS"
+/>
+
+**Use case:** investigating "who deleted the bucket," "who modified the security group," security forensics, meeting compliance/audit requirements, storing long-term activity history.
+
+**Keywords:** `who made this API call`, `who deleted/created/modified`, `audit`, `governance`, `compliance forensics`, `source IP of a request`, `account activity history`.
+
+---
+
+## 5. AWS Config — the compliance inspector that tracks configuration
+
+**AWS Config** answers a very different question from the two services above: **"What does a resource's configuration look like, and is it compliant with the rules?"** While CloudTrail records **actions** (who called which API), Config tracks **state** — each resource's current configuration, and how that configuration changes over time.
+
+Picture Config as an inspector: it periodically photographs each resource's current state, files those into an album over time, then checks them against a set of rules.
+
+Core components:
+
+- **Configuration Recorder**: continuously records the configuration of supported resources.
+- **Configuration Item (CI)**: Config's basic unit of data.
+- **Configuration Timeline / History**: a timeline showing how a resource's configuration changed over time, with a link to the very **CloudTrail event** that caused each change.
+
+The "smartest" part is **Config Rules** — evaluating whether a resource is **compliant**:
+
+- **Managed rules**: hundreds of AWS-prebuilt rules, e.g. `s3-bucket-public-read-prohibited` (S3 buckets must not be public), `encrypted-volumes` (EBS must be encrypted), `restricted-ssh` (SGs must not open port 22 to the internet).
+- **Custom rules**: you write your own with Lambda or Guard.
+- Rules can run **on configuration change** or **periodically**.
+
+**A very common point of confusion:** Config is a **detective control**, **NOT a preventive control**. It **cannot block** a bad action — it only **flags** a resource as non-compliant after the fact. If a question asks "prevent someone from creating a wrong resource in the first place," the answer is **IAM policy / SCP**, not Config.
+
+Extended features:
+
+- **Remediation**: when non-compliance is detected, Config can **auto-fix** it by running an **SSM Automation document** (e.g. automatically close a port, turn on encryption).
+- **Notification & reaction when compliance changes** — Config has **two paths** to send signals out:
+  - **Directly to SNS**: the delivery channel pushes notifications (configuration change + compliance change) straight to an **SNS topic**. Simple, but it sends **everything** — you have to filter on the subscriber side.
+  - **Via EventBridge**: when a resource turns **non-compliant**, Config emits an event to **EventBridge**; EventBridge **filters by pattern** and routes to **Lambda** (auto-remediate), **SNS**, **Step Functions**... This reacts **selectively** and more flexibly — the same "detect and react" spirit as the CloudTrail + EventBridge pattern earlier, but the trigger here is a **compliance change** rather than an API call.
+- **Conformance Pack**: a bundle of Config rules + remediation, deployed as a single unit across one account or an entire Organization.
+- **Aggregator**: a consolidated multi-account / multi-region view.
+- **Delivery channel**: the channel Config uses to send configuration snapshots/history to an **S3 bucket** (long-term storage), and also where you declare the **SNS topic** for the notifications above.
+
+Note: Config is a **per-region** service (the configuration recorder runs per region), but an aggregator can consolidate across them.
+
+**Use case:** continuously check "are all EBS volumes encrypted," "is any bucket public," view a resource's configuration change history, auto-remediate violations, prove compliance for audits.
+
+**Keywords:** `compliance`, `configuration change over time`, `is the resource configured correctly`, `desired/non-compliant configuration`, `config history`, `audit a resource's settings`, `automatically remediate`.
+
+---
+
+## 6. CloudTrail vs CloudWatch vs Config — telling them apart for good
+
+This is the most important part for the exam. All three sound like "monitoring," but each looks through a different **lens** at the same resource:
+
+| Criterion       | **CloudWatch**                | **CloudTrail**                  | **AWS Config**                                       |
+| --------------- | ----------------------------- | ------------------------------- | ---------------------------------------------------- |
+| Core question   | How is the system **performing**? | **Who did what** (via API)? | How is the resource **configured** & is it compliant? |
+| Focus           | Performance & operations      | API activity / audit            | Configuration state & compliance                     |
+| Data            | Metrics, logs, events         | API call records                | Configuration items, compliance state                |
+| Time axis       | Real-time + measurement history | Event log over time           | Configuration snapshots & change history             |
+| Typical example | Alarm when CPU > 80%          | Detect who deleted a bucket     | Detect an SG open to `0.0.0.0/0`                     |
+| Control nature  | Monitoring                    | Audit / forensics               | Detective (detects), doesn't prevent                 |
+
+A mantra to remember:
+
+- **CloudWatch = Performance** ("How is it performing?")
+- **CloudTrail = Who** ("Who did this?")
+- **Config = What & Compliance** ("What does it look like, is it compliant?")
+
+### How they work together
+
+In practice these three are **not mutually exclusive** — they combine into one complete story. Back to the opening scenario: someone opens a Security Group to the internet at 2 a.m.
+
+1. **AWS Config** detects the Security Group is now **non-compliant** (violating the "no SSH open to `0.0.0.0/0`" rule) — answering "**what** is wrong."
+2. **CloudTrail** tells you exactly **who** called the `AuthorizeSecurityGroupIngress` API, from **which IP**, and when — answering "**who** did it."
+3. **CloudWatch** (via logs/alarms) or **EventBridge** sends the notification and can **trigger an auto-fix** — answering "how do we react."
+
+Three lenses, three answers, combining into the full picture of an incident.
+
+---
+
+## 7. Tips & Tricks: spotting keywords in SAA questions
+
+In the exam you have only about 90 seconds per question. Recognition has to be almost reflexive. The table below maps common keywords to the answer:
+
+| Keyword/scenario in the question                                          | Answer                                              |
+| ------------------------------------------------------------------------- | --------------------------------------------------- |
+| CPU utilization, latency, error rate, metric, dashboard                   | **CloudWatch**                                      |
+| EC2 **memory / RAM / disk space** usage                                   | **CloudWatch Agent** (not available by default)     |
+| Need EC2 metrics every **1 minute** instead of 5                          | **Enable Detailed Monitoring**                      |
+| Alert when a specific string appears in logs (`ERROR`...)                 | **CloudWatch Logs Metric Filter** → Alarm           |
+| Centralize logs from **many accounts** in one place, real time            | **CloudWatch Logs Subscription Filter** (→ Kinesis) |
+| Stream **metrics** near-real-time to a data lake (S3) / third-party tool  | **CloudWatch Metric Streams** (→ Firehose)          |
+| Automatically **recover** an EC2 instance when hardware fails             | **CloudWatch Alarm** + EC2 recover action           |
+| Monitor **endpoint uptime/latency from the outside**                      | **CloudWatch Synthetics (Canary)**                  |
+| Find the **top-N** (IP/URL) contributors                                  | **CloudWatch Contributor Insights**                 |
+| **Who** called an API / deleted / modified a resource, **source IP**      | **CloudTrail**                                      |
+| **Audit / governance / compliance forensics**, long-term API history      | **CloudTrail** (trail → S3)                          |
+| Detect **unusual API activity**                                           | **CloudTrail Insights**                             |
+| Prove logs **haven't been tampered with**                                 | **CloudTrail log file integrity validation**        |
+| Is a resource **configuration-compliant**, **configuration change history** | **AWS Config**                                    |
+| **Automatically remediate** a violating resource                          | **AWS Config** + SSM Automation (remediation)       |
+| Apply a set of compliance rules across an **entire Organization**         | **Config Conformance Pack**                         |
+| **React** to an event / serverless **cron** / route an event to Lambda    | **EventBridge**                                     |
+| React in **real time** to a specific API call                             | **CloudTrail/Config + EventBridge**                 |
+
+A few quick tie-breakers when you're torn:
+
+- See **"who"** → almost certainly **CloudTrail**.
+- See **"compliant / configuration / correctly configured"** → **Config**.
+- See a performance measure (**CPU, latency, metric, alarm**) → **CloudWatch**.
+- See **"react / trigger / when X happens then do Y"** → **EventBridge**.
+- See **"EC2 memory/disk"** → don't forget the **CloudWatch Agent**.
+- See **"prevent it in the first place"** → that's **IAM/SCP**, NOT Config (Config only detects after the fact).
+
+---
+
+## Conclusion
+
+Back to the four 3 a.m. questions, now you have a clear address for each:
+
+- **"How is the system running?"** → **CloudWatch** measures performance, stores logs, fires alarms.
+- **"Who did what?"** → **CloudTrail** records every API call like a security camera.
+- **"Is the configuration compliant?"** → **AWS Config** tracks state and evaluates compliance.
+- **"How do we react?"** → **EventBridge** turns events into automated actions.
+
+Things to burn into memory for the SAA exam:
+
+- **CloudWatch = performance**. Remember EC2 memory/disk **needs the Agent**, detailed monitoring for **1-minute** metrics, metric filters turn logs into alarms, subscription filters centralize multi-account logs, billing alarms only in **us-east-1**.
+- **CloudTrail = "who did what"**. Event history is 90 days free but management events only; for long-term / data events, create a **trail → S3**. Distinguish management / data / insights events.
+- **AWS Config = configuration & compliance**. It's a **detective control** (detects, doesn't prevent), tracks change history, and can **auto-remediate** via SSM.
+- **EventBridge = react to events**. It's the glue that ties services together for event-driven architecture and automation.
+- **Three lenses, one picture**: Config says **what** is wrong, CloudTrail says **who** did it, CloudWatch/EventBridge help you **react**. In the exam they're mutually exclusive answers; in practice they complement each other.
+
+Master the boundaries between these four services, and you'll stop being fooled by "four answers that all sound right."
