@@ -116,7 +116,7 @@ Mức độ ảnh hưởng tùy workload:
 
 > **Đây là trade-off thật sự: bạn đánh đổi vài ms write latency để lấy High Availability.**
 
-Trong gần như mọi trường hợp production, **deal này là cực kỳ hời** — đổi 1–3ms để được uptime SLA 99.95% và không bị đánh thức lúc 3h sáng. Nếu app của bạn nhạy cảm với 2ms thì vấn đề thường nằm ở chỗ khác (N+1 query, thiếu connection pool, network app↔DB...) chứ không phải ở Multi-AZ.
+Trong gần như mọi trường hợp production, **deal này là cực kỳ hời** — đổi 1–3ms để được uptime SLA 99.95% và không bị đánh thức lúc 3h sáng. Nếu app của bạn nhạy cảm với 2ms thì vấn đề thường nằm ở chỗ khác (N+1 query, thiếu connection pool, network app ↔ DB...) chứ không phải ở Multi-AZ.
 
 Chỉ cân nhắc tắt Multi-AZ khi:
 

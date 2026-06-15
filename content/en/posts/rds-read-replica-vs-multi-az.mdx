@@ -116,7 +116,7 @@ Impact varies by workload:
 
 > **This is the real trade-off: you exchange a few ms of write latency for High Availability.**
 
-In almost every production scenario, **this is an excellent deal** — trading 1-3ms for 99.95% uptime SLA and not getting woken up at 3 AM. If your app is sensitive to 2ms, the issue is usually elsewhere (N+1 queries, missing connection pool, app↔DB network...) not Multi-AZ.
+In almost every production scenario, **this is an excellent deal** — trading 1-3ms for 99.95% uptime SLA and not getting woken up at 3 AM. If your app is sensitive to 2ms, the issue is usually elsewhere (N+1 queries, missing connection pool, app ↔ DB network...) not Multi-AZ.
 
 Only consider disabling Multi-AZ when:
 
