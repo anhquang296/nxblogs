@@ -1,0 +1,256 @@
+---
+title: 'Amazon S3 Security: Mã hóa, Object Lock, Access Points và những gì cần nhớ cho kỳ thi SAA'
+date: '2026-06-16'
+tags: ['Devops', 'AWS', 'SAA']
+description: 'Tổng quan toàn bộ tính năng bảo mật của Amazon S3 cho kỳ thi SAA — mã hóa (SSE-S3, SSE-KMS, SSE-C, DSSE-KMS, client-side), Default Encryption, CORS, MFA Delete, Access Logs, Pre-signed URLs, Object Lock & Glacier Vault Lock, Access Points và Object Lambda. Mỗi tính năng giải quyết vấn đề gì, dùng khi nào, và cần nhớ điều gì để đi thi.'
+enableComment: true
+---
+
+# Amazon S3 Security: Mã hóa, Object Lock, Access Points và những gì cần nhớ cho kỳ thi SAA
+
+Bạn vừa đưa một hệ thống lưu trữ hồ sơ y tế và chứng từ tài chính lên Amazon S3. Mọi thứ chạy mượt — cho đến khi đội compliance gõ cửa với một bảng câu hỏi khiến bạn toát mồ hôi:
+
+- Dữ liệu trong bucket có được mã hóa không? Ai đang giữ khóa — AWS, hay bạn?
+- Nếu một nhân viên (hoặc kẻ tấn công có credential) cố xóa hồ sơ, ta có chặn được không? Có chứng minh được với kiểm toán viên là hồ sơ không thể bị sửa trong 7 năm không?
+- Ai đã truy cập object nào, lúc nào?
+- Làm sao cho đối tác tải đúng một file trong 10 phút, mà không phải mở bucket ra public?
+- Năm team khác nhau cần truy cập năm thư mục khác nhau trong cùng một bucket — quản lý quyền kiểu gì cho khỏi loạn?
+- Khi đội phân tích đọc dữ liệu, làm sao tự động che (redact) số CMND/thẻ tín dụng mà không phải tạo một bản sao đã xử lý?
+
+Điều thú vị: **mỗi câu hỏi ở trên ứng với đúng một tính năng bảo mật của S3.** S3 không chỉ là "kho lưu file giá rẻ" — nó là một tập hợp các lớp phòng thủ, mỗi lớp sinh ra để trả lời một câu hỏi cụ thể. Bài viết này sắp xếp toàn bộ những tính năng đó thành bốn lớp dễ nhớ, giải thích mỗi tính năng giải quyết vấn đề gì, dùng khi nào, và chốt lại những điểm hay ra trong kỳ thi <Tooltip content="AWS Certified Solutions Architect – Associate, chứng chỉ kiến trúc sư giải pháp AWS mức Associate">SAA</Tooltip>.
+
+---
+
+## 1. Bức tranh tổng thể: bốn lớp phòng thủ
+
+Thay vì học 13 tính năng rời rạc, hãy gắn mỗi tính năng với **câu hỏi bảo mật** mà nó trả lời. Tất cả gom lại thành bốn lớp:
+
+| Câu hỏi compliance hỏi               | Lớp phòng thủ           | Tính năng S3                                                       |
+| ------------------------------------ | ----------------------- | ----------------------------------------------------------------- |
+| "Dữ liệu có mã hóa không? Ai giữ khóa?" | **Encryption**          | SSE-S3, SSE-KMS, SSE-C, DSSE-KMS, Client-Side, TLS in-transit      |
+| "Có chống sửa/xóa được không?"          | **Integrity & Retention** | Versioning, S3 Object Lock, Glacier Vault Lock, MFA Delete         |
+| "Ai được làm gì, cấp quyền ra sao?"     | **Access Control**      | Bucket Policy/IAM, Pre-signed URLs, Access Points, CORS, Object Lambda |
+| "Ai đã truy cập cái gì, lúc nào?"       | **Observability**       | S3 Server Access Logs, CloudTrail                                  |
+
+Hai ý xuyên suốt cần ghim trước khi đi vào chi tiết:
+
+- **Mã hóa và kiểm soát truy cập là hai chuyện khác nhau.** Mã hóa trả lời "nếu dữ liệu bị lấy ra thì kẻ trộm có đọc được không"; kiểm soát truy cập trả lời "ai được chạm vào dữ liệu". Một bucket mã hóa hoàn hảo vẫn có thể bị rò nếu policy mở toang, và ngược lại.
+- **Versioning là nền móng.** Hai tính năng chống xóa quan trọng nhất — Object Lock và MFA Delete — đều yêu cầu bật Versioning trước. <Tooltip content="Tính năng giữ lại mọi phiên bản của một object: khi ghi đè hay xóa, S3 không thực sự mất dữ liệu mà tạo phiên bản mới hoặc đánh dấu delete marker">Versioning</Tooltip> nghĩa là S3 giữ lại mọi phiên bản của object, nên "xóa" không đồng nghĩa với "mất".
+
+---
+
+## 2. Mã hóa at-rest: bốn cách giữ khóa
+
+Đây là phần dày nhất của Section 14, và cũng hay ra thi nhất. "Mã hóa at-rest" (encryption at rest) nghĩa là dữ liệu được mã hóa khi nằm yên trên đĩa, để nếu ai đó lấy được phần cứng vật lý cũng không đọc được nội dung. Câu hỏi cốt lõi phân biệt các phương án không phải "có mã hóa hay không", mà là: **mã hóa diễn ra ở đâu, và ai giữ khóa.**
+
+### 2.1. SSE-S3 — để AWS lo hết
+
+<Tooltip content="Server-Side Encryption with Amazon S3-Managed Keys — mã hóa phía server bằng khóa do chính S3 quản lý">SSE-S3</Tooltip> là kiểu mã hóa mặc định và đơn giản nhất. S3 mã hóa object bằng thuật toán AES-256, dùng khóa do chính AWS tạo, quản lý và xoay vòng. Bạn không thấy khóa, không quản lý khóa, không trả thêm tiền.
+
+Enable SSE-S3 thông qua header `x-amz-server-side-encryption: AES256`.
+
+### 2.2. SSE-KMS — kiểm soát và audit khóa
+
+<Tooltip content="Server-Side Encryption with AWS KMS Keys — mã hóa phía server bằng khóa quản lý qua dịch vụ AWS Key Management Service">SSE-KMS</Tooltip> vẫn để S3 mã hóa, nhưng khóa nằm trong AWS KMS — dịch vụ quản lý khóa của AWS. Khác biệt lớn so với SSE-S3 nằm ở hai chữ: **kiểm soát và audit.** Bạn tự tạo khóa, đặt policy ai được dùng khóa, bật xoay vòng khóa, và quan trọng nhất: mọi lần khóa được dùng để mã hóa/giải mã đều được ghi lại trong CloudTrail.
+
+- **Vấn đề nó giải quyết:** "tôi cần biết chính xác ai giải mã dữ liệu, lúc nào, và muốn tự kiểm soát vòng đời khóa."
+- **Use case:** dữ liệu nhạy cảm, yêu cầu tách quyền (người quản trị bucket khác người quản trị khóa), cần dấu vết audit.
+
+Mỗi lần upload object, S3 gọi KMS API `GenerateDataKey`, mỗi lần download, S3 gọi `Decrypt`. Các lời gọi này tính vào quota KMS theo region (mặc định vài nghìn request/giây). Với bucket lưu lượng cực cao, bạn có thể bị **throttling** (KMS từ chối bớt request khi vượt quota).
+
+Giải pháp: bật **S3 Bucket Keys** — S3 tạo một khóa cấp-bucket, dùng nó để sinh khóa dữ liệu cục bộ cho từng object thay vì gọi KMS mỗi lần, giảm số lời gọi KMS tới khoảng 99% (giảm cả chi phí lẫn nguy cơ throttling).
+
+Chi tiết về cách KMS sinh khóa, <Tooltip content="Kỹ thuật mã hóa lồng nhau: một khóa dữ liệu mã hóa data, rồi chính khóa dữ liệu đó lại được mã hóa bằng một master key">envelope encryption</Tooltip> và các loại khóa nằm trong bài [AWS Security & Encryption](/vi/posts/aws-security-encryption-overview) — bài này chỉ tập trung vào cách S3 vận dụng chúng.
+
+### 2.3. SSE-C — bạn mang khóa, S3 mã hóa hộ
+
+<Tooltip content="Server-Side Encryption with Customer-Provided Keys — mã hóa phía server bằng khóa do khách hàng tự cung cấp">SSE-C</Tooltip> dành cho trường hợp bạn muốn tự quản lý khóa hoàn toàn bên ngoài AWS, nhưng vẫn để S3 làm việc mã hóa.
+
+Cách hoạt động: bạn đính kèm khoá trong headers của mỗi request. S3 dùng khóa đó để mã hóa (hoặc giải mã) object, rồi vứt bỏ khóa ngay — AWS không bao giờ lưu khóa của bạn.
+
+- **Vấn đề nó giải quyết:** "tôi bắt buộc phải tự giữ khóa ngoài AWS, nhưng không muốn tự viết code mã hóa."
+- **Use case:** yêu cầu tuân thủ bắt buộc khóa không được nằm trong hạ tầng nhà cung cấp cloud.
+
+> Vì khóa truyền qua đường mạng trong mỗi request, **HTTPS là bắt buộc**. Mất khóa = mất luôn dữ liệu, vì AWS không giữ bản sao nào.
+
+### 2.4. DSSE-KMS — mã hóa hai lớp cho compliance khắt khe
+
+<Tooltip content="Dual-layer Server-Side Encryption with AWS KMS Keys — mã hóa phía server hai lớp, cả hai dùng khóa KMS">DSSE-KMS</Tooltip> giống SSE-KMS nhưng áp dụng **hai lớp** mã hóa chồng lên nhau, cả hai đều dùng khóa KMS. Nó ra đời để đáp ứng các tiêu chuẩn tuân thủ rất nghiêm ngặt (ví dụ một số yêu cầu của chính phủ/quốc phòng Mỹ) vốn đòi hỏi mã hóa nhiều lớp.
+
+- **Vấn đề nó giải quyết:** "quy định bắt buộc dữ liệu phải được mã hóa bằng hai lớp độc lập."
+- **Use case:** tổ chức chịu khung tuân thủ đặc thù yêu cầu dual-layer encryption.
+
+### 2.5. Client-Side Encryption — server không bao giờ thấy plaintext
+
+Với mã hóa phía client (client-side encryption), bạn mã hóa dữ liệu **trước khi** gửi lên S3 và tự giữ khóa. S3 chỉ nhận và lưu ciphertext — nó không bao giờ thấy nội dung gốc hay khóa. Khi tải về, chính client giải mã.
+
+- **Vấn đề nó giải quyết:** "tôi không tin tưởng giao việc mã hóa cho server, kể cả AWS."
+- **Use case:** dữ liệu cực kỳ nhạy cảm; mô hình zero-trust với nhà cung cấp cloud.
+
+> Vì khóa truyền qua đường mạng trong mỗi request, HTTPS là bắt buộc. Mất khóa = mất luôn dữ liệu, vì AWS không giữ bản sao nào.
+
+### 2.6. Mã hóa in-transit (encryption in flight)
+
+Bốn mục trên nói về dữ liệu nằm yên. Còn dữ liệu đang **di chuyển** giữa client và S3 thì sao? Đó là mã hóa in-transit, hay SSL/TLS. S3 cung cấp cả endpoint HTTP lẫn HTTPS.
+
+Để ép buộc chỉ dùng HTTPS, ta thêm vào bucket policy một điều kiện từ chối khi `aws:SecureTransport` bằng `false`. SSE-C, như đã nói, bắt buộc HTTPS sẵn.
+
+---
+
+## 3. Default Encryption & ép buộc mã hóa
+
+Biết các kiểu mã hóa là một chuyện; đảm bảo **không object nào lọt qua mà chưa mã hóa** lại là chuyện khác. Đây là nơi hai cơ chế bổ trợ xuất hiện.
+
+### 3.1. Default Encryption
+
+Từ đầu năm 2023, AWS bật mã hóa mặc định cho mọi bucket, mọi object mới tự động được mã hóa bằng SSE-S3, không tốn thêm phí và không cần cấu hình. Bạn có thể đổi mặc định của bucket sang SSE-KMS nếu muốn kiểm soát khóa.
+
+- **Vấn đề nó giải quyết:** lỗi do con người — quên không bật mã hóa khi upload.
+
+Default Encryption đảm bảo object được mã hóa, nhưng **không ngăn** ai đó cố tình upload với một kiểu mã hóa khác. Nếu cần ép buộc một kiểu cụ thể, dùng bucket policy.
+
+### 3.2. Ép buộc mã hóa bằng bucket policy
+
+Muốn bắt buộc mọi upload phải dùng đúng một kiểu mã hóa (ví dụ chỉ chấp nhận SSE-KMS), ta viết một **bucket policy** từ chối lệnh `s3:PutObject` nếu thiếu hoặc sai header mã hóa mong muốn.
+
+- **Cần nhớ thứ tự đánh giá:** bucket policy được kiểm tra **trước** khi Default Encryption áp dụng. Nghĩa là policy là "người gác cổng" — nó có thể chặn đứng một request không hợp lệ ngay từ đầu, còn Default Encryption chỉ là lưới an toàn áp mã hóa cho những request đã được cho qua.
+
+---
+
+## 4. Bảo toàn & chống xóa: Object Lock, Glacier Vault Lock, MFA Delete
+
+Mã hóa bảo vệ tính bí mật. Nhóm tính năng này bảo vệ tính **toàn vẹn** — chống việc dữ liệu bị sửa hoặc xóa, dù do tai nạn, do người trong cuộc, hay do ransomware. Khái niệm trung tâm là <Tooltip content="Write Once Read Many — ghi một lần, đọc nhiều lần, không thể sửa hay xóa trong thời gian quy định">WORM</Tooltip>: ghi một lần, không ai sửa/xóa được nữa.
+
+### 4.1. S3 Object Lock
+
+Yêu cầu: **Versioning enable**
+
+Object Lock áp mô hình WORM cho từng phiên bản object: khóa không cho xóa một object version trong một khoảng thời gian xác định.
+
+Có ba khái niệm cần tách bạch:
+
+- **Retention mode** — có hai loại:
+  - **Governance mode:** đa số người dùng không thể xóa/ghi đè, nhưng một số ít có quyền đặc biệt (`s3:BypassGovernanceRetention`) vẫn vượt được khi cần. Phù hợp khi bạn muốn bảo vệ mạnh nhưng giữ một "đường thoát" cho admin.
+  - **Compliance mode:** không một ai xóa/ghi đè được, **kể cả root account**. Đã đặt là không thể rút ngắn thời hạn hay đổi mode. Dùng khi quy định pháp lý không cho phép bất kỳ ngoại lệ nào.
+- **Retention Period:** bảo vệ object trong một khoảng thời gian cố định; có thể gia hạn thêm.
+- **Legal Hold:** bảo vệ object **vô thời hạn**, độc lập hoàn toàn với retention period, bật/tắt tự do bằng quyền `s3:PutObjectLegalHold`. Hình dung như một "lệnh phong tỏa" trong vụ kiện: giữ chừng nào còn cần, gỡ khi xong.
+
+- **Use case:** hồ sơ tài chính/y tế phải giữ bất biến nhiều năm; chống ransomware xóa backup.
+
+### 4.2. Glacier Vault Lock
+
+Trong khi Object Lock bảo vệ object trong S3, **Glacier Vault Lock** bảo vệ dữ liệu trong kho lưu trữ lạnh Amazon S3 Glacier. Nó cũng theo mô hình WORM, nhưng điểm đặc trưng là một **lock policy** (chính sách khóa): một khi đã khóa, chính sách đó trở thành bất biến — không ai sửa hay xóa được nữa, mãi mãi.
+
+- **Vấn đề nó giải quyết:** chứng minh với kiểm toán viên rằng dữ liệu lưu trữ dài hạn tuyệt đối không thể bị thay đổi.
+
+
+> Object Lock dành cho object trong S3 (cần enable versioning). Vault Lock dành cho Glacier vault, nhấn mạnh ở chính sách khóa vĩnh viễn.
+
+### 4.3. MFA Delete
+
+Yêu cầu: **Versioning enable**
+
+<Tooltip content="Multi-Factor Authentication — xác thực đa yếu tố, buộc người dùng nhập thêm mã từ một thiết bị (điện thoại hoặc khóa cứng) ngoài mật khẩu/credential">MFA</Tooltip> Delete buộc người dùng phải nhập mã MFA cho những thao tác nguy hiểm nhất trên bucket. Chỉ chủ bucket (root account) mới bật/tắt được MFA Delete.
+
+Cụ thể, MFA được yêu cầu khi:
+
+- Xóa vĩnh viễn một object version.
+- Tắt versioning của bucket.
+
+Ngược lại, MFA **không** cần khi bật Versioning hay liệt kê các version đã xóa.
+
+---
+
+## 5. Quan sát & cấp quyền tạm thời
+
+### 5.1. S3 Server Access Logs
+
+Muốn trả lời "ai đã truy cập object nào, lúc nào", bạn bật **S3 Server Access Logging**. Nó ghi lại mọi request đến bucket (kể cả request bị từ chối, và từ tài khoản khác), rồi giao log sang một bucket S3 khác trong cùng region để bạn phân tích sau (ví dụ truy vấn bằng Athena).
+
+> **Đừng để bucket chứa log trùng với bucket đang được giám sát.** Làm vậy tạo vòng lặp: ghi log lại sinh ra request, request lại sinh log... bucket phình ra theo cấp số nhân.
+
+### 5.2. Pre-signed URLs
+
+<Tooltip content="URL được ký sẵn, mang quyền truy cập tạm thời và có thời hạn tới một object cụ thể">Pre-signed URL</Tooltip> là URL do bạn ký, cho phép người cầm nó truy cập một object cụ thể trong thời gian giới hạn — kế thừa đúng quyền của người đã ký. Nhờ đó bạn cấp quyền tải lên/tải xuống mà **không cần mở bucket ra public**.
+
+- **Use case:** cho phép tải nội dung premium chỉ với người đã đăng nhập; danh sách người được tải thay đổi liên tục; cho người dùng upload thẳng vào đúng vị trí trong bucket.
+- **Cần nhớ:** URL có thời hạn (CLI mặc định một giờ, cấu hình được). Bucket vẫn private hoàn toàn.
+
+Đây là tính năng có riêng một bài đi sâu — gồm cả luồng upload bằng presigned POST, download, và tích hợp CloudFront Signed Cookies cho ảnh: [S3 Presigned URL](/vi/posts/s3-presigned-url).
+
+---
+
+## 6. Quản lý ở quy mô lớn & biến đổi dữ liệu
+
+### 6.1. S3 Access Points
+
+Hình dung một bucket dữ liệu chung mà năm team cùng dùng: finance đọc/ghi thư mục `finance/`, sales chỉ đọc `sales/`, đối tác chỉ đọc `shared/`... Nếu nhồi tất cả quy tắc vào một bucket policy, nó sẽ phình thành một khối JSON khổng lồ, khó đọc, dễ sai.
+
+**S3 Access Points** giải bài toán này bằng cách tách quyền ra nhiều "cửa vào". Mỗi access point có **DNS name riêng** và **access point policy riêng** (giống bucket policy nhưng chỉ cho phạm vi của nó). Bạn cấp cho mỗi team một access point với policy gọn gàng, thay vì một policy trung tâm phức tạp.
+
+- **VPC Origin:** một access point có thể đặt nguồn là Internet hoặc <Tooltip content="Virtual Private Cloud — mạng riêng ảo của bạn trong AWS">VPC</Tooltip>. Nếu chọn VPC Origin, access point chỉ truy cập được từ trong VPC, và bạn phải tạo một **VPC Endpoint** (Gateway hoặc Interface) để tới nó — policy của VPC endpoint phải cho phép truy cập tới cả bucket lẫn access point.
+
+Access Points là để **mở rộng quản lý quyền** (nhiều team/prefix). Mỗi Access Points = một policy + một DNS.
+
+### 6.2. S3 Object Lambda
+
+Đôi khi các ứng dụng khác nhau cần **các phiên bản khác nhau** của cùng một object: đội phân tích cần bản đã che PII, ứng dụng cũ cần định dạng XML thay vì JSON, trang web cần ảnh đã resize. Cách cũ là tạo và lưu nhiều bản sao đã xử lý — tốn kém và khó đồng bộ.
+
+**S3 Object Lambda** cho phép chèn một hàm AWS Lambda vào giữa, để **biến đổi object ngay lúc nó được đọc (GET)**, không cần lưu bản sao. Kiến trúc cần: một bucket, một S3 Access Point hỗ trợ, và một **S3 Object Lambda Access Point**. Ứng dụng gọi Object Lambda Access Point → nó kích hoạt Lambda → Lambda đọc object gốc qua access point hỗ trợ, biến đổi, rồi trả kết quả về cho người gọi.
+
+- **Use case:** che (redact) thông tin nhạy cảm như PII cho môi trường phân tích; chuyển đổi định dạng (XML → JSON); resize/đóng dấu mờ ảnh on-the-fly; làm giàu dữ liệu từ nguồn khác.
+- **Cần nhớ:** chỉ **một bucket** duy nhất; điểm mấu chốt là biến đổi lúc đọc, dùng cặp Access Point + Object Lambda Access Point.
+
+### 6.3. S3 CORS
+
+<Tooltip content="Cross-Origin Resource Sharing — cơ chế cho phép một origin (web) truy cập tài nguyên ở một origin khác, do trình duyệt thực thi">CORS</Tooltip> là cơ chế bảo mật của **trình duyệt**, không phải của riêng S3. Một origin được định nghĩa bởi scheme + host + port (ví dụ `https://www.example.com`). Theo mặc định, trình duyệt chặn JavaScript của một origin gọi tài nguyên ở origin khác — trừ khi origin đích cho phép qua các header CORS.
+
+Cách hoạt động: trước request thật, trình duyệt gửi một request "thăm dò" (<Tooltip content="Request OPTIONS trình duyệt tự gửi trước request thật để hỏi server có cho phép cross-origin không">preflight</Tooltip>) tới S3; nếu cấu hình CORS của bucket cho phép origin đó, trình duyệt mới gửi request thật.
+
+- **Use case kinh điển trong đề thi:** một website tĩnh host trên bucket A nạp file (ảnh, font, dữ liệu) từ bucket B → bạn phải bật cấu hình **CORS trên bucket B** (bucket đích), cho phép origin của bucket A.
+- **Cần nhớ:** thấy "trình duyệt", "cross-origin", "website tĩnh gọi bucket khác" → CORS, và cấu hình đặt ở **bucket được gọi**.
+
+---
+
+## 7. Tổng hợp cho phòng thi
+
+Những cặp dễ nhầm — ghim lại cho chắc trước khi vào phòng thi:
+
+| Tình huống / cặp dễ nhầm                          | Chốt nhanh                                                                                          |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| SSE-KMS vs SSE-C                                   | KMS: khóa trong AWS, có audit CloudTrail. SSE-C: bạn gửi khóa mỗi request, **bắt buộc HTTPS**, AWS không lưu khóa |
+| Cần mã hóa 2 lớp cho compliance                    | **DSSE-KMS** — không phải SSE-KMS thường                                                            |
+| Lưu lượng KMS quá cao bị throttling                | Bật **S3 Bucket Keys** → giảm ~99% lời gọi KMS                                                      |
+| Governance vs Compliance (Object Lock)            | Governance: có quyền đặc biệt thì bypass được. Compliance: **không ai**, kể cả root                 |
+| Object Lock vs Glacier Vault Lock                 | Object Lock: object trong S3 (cần Versioning). Vault Lock: vault Glacier, **lock policy bất biến**  |
+| Retention Period vs Legal Hold                    | Period: có thời hạn, gia hạn được. Legal Hold: vô thời hạn, độc lập, bật/tắt bằng quyền             |
+| MFA Delete                                         | Chỉ **root** bật được; cần Versioning; bảo vệ "xóa version vĩnh viễn" + "tắt versioning"; chỉ qua CLI |
+| Default Encryption vs ép buộc mã hóa              | Default: SSE-S3 tự động từ 2023. Ép buộc: **bucket policy** Deny PutObject thiếu header (đánh giá trước) |
+| Nhiều team/prefix một bucket                       | **S3 Access Points** — mỗi team một AP với policy + DNS riêng                                        |
+| Biến đổi dữ liệu lúc đọc (redact, resize, đổi định dạng) | **S3 Object Lambda** — 1 bucket + Access Point + Object Lambda Access Point                     |
+| Website/trình duyệt gọi bucket khác               | **CORS**, cấu hình trên bucket đích                                                                 |
+| "Ai đã truy cập gì"                                | **S3 Access Logs** → ghi sang bucket KHÁC (đừng trỏ về chính nó)                                    |
+| Cho phép tải/đẩy file tạm thời, bucket vẫn private | **Pre-signed URL**                                                                                  |
+
+---
+
+## Kết: một bucket, bốn lớp phòng thủ
+
+Quay lại bảng câu hỏi của đội compliance ở đầu bài. Giờ mỗi câu đã có lời đáp:
+
+- "Dữ liệu mã hóa chưa, ai giữ khóa?" → chọn giữa **SSE-S3 / SSE-KMS / SSE-C / DSSE-KMS / Client-Side** theo mức kiểm soát khóa bạn cần.
+- "Chống sửa/xóa được không?" → **Object Lock** (Compliance mode + Legal Hold), **Glacier Vault Lock**, **MFA Delete** — tất cả dựng trên nền **Versioning**.
+- "Ai truy cập gì?" → **S3 Access Logs** và **CloudTrail**.
+- "Cấp quyền tạm thời không cần public?" → **Pre-signed URL**.
+- "Nhiều team một bucket?" → **S3 Access Points**.
+- "Biến đổi dữ liệu lúc đọc?" → **S3 Object Lambda**.
+
+Vài điều cốt lõi cần mang theo vào phòng thi:
+
+- **Trục phân biệt mã hóa là "ai giữ khóa".** SSE-S3 (AWS giữ) → SSE-KMS (bạn giữ qua KMS, có audit) → SSE-C (bạn mang khóa mỗi request) → Client-Side (server không bao giờ thấy plaintext). DSSE-KMS = SSE-KMS nhưng hai lớp.
+- **SSE-KMS tốn KMS API calls** — gặp throttling thì nhớ ngay **S3 Bucket Keys**.
+- **Versioning là điều kiện tiên quyết** của Object Lock và MFA Delete.
+- **Compliance mode chặn cả root; Governance mode cho phép bypass có kiểm soát.** Legal Hold thì vô thời hạn và độc lập với retention period.
+- **MFA Delete chỉ root bật, chỉ qua CLI, cần Versioning** — ba điểm hay bị hỏi gộp.
+- **Access Points để mở rộng quản lý quyền; Object Lambda để biến đổi dữ liệu lúc đọc; CORS cấu hình ở bucket đích.**
+- **Access Logs phải ghi sang bucket khác** — bẫy vòng lặp log là câu hỏi quen thuộc.
