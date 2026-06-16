@@ -231,26 +231,3 @@ The easily-confused pairs — pin them down before walking into the exam room:
 | Website/browser calling another bucket            | **CORS**, configured on the target bucket                                                            |
 | "Who accessed what"                               | **S3 Access Logs** → write to a DIFFERENT bucket (don't point it at itself)                          |
 | Allow temporary download/upload, bucket stays private | **Pre-signed URL**                                                                               |
-
----
-
-## Conclusion: one bucket, four defense layers
-
-Back to the compliance team's checklist from the start. Now each question has an answer:
-
-- "Is the data encrypted, who holds the key?" → choose among **SSE-S3 / SSE-KMS / SSE-C / DSSE-KMS / Client-Side** based on the level of key control you need.
-- "Can we prevent tampering/deletion?" → **Object Lock** (Compliance mode + Legal Hold), **Glacier Vault Lock**, **MFA Delete** — all built on **Versioning**.
-- "Who accessed what?" → **S3 Access Logs** and **CloudTrail**.
-- "Grant temporary access without going public?" → **Pre-signed URL**.
-- "Many teams, one bucket?" → **S3 Access Points**.
-- "Transform data on read?" → **S3 Object Lambda**.
-
-A few core takeaways to bring into the exam room:
-
-- **The axis that distinguishes encryption is "who holds the key".** SSE-S3 (AWS holds it) → SSE-KMS (you hold it via KMS, with audit) → SSE-C (you bring the key on every request) → Client-Side (the server never sees plaintext). DSSE-KMS = SSE-KMS but two layers.
-- **SSE-KMS costs KMS API calls** — if you hit throttling, think **S3 Bucket Keys** immediately.
-- **Versioning is a prerequisite** for Object Lock and MFA Delete.
-- **Compliance mode blocks even root; Governance mode allows controlled bypass.** Legal Hold is indefinite and independent of the retention period.
-- **MFA Delete is root-only, CLI-only, and requires Versioning** — three points often asked together.
-- **Access Points scale permission management; Object Lambda transforms data on read; CORS is configured on the target bucket.**
-- **Access Logs must write to a different bucket** — the log-loop trap is a familiar question.

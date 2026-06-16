@@ -231,26 +231,3 @@ Những cặp dễ nhầm — ghim lại cho chắc trước khi vào phòng thi
 | Website/trình duyệt gọi bucket khác               | **CORS**, cấu hình trên bucket đích                                                                 |
 | "Ai đã truy cập gì"                                | **S3 Access Logs** → ghi sang bucket KHÁC (đừng trỏ về chính nó)                                    |
 | Cho phép tải/đẩy file tạm thời, bucket vẫn private | **Pre-signed URL**                                                                                  |
-
----
-
-## Kết: một bucket, bốn lớp phòng thủ
-
-Quay lại bảng câu hỏi của đội compliance ở đầu bài. Giờ mỗi câu đã có lời đáp:
-
-- "Dữ liệu mã hóa chưa, ai giữ khóa?" → chọn giữa **SSE-S3 / SSE-KMS / SSE-C / DSSE-KMS / Client-Side** theo mức kiểm soát khóa bạn cần.
-- "Chống sửa/xóa được không?" → **Object Lock** (Compliance mode + Legal Hold), **Glacier Vault Lock**, **MFA Delete** — tất cả dựng trên nền **Versioning**.
-- "Ai truy cập gì?" → **S3 Access Logs** và **CloudTrail**.
-- "Cấp quyền tạm thời không cần public?" → **Pre-signed URL**.
-- "Nhiều team một bucket?" → **S3 Access Points**.
-- "Biến đổi dữ liệu lúc đọc?" → **S3 Object Lambda**.
-
-Vài điều cốt lõi cần mang theo vào phòng thi:
-
-- **Trục phân biệt mã hóa là "ai giữ khóa".** SSE-S3 (AWS giữ) → SSE-KMS (bạn giữ qua KMS, có audit) → SSE-C (bạn mang khóa mỗi request) → Client-Side (server không bao giờ thấy plaintext). DSSE-KMS = SSE-KMS nhưng hai lớp.
-- **SSE-KMS tốn KMS API calls** — gặp throttling thì nhớ ngay **S3 Bucket Keys**.
-- **Versioning là điều kiện tiên quyết** của Object Lock và MFA Delete.
-- **Compliance mode chặn cả root; Governance mode cho phép bypass có kiểm soát.** Legal Hold thì vô thời hạn và độc lập với retention period.
-- **MFA Delete chỉ root bật, chỉ qua CLI, cần Versioning** — ba điểm hay bị hỏi gộp.
-- **Access Points để mở rộng quản lý quyền; Object Lambda để biến đổi dữ liệu lúc đọc; CORS cấu hình ở bucket đích.**
-- **Access Logs phải ghi sang bucket khác** — bẫy vòng lặp log là câu hỏi quen thuộc.
