@@ -8,16 +8,16 @@ enableComment: true
 
 # AWS Monitoring & Auditing: CloudWatch, CloudTrail, Config
 
-Ba giờ sáng, điện thoại bạn rung. Hệ thống production đang chậm bất thường, một vài API trả về lỗi 500. Bạn mở laptop, và trong vài phút tiếp theo bạn sẽ phải trả lời **bốn câu hỏi hoàn toàn khác nhau**:
+Ba giờ sáng, điện thoại bạn rung. Hệ thống production đang chậm bất thường, một vài API trả về lỗi 500. Bạn mở laptop, và trong vài phút tiếp theo bạn sẽ phải trả lời bốn câu hỏi hoàn toàn khác nhau:
 
-1. "Hệ thống đang **chạy thế nào**? CPU bao nhiêu, độ trễ tăng từ lúc nào, error rate đang ở mức nào?"
+1. "Hệ thống đang chạy thế nào? CPU bao nhiêu, độ trễ tăng từ lúc nào, error rate đang ở mức nào?"
 2. "Lúc 2 giờ sáng, **ai** đã sửa cái Security Group đó? Sửa từ IP nào?"
-3. "Cấu hình của các resource bây giờ có còn **đúng chuẩn tuân thủ** (compliance) không, và nó đã thay đổi ra sao theo thời gian?"
-4. "Lần sau khi sự kiện y hệt xảy ra, làm sao để hệ thống **tự động phản ứng** mà không cần đánh thức tôi lúc 3 giờ sáng?"
+3. "Cấu hình của các resource bây giờ có còn đúng chuẩn tuân thủ (compliance) không, và nó đã thay đổi ra sao theo thời gian?"
+4. "Lần sau khi sự kiện y hệt xảy ra, làm sao để hệ thống tự động phản ứng mà không cần đánh thức tôi lúc 3 giờ sáng?"
 
-Điều thú vị là: mỗi câu hỏi ánh xạ tới **một dịch vụ AWS khác nhau**. Câu 1 là **CloudWatch**, câu 2 là **CloudTrail**, câu 3 là **AWS Config**, câu 4 là **EventBridge**. Bốn dịch vụ này thường bị gom chung vào nhóm "monitoring", và đó chính là cái bẫy yêu thích của đề thi SAA: đưa ra một tình huống rồi hỏi bạn nên dùng dịch vụ nào — trong khi ba phương án còn lại đều "nghe có vẻ đúng".
+Điều thú vị là: mỗi câu hỏi ánh xạ tới một dịch vụ AWS khác nhau. Câu 1 là **CloudWatch**, câu 2 là **CloudTrail**, câu 3 là **AWS Config**, câu 4 là **EventBridge**. Bốn dịch vụ này thường bị gom chung vào nhóm "monitoring", và đó chính là cái bẫy yêu thích của đề thi SAA: đưa ra một tình huống rồi hỏi bạn nên dùng dịch vụ nào — trong khi ba phương án còn lại đều "nghe có vẻ đúng".
 
-Bài viết này là tấm bản đồ giúp bạn phân biệt rạch ròi bốn "con mắt" đó. Với mỗi dịch vụ, mình sẽ đi qua: nó **quan sát cái gì**, các **tính năng cốt lõi**, **use case** thực tế, và quan trọng nhất cho phòng thi — các **keyword "tố cáo"** nó trong đề.
+Bài viết này là tấm bản đồ giúp bạn phân biệt rạch ròi bốn "con mắt" đó. Với mỗi dịch vụ, mình sẽ đi qua: nó quan sát cái gì, các tính năng cốt lõi, use case thực tế, và quan trọng nhất cho phòng thi — các keyword "tố cáo" nó trong đề.
 
 > **Lưu ý:** Đây là góc nhìn overview để xây mental model và nhận diện nhanh trong phòng thi. Mỗi dịch vụ ở đây đều có thể viết thành một bài deep-dive riêng; bài này tập trung vào ranh giới giữa chúng và những con số hay được hỏi.
 
@@ -25,16 +25,16 @@ Bài viết này là tấm bản đồ giúp bạn phân biệt rạch ròi bố
 
 ## 1. Bức tranh tổng thể: 4 câu hỏi, 4 dịch vụ
 
-Trước khi đi vào chi tiết, hãy ghim cái khung tư duy này. Cả bốn dịch vụ đều "nhìn" vào hệ thống của bạn, nhưng mỗi cái nhìn vào một **khía cạnh khác nhau**:
+Trước khi đi vào chi tiết, hãy ghim cái khung tư duy này. Cả bốn dịch vụ đều "nhìn" vào hệ thống của bạn, nhưng mỗi cái nhìn vào một khía cạnh khác nhau:
 
 | Câu hỏi                         | Dịch vụ         | Bản chất                                              | Ví von                                            |
 | ------------------------------- | --------------- | ----------------------------------------------------- | ------------------------------------------------- |
-| "Hệ thống chạy thế nào?"        | **CloudWatch**  | Giám sát hiệu năng & vận hành (metrics, logs, alarms) | Bảng đồng hồ trên xe — tốc độ, vòng tua, nhiệt độ |
-| "Ai đã làm gì?"                 | **CloudTrail**  | Ghi lại lịch sử các lời gọi API (audit trail)         | Camera an ninh — ai vào, lúc nào, làm gì          |
-| "Cấu hình có đúng chuẩn không?" | **AWS Config**  | Theo dõi cấu hình resource & đánh giá tuân thủ        | Thanh tra — chụp ảnh hiện trạng, so với quy định  |
-| "Phản ứng khi có sự kiện?"      | **EventBridge** | Định tuyến sự kiện tới hành động tự động              | Hệ thần kinh — sự kiện kích thích, cơ thể phản xạ |
+| "Hệ thống chạy thế nào?"        | CloudWatch  | Giám sát hiệu năng & vận hành (metrics, logs, alarms) | Bảng đồng hồ trên xe — tốc độ, vòng tua, nhiệt độ |
+| "Ai đã làm gì?"                 | CloudTrail  | Ghi lại lịch sử các lời gọi API (audit trail)         | Camera an ninh — ai vào, lúc nào, làm gì          |
+| "Cấu hình có đúng chuẩn không?" | AWS Config  | Theo dõi cấu hình resource & đánh giá tuân thủ        | Thanh tra — chụp ảnh hiện trạng, so với quy định  |
+| "Phản ứng khi có sự kiện?"      | EventBridge | Định tuyến sự kiện tới hành động tự động              | Hệ thần kinh — sự kiện kích thích, cơ thể phản xạ |
 
-Ba dịch vụ đầu trả lời câu hỏi **"chuyện gì đang/đã xảy ra"** ở ba lớp khác nhau: hiệu năng (CloudWatch), hành vi con người/hệ thống qua API (CloudTrail), trạng thái cấu hình (Config). Dịch vụ thứ tư — EventBridge — không phải để **quan sát** mà để **hành động**: nó là chất keo dán các dịch vụ kia lại với nhau, biến một sự kiện thành một phản ứng tự động.
+Ba dịch vụ đầu trả lời câu hỏi "chuyện gì đang/đã xảy ra" ở ba lớp khác nhau: hiệu năng (CloudWatch), hành vi con người/hệ thống qua API (CloudTrail), trạng thái cấu hình (Config). Dịch vụ thứ tư — EventBridge — không phải để quan sát mà để **hành động**: nó là chất keo dán các dịch vụ kia lại với nhau, biến một sự kiện thành một phản ứng tự động.
 
 Giữ cái khung này trong đầu, giờ ta đi sâu từng dịch vụ.
 
@@ -42,7 +42,7 @@ Giữ cái khung này trong đầu, giờ ta đi sâu từng dịch vụ.
 
 ## 2. Amazon CloudWatch — đôi mắt theo dõi hiệu năng
 
-**Amazon CloudWatch** là dịch vụ giám sát trung tâm của AWS: nó thu thập **metrics** (số đo định lượng), **logs** (bản ghi văn bản), tạo **alarms** (cảnh báo), và **dashboards** (bảng trực quan) cho gần như mọi dịch vụ AWS. Nếu bạn cần biết "thứ này đang chạy ra sao", câu trả lời gần như luôn bắt đầu từ CloudWatch.
+**Amazon CloudWatch** là dịch vụ giám sát trung tâm của AWS: nó thu thập metrics (số đo định lượng), logs (bản ghi văn bản), tạo alarms (cảnh báo), và dashboards (bảng trực quan) cho gần như mọi dịch vụ AWS. Nếu bạn cần biết "thứ này đang chạy ra sao", câu trả lời gần như luôn bắt đầu từ CloudWatch.
 
 CloudWatch là một "chiếc ô" lớn gồm nhiều thành phần con. Ta đi qua từng cái.
 
@@ -54,35 +54,35 @@ CloudWatch là một "chiếc ô" lớn gồm nhiều thành phần con. Ta đi 
 - <Tooltip content="Cặp name/value để định danh một metric, ví dụ InstanceId=i-1234. Giúp phân biệt metric CPU của instance này với instance khác">
     Dimension
   </Tooltip>
-  là một thuộc tính của metric (instance id, environment...) giúp bạn lọc tới đúng resource. Một metric có **tối đa 30
-  dimension**.
-- Mỗi điểm dữ liệu đều gắn một **timestamp** — về bản chất metric là dữ liệu chuỗi thời gian.
-- **Custom metric**: bạn đẩy metric của riêng mình qua API `PutMetricData` — số đơn hàng/phút, độ dài queue trong app, hoặc chính **RAM usage** (thứ CloudWatch không tự thấy được — sẽ nói ở mục 2.4).
-- Từ metric, bạn dựng được **CloudWatch Dashboard** để trực quan hoá nhiều metric trên một màn hình, kể cả metric đến từ nhiều region/account.
+  là một thuộc tính của metric (instance id, environment...) giúp bạn lọc tới đúng resource. Một metric có tối đa 30
+  dimension.
+- Mỗi điểm dữ liệu đều gắn một timestamp — về bản chất metric là dữ liệu chuỗi thời gian.
+- **Custom metric**: bạn đẩy metric của riêng mình qua API `PutMetricData` — số đơn hàng/phút, độ dài queue trong app, hoặc chính RAM usage (thứ CloudWatch không tự thấy được — sẽ nói ở mục 2.4).
+- Từ metric, bạn dựng được CloudWatch Dashboard để trực quan hoá nhiều metric trên một màn hình, kể cả metric đến từ nhiều region/account.
 
 Hai con số kinh điển hay bị hỏi:
 
-- **Độ phân giải (resolution):** Mặc định metric là **standard resolution = 1 phút**. Bạn có thể bật **high resolution = 1 giây** cho custom metric khi cần theo dõi cực sát.
+- **Độ phân giải (resolution):** Mặc định metric là standard resolution = 1 phút. Bạn có thể bật high resolution = 1 giây cho custom metric khi cần theo dõi cực sát.
 - **Thời gian lưu trữ (retention):** CloudWatch tự động "cuộn" (rollup) dữ liệu cũ về độ phân giải thô hơn rồi cuối cùng xoá:
-  - Dữ liệu dưới 60 giây: giữ **3 giờ**
-  - Dữ liệu 1 phút: giữ **15 ngày**
-  - Dữ liệu 5 phút: giữ **63 ngày**
-  - Dữ liệu 1 giờ: giữ **455 ngày (15 tháng)**
+  - Dữ liệu dưới 60 giây: giữ 3 giờ
+  - Dữ liệu 1 phút: giữ 15 ngày
+  - Dữ liệu 5 phút: giữ 63 ngày
+  - Dữ liệu 1 giờ: giữ 455 ngày (15 tháng)
 
   Bạn không xoá metric thủ công được — chúng tự hết hạn theo lịch trên.
 
-**Detailed Monitoring:** Với EC2, mặc định là **basic monitoring**, metric đẩy về mỗi **5 phút** (free). **Enable detailed monitoring** thì metric về mỗi **1 phút** (charged).
+**Detailed Monitoring:** Với EC2, mặc định là basic monitoring, metric đẩy về mỗi 5 phút (free). Enable detailed monitoring thì metric về mỗi 1 phút (charged).
 
-**Đối với những metric CloudWatch KHÔNG thấy:** Mặc định CloudWatch chỉ thấy được những gì ở mức hypervisor: CPU utilization, network in/out, disk I/O. Nó **không nhìn thấy được**:
+**Đối với những metric CloudWatch KHÔNG thấy:** Mặc định CloudWatch chỉ thấy được những gì ở mức hypervisor: CPU utilization, network in/out, disk I/O. Nó **không** nhìn thấy được:
 
-- **Memory (RAM) utilization**
-- **Disk space used** (dung lượng đĩa còn trống)
+- Memory (RAM) utilization
+- Disk space used (dung lượng đĩa còn trống)
 
 Lý do là những thông số này nằm ở tầng hệ điều hành bên trong, AWS không "nhòm" vào trong instance của bạn. Muốn có chúng, bạn phải cài **CloudWatch Agent**.
 
 ### 2.2. Metric Streams — đẩy metric ra ngoài theo thời gian thực
 
-Mặc định, muốn lấy metric ra khỏi CloudWatch bạn phải **kéo (pull)** qua API. **CloudWatch Metric Streams** đảo ngược điều đó: nó **đẩy (push)** metric ra một đích bên ngoài một cách **liên tục, near-real-time** với độ trễ thấp. Hãy xem đây là phiên bản dành cho **metric** của ý tưởng subscription filter (vốn dành cho **log**, sẽ gặp ở mục 2.3).
+Mặc định, muốn lấy metric ra khỏi CloudWatch bạn phải kéo (pull) qua API. **CloudWatch Metric Streams** đảo ngược điều đó: nó đẩy (push) metric ra một đích bên ngoài một cách liên tục, near-real-time với độ trễ thấp. Hãy xem đây là phiên bản dành cho metric của ý tưởng subscription filter (vốn dành cho log, sẽ gặp ở mục 2.3).
 
 <ExcalidrawDiagram
   src="/aws-monitoring-metric-streams.excalidraw"
@@ -91,10 +91,10 @@ Mặc định, muốn lấy metric ra khỏi CloudWatch bạn phải **kéo (pul
 
 Đích nhận phổ biến:
 
-- **Kinesis Data Firehose** — và từ Firehose đi tiếp tới các đích của nó: **S3**, **Redshift**, **OpenSearch**.
+- **Kinesis Data Firehose** — và từ Firehose đi tiếp tới các đích của nó: S3, Redshift, OpenSearch.
 - **Công cụ giám sát bên thứ ba**: Datadog, Dynatrace, New Relic, Splunk, Sumo Logic...
 
-Bạn có thể **lọc** để chỉ stream một tập con metric thay vì toàn bộ, giúp tiết kiệm chi phí.
+Bạn có thể lọc để chỉ stream một tập con metric thay vì toàn bộ, giúp tiết kiệm chi phí.
 
 **Use case:** đưa metric vào kho phân tích tập trung (data lake trên S3, hoặc công cụ <Tooltip content="Application Performance Monitoring — giám sát hiệu năng ứng dụng, ví dụ Datadog, New Relic">APM</Tooltip> bên thứ ba) theo thời gian thực, thay vì phải gọi API định kỳ.
 
@@ -109,20 +109,20 @@ Keyword nhận diện: "stream metrics in near-real-time to a data lake / third-
 
 Nguồn log đổ vào rất đa dạng: Lambda, VPC Flow Logs, API Gateway, Elastic Beanstalk, Cloudtrail, Route 53, ECS, và EC2 (qua agent).
 
-**Retention** của log có thể cấu hình theo từng log group, từ 1 ngày tới 10 năm, hoặc **không bao giờ hết hạn** (mặc định)
+**Retention** của log có thể cấu hình theo từng log group, từ 1 ngày tới 10 năm, hoặc không bao giờ hết hạn (mặc định)
 
 > Khác so với Cloudwatch metrics, sẽ hết hạn theo rule
 
 Hai tính năng "biến log thành hành động" rất hay được hỏi:
 
 - **Metric filter**: quét log tìm một mẫu (ví dụ chữ `ERROR` hoặc `404`), đếm số lần xuất hiện và biến nó thành một metric. Từ metric đó bạn có thể tạo alarm. Đây là cách "cảnh báo khi log xuất hiện lỗi".
-- **Logs subscriptions**: đẩy log theo thời gian thực tới đích khác — **Kinesis Data Streams**, **Kinesis Data Firehose**, **Lambda**, hoặc **OpenSearch**. Có thể apply **Subscription filter** để lọc logs trước khi đẩy đi.
+- **Logs subscriptions**: đẩy log theo thời gian thực tới đích khác — Kinesis Data Streams, Kinesis Data Firehose, Lambda, hoặc OpenSearch. Có thể apply Subscription filter để lọc logs trước khi đẩy đi.
 - **S3 export**: export log ra S3 theo batch, có thể mất tới 12 giờ để batch available.
 - **Live Tail**: để xem log chảy theo thời gian thực ngay trên console khi đang debug.
 
 > Metric filter chỉ áp dụng cho log **đến sau khi** filter được tạo, không lọc ngược về quá khứ.
 
-Một pattern kinh điển hay ra đề là **gom log tập trung từ nhiều account/region về một "data lake" ở một account duy nhất**. Mỗi account/region gắn một **Subscription Filter** đẩy log real-time về một **Kinesis Data Streams** chung ở account trung tâm, rồi qua **Firehose** đổ vào **S3** để lưu trữ và phân tích lâu dài (query bằng Athena). Cách này cho bạn khả năng quan sát toàn tổ chức mà không phải đăng nhập vào từng account riêng lẻ.
+Một pattern kinh điển hay ra đề là gom log tập trung từ nhiều account/region về một "data lake" ở một account duy nhất. Mỗi account/region gắn một Subscription Filter đẩy log real-time về một Kinesis Data Streams chung ở account trung tâm, rồi qua Firehose đổ vào S3 để lưu trữ và phân tích lâu dài (query bằng Athena). Cách này cho bạn khả năng quan sát toàn tổ chức mà không phải đăng nhập vào từng account riêng lẻ.
 
 <ExcalidrawDiagram
   src="/aws-monitoring-centralized-logging.excalidraw"
@@ -131,9 +131,9 @@ Một pattern kinh điển hay ra đề là **gom log tập trung từ nhiều a
 
 ### 2.4. CloudWatch Agent — cánh tay nối dài vào EC2
 
-Như đã nói, để lấy được **memory** và **disk usage** từ EC2 (hoặc server on-premises), bạn cần cài thêm phần mềm.
+Như đã nói, để lấy được memory và disk usage từ EC2 (hoặc server on-premises), bạn cần cài thêm phần mềm.
 
-**Unified CloudWatch Agent** là agent hiện tại làm việc này: nó thu thập **cả metric mức hệ điều hành (memory, disk, swap, per-process) lẫn log** rồi đẩy về CloudWatch. Trước đây nó tên là **CloudWatch Logs Agent**, chỉ làm nhiệm vụ đẩy log về Cloudwatch (không bao gồm metric).
+**Unified CloudWatch Agent** là agent hiện tại làm việc này: nó thu thập cả metric mức hệ điều hành (memory, disk, swap, per-process) lẫn log rồi đẩy về CloudWatch. Trước đây nó tên là CloudWatch Logs Agent, chỉ làm nhiệm vụ đẩy log về Cloudwatch (không bao gồm metric).
 
 Vài điểm cần nhớ:
 
@@ -148,43 +148,43 @@ Vài điểm cần nhớ:
 - **ALARM** — metric đã vượt ngưỡng.
 - **INSUFFICIENT_DATA** — chưa đủ dữ liệu để kết luận.
 
-Khi chuyển sang ALARM, alarm có thể kích hoạt nhiều loại **action**:
+Khi chuyển sang ALARM, alarm có thể kích hoạt nhiều loại action:
 
 - **SNS** — gửi thông báo.
-- **EC2 Action** — stop / terminate / reboot / **recover** instance.
+- **EC2 Action** — stop / terminate / reboot / recover instance.
 - **Auto Scaling Action** — scale out/in một Auto Scaling Group.
 - **Systems Manager Action** — tạo OpsItem.
 
 Vài chi tiết hay ra đề:
 
-- **EC2 Auto Recovery**: alarm dựa trên metric `StatusCheckFailed_System` có thể **recover** instance khi phần cứng vật lý bên dưới hỏng — instance được chuyển sang phần cứng mới mà **giữ nguyên** private IP, public IP (nếu là Elastic IP), instance ID và metadata.
-- **Composite Alarm**: kết hợp nhiều alarm bằng logic **AND/OR** để giảm nhiễu — chỉ báo động khi nhiều điều kiện cùng đúng (ví dụ CPU cao **VÀ** latency cao).
+- **EC2 Auto Recovery**: alarm dựa trên metric `StatusCheckFailed_System` có thể recover instance khi phần cứng vật lý bên dưới hỏng — instance được chuyển sang phần cứng mới mà giữ nguyên private IP, public IP (nếu là Elastic IP), instance ID và metadata.
+- **Composite Alarm**: kết hợp nhiều alarm bằng logic AND/OR để giảm nhiễu — chỉ báo động khi nhiều điều kiện cùng đúng (ví dụ CPU cao **VÀ** latency cao).
 - **Billing Alarm**: cảnh báo khi hoá đơn vượt ngưỡng.
 
-> Điểm gài bẫy: metric billing **chỉ tồn tại ở region us-east-1 (N. Virginia)**, nên billing alarm phải tạo ở đó.
+> Điểm gài bẫy: metric billing **chỉ** tồn tại ở region us-east-1 (N. Virginia), nên billing alarm phải tạo ở đó.
 
 ### 2.6. Synthetics Canaries và nhóm Insights
 
 Hai nhóm tính năng cao cấp hơn, nhưng vẫn nằm trong tầm SAA:
 
-- **CloudWatch Synthetics (Canary)**: các script chạy theo lịch để **mô phỏng người dùng truy cập từ bên ngoài** vào website/API của bạn — kiểm tra endpoint còn sống không, độ trễ bao nhiêu, link có gãy không. Đây là giám sát "từ ngoài nhìn vào" (outside-in), khác với metric nội bộ. Keyword: "monitor endpoint/API availability from a user's perspective".
+- **CloudWatch Synthetics (Canary)**: các script chạy theo lịch để mô phỏng người dùng truy cập từ bên ngoài vào website/API của bạn — kiểm tra endpoint còn sống không, độ trễ bao nhiêu, link có gãy không. Đây là giám sát "từ ngoài nhìn vào" (outside-in), khác với metric nội bộ. Keyword: "monitor endpoint/API availability from a user's perspective".
 
 - Nhóm **Insights** — các công cụ phân tích chuyên sâu:
   - **CloudWatch Logs Insights**: ngôn ngữ truy vấn để tìm kiếm và phân tích log nhanh.
   - **Container Insights**: thu thập metric & log cho ECS, EKS, Kubernetes.
   - **Lambda Insights**: giám sát chuyên sâu cho hàm Lambda.
   - **Contributor Insights**: tìm ra những "tác nhân đóng góp nhiều nhất" vào một metric.
-  - **Application Insights**: tự động thiết lập giám sát cho cả một **stack ứng dụng** (web tier, .NET, Microsoft SQL Server, SAP HANA...) — tự chọn sẵn metric/log/alarm phù hợp và dùng phân tích tự động để chỉ ra **nguyên nhân gốc** khi có sự cố, thay vì bạn phải cấu hình thủ công từng phần. (Powered by SageMaker.)
+  - **Application Insights**: tự động thiết lập giám sát cho cả một stack ứng dụng (web tier, .NET, Microsoft SQL Server, SAP HANA...) — tự chọn sẵn metric/log/alarm phù hợp và dùng phân tích tự động để chỉ ra nguyên nhân gốc khi có sự cố, thay vì bạn phải cấu hình thủ công từng phần. (Powered by SageMaker.)
 
 **Use case tổng của CloudWatch:** dashboard vận hành, cảnh báo khi CPU/latency/error vượt ngưỡng, trigger Auto Scaling, gom log tập trung, phân tích log, giám sát uptime endpoint.
 
-**Keyword nhận diện:** `CPU utilization`, `latency`, `error rate`, `metric`, `alarm`, `dashboard`, `log`. Và đặc biệt: hễ thấy "**memory / disk usage của EC2**" → nhớ ngay tới **CloudWatch Agent**.
+**Keyword nhận diện:** `CPU utilization`, `latency`, `error rate`, `metric`, `alarm`, `dashboard`, `log`. Và đặc biệt: hễ thấy "memory / disk usage của EC2" → nhớ ngay tới **CloudWatch Agent**.
 
 ---
 
 ## 3. Amazon EventBridge — hệ thần kinh phản ứng theo sự kiện
 
-**Amazon EventBridge** (tên cũ là **CloudWatch Events**) là một <Tooltip content="Một bus trung tâm nhận sự kiện từ nhiều nguồn rồi định tuyến tới nhiều đích, không cần các bên biết về nhau">serverless event bus</Tooltip> — bạn có thể hình dung nó như một "tổng đài" nhận sự kiện từ khắp nơi rồi định tuyến tới đúng nơi cần xử lý. Đây là dịch vụ khác biệt nhất trong nhóm: nó không **đo lường** hay **ghi lại**, mà giúp hệ thống **phản ứng**.
+**Amazon EventBridge** (tên cũ là CloudWatch Events) là một <Tooltip content="Một bus trung tâm nhận sự kiện từ nhiều nguồn rồi định tuyến tới nhiều đích, không cần các bên biết về nhau">serverless event bus</Tooltip> — bạn có thể hình dung nó như một "tổng đài" nhận sự kiện từ khắp nơi rồi định tuyến tới đúng nơi cần xử lý. Đây là dịch vụ khác biệt nhất trong nhóm: nó không đo lường hay ghi lại, mà giúp hệ thống **phản ứng**.
 
 Các thành phần chính:
 
@@ -192,21 +192,21 @@ Các thành phần chính:
   - **Default event bus**: nhận sự kiện từ các dịch vụ AWS (ví dụ EC2 đổi trạng thái, S3 có object mới).
   - **Custom event bus**: cho sự kiện từ ứng dụng của bạn.
   - **Partner event bus**: cho sự kiện từ các SaaS bên thứ ba (Datadog, Zendesk, Auth0...).
-- **Rule** — luật định tuyến. Một rule khớp sự kiện theo **event pattern** (ví dụ "mọi sự kiện EC2 chuyển sang trạng thái `terminated`") hoặc theo **lịch (schedule)** dạng cron/rate, rồi gửi tới các target.
-- **Target** — đích xử lý. EventBridge hỗ trợ **hơn 200 target**: Lambda, SQS, SNS, Step Functions, Kinesis, ECS task...
+- **Rule** — luật định tuyến. Một rule khớp sự kiện theo event pattern (ví dụ "mọi sự kiện EC2 chuyển sang trạng thái `terminated`") hoặc theo lịch (schedule) dạng cron/rate, rồi gửi tới các target.
+- **Target** — đích xử lý. EventBridge hỗ trợ hơn 200 target: Lambda, SQS, SNS, Step Functions, Kinesis, ECS task...
 
 > Event Bus có thể được truy cập bởi 1 AWS account khác thông quan Resource-based policy.
 
 Một vài tính năng nâng cao đáng biết:
 
-- **Schedule:** dùng cron rule để chạy tác vụ định kỳ — thay thế cho cron server truyền thống. (AWS còn có **EventBridge Scheduler** mới hơn, chuyên cho lập lịch ở quy mô hàng triệu tác vụ.)
+- **Schedule:** dùng cron rule để chạy tác vụ định kỳ — thay thế cho cron server truyền thống. (AWS còn có EventBridge Scheduler mới hơn, chuyên cho lập lịch ở quy mô hàng triệu tác vụ.)
 - **Schema Registry:** EventBridge có thể tự suy ra cấu trúc (schema) của sự kiện và sinh code binding cho ứng dụng của bạn.
-- **Archive & Replay:** lưu lại sự kiện và **phát lại** sau này — hữu ích để debug hoặc xử lý lại khi có lỗi.
+- **Archive & Replay:** lưu lại sự kiện và phát lại sau này — hữu ích để debug hoặc xử lý lại khi có lỗi.
 - **EventBridge Pipes:** kết nối điểm-tới-điểm (point-to-point) từ một nguồn (SQS, Kinesis, DynamoDB Streams, Kafka...) qua bước lọc/làm giàu tới một đích.
 
-**Use case:** phản ứng tự động với thay đổi trạng thái trong AWS (ví dụ "khi có instance bị terminate thì gửi cảnh báo"), chạy tác vụ định kỳ kiểu cron, và **giải đôi (decouple)** các microservice theo kiến trúc hướng sự kiện (event-driven).
+**Use case:** phản ứng tự động với thay đổi trạng thái trong AWS (ví dụ "khi có instance bị terminate thì gửi cảnh báo"), chạy tác vụ định kỳ kiểu cron, và giải đôi (decouple) các microservice theo kiến trúc hướng sự kiện (event-driven).
 
-Một use case cực kỳ quan trọng cho phần này: **EventBridge là cầu nối để phản ứng real-time với CloudTrail và Config** — ta sẽ thấy ngay ở hai mục sau.
+Một use case cực kỳ quan trọng cho phần này: EventBridge là cầu nối để phản ứng real-time với CloudTrail và Config — ta sẽ thấy ngay ở hai mục sau.
 
 **Keyword nhận diện:** `react to an event`, `event-driven`, `trigger Lambda when...`, `schedule` / `cron`, `route events`, `decouple`.
 
@@ -214,26 +214,26 @@ Một use case cực kỳ quan trọng cho phần này: **EventBridge là cầu 
 
 ## 4. AWS CloudTrail — camera an ninh ghi lại "ai làm gì"
 
-Nếu CloudWatch quan tâm "hệ thống chạy ra sao", thì **AWS CloudTrail** quan tâm **"ai đã làm gì"**.
+Nếu CloudWatch quan tâm "hệ thống chạy ra sao", thì **AWS CloudTrail** quan tâm "ai đã làm gì".
 
-Mỗi khi có một lời gọi API tới AWS — qua Console, CLI, SDK, hay từ một dịch vụ AWS khác — CloudTrail ghi lại một bản ghi: **ai** thực hiện (identity), **làm gì** (action), **lúc nào** (timestamp), **từ đâu** (source IP), và lên resource nào.
+Mỗi khi có một lời gọi API tới AWS — qua Console, CLI, SDK, hay từ một dịch vụ AWS khác — CloudTrail ghi lại một bản ghi: ai thực hiện (identity), làm gì (action), lúc nào (timestamp), từ đâu (source IP), và lên resource nào.
 
-Đây là dịch vụ dành cho **governance, audit và compliance** — trả lời các câu hỏi điều tra.
+Đây là dịch vụ dành cho governance, audit và compliance — trả lời các câu hỏi điều tra.
 
-CloudTrail được **bật sẵn** ở mọi account. Có thể sử dụng **Event History** để xem toàn bộ bản ghi của **90 ngày gần nhất** các sự kiện, xem/tìm/tải được ngay trên console, **miễn phí**. Nhưng có giới hạn quan trọng: Event History **chỉ chứa management events**, và chỉ 90 ngày.
+CloudTrail được bật sẵn ở mọi account. Có thể sử dụng **Event History** để xem toàn bộ bản ghi của 90 ngày gần nhất các sự kiện, xem/tìm/tải được ngay trên console, miễn phí. Nhưng có giới hạn quan trọng: Event History **chỉ** chứa management events, và chỉ 90 ngày.
 
 Muốn nhiều hơn thế, bạn tạo một **Trail**:
 
-- Trail cho phép **lưu trữ lâu dài** bằng cách đẩy log tới một **S3 bucket**, sử dụng AWS Athena để đọc.
-- Có thể là **multi-region trail** (gom sự kiện từ mọi region) và **organization trail** (gom mọi account trong AWS Organizations).
-- Có thể đồng thời gửi log tới **CloudWatch Logs** để tạo metric filter và alarm trên hành vi API.
+- Trail cho phép lưu trữ lâu dài bằng cách đẩy log tới một S3 bucket, sử dụng AWS Athena để đọc.
+- Có thể là multi-region trail (gom sự kiện từ mọi region) và organization trail (gom mọi account trong AWS Organizations).
+- Có thể đồng thời gửi log tới CloudWatch Logs để tạo metric filter và alarm trên hành vi API.
 
 <ExcalidrawDiagram
   src="/aws-monitoring-cloudtrail-events.excalidraw"
   alt="CloudTrail event types — Management, Data, and Insights events flow into CloudTrail (90-day history), then to an S3 bucket for long-term retention, queried with Athena"
 />
 
-CloudTrail phân biệt **ba loại sự kiện** — đây là chỗ hay gài bẫy:
+CloudTrail phân biệt ba loại sự kiện — đây là chỗ hay gài bẫy:
 
 | Loại event            | Là gì                                     | Mặc định |
 | --------------------- | ----------------------------------------- | -------- |
@@ -243,12 +243,12 @@ CloudTrail phân biệt **ba loại sự kiện** — đây là chỗ hay gài b
 
 Hai tính năng cần nhớ:
 
-- **CloudTrail Insights**: tự động phát hiện **hoạt động API bất thường** (đột biến về tần suất gọi hoặc tỷ lệ lỗi) so với baseline thông thường.
+- **CloudTrail Insights**: tự động phát hiện hoạt động API bất thường (đột biến về tần suất gọi hoặc tỷ lệ lỗi) so với baseline thông thường.
 - **Log file integrity validation**: bằng chứng pháp lý rằng log không bị giả mạo — rất quan trọng cho audit.
 
-**Tích hợp EventBridge:** CloudTrail có thể kết hợp với EventBridge để **phản ứng gần như tức thời** với một lời gọi API cụ thể. Đây là mẫu kiến trúc "phát hiện và tự sửa" rất hay ra đề.
+**Tích hợp EventBridge:** CloudTrail có thể kết hợp với EventBridge để phản ứng gần như tức thời với một lời gọi API cụ thể. Đây là mẫu kiến trúc "phát hiện và tự sửa" rất hay ra đề.
 
-Mấu chốt là **CloudTrail ghi lại MỌI lời gọi API**, nên bất kỳ hành động nhạy cảm nào — xoá một bảng DynamoDB (`DeleteTable`), mở một Security Group (`AuthorizeSecurityGroupIngress`)... — đều có thể trở thành một event để **EventBridge** bắt lấy và bắn cảnh báo qua **SNS** (hoặc trigger Lambda để tự khắc phục):
+Mấu chốt là CloudTrail ghi lại **MỌI** lời gọi API, nên bất kỳ hành động nhạy cảm nào — xoá một bảng DynamoDB (`DeleteTable`), mở một Security Group (`AuthorizeSecurityGroupIngress`)... — đều có thể trở thành một event để EventBridge bắt lấy và bắn cảnh báo qua SNS (hoặc trigger Lambda để tự khắc phục):
 
 <ExcalidrawDiagram
   src="/aws-monitoring-cloudtrail-eventbridge.excalidraw"
@@ -263,7 +263,7 @@ Mấu chốt là **CloudTrail ghi lại MỌI lời gọi API**, nên bất kỳ
 
 ## 5. AWS Config — thanh tra tuân thủ theo dõi cấu hình
 
-**AWS Config** trả lời một câu hỏi khác hẳn hai dịch vụ trên: **"Cấu hình của resource trông như thế nào, và nó có tuân thủ quy định không?"** Trong khi CloudTrail ghi lại **hành động** (ai gọi API gì), thì Config theo dõi **trạng thái** — cấu hình hiện tại của từng resource, và cấu hình đó thay đổi ra sao theo thời gian.
+**AWS Config** trả lời một câu hỏi khác hẳn hai dịch vụ trên: "Cấu hình của resource trông như thế nào, và nó có tuân thủ quy định không?" Trong khi CloudTrail ghi lại hành động (ai gọi API gì), thì Config theo dõi **trạng thái** — cấu hình hiện tại của từng resource, và cấu hình đó thay đổi ra sao theo thời gian.
 
 Hãy hình dung Config như một thanh tra: định kỳ chụp ảnh hiện trạng từng resource, lưu lại thành album theo thời gian, rồi đối chiếu với một bộ quy định.
 
@@ -271,27 +271,27 @@ Các thành phần cốt lõi:
 
 - **Configuration Recorder**: bộ ghi liên tục theo dõi cấu hình các resource được hỗ trợ.
 - **Configuration Item (CI)**: đơn vị dữ liệu cơ bản của Config.
-- **Configuration Timeline / History**: dòng thời gian cho thấy một resource đã thay đổi cấu hình thế nào, kèm liên kết tới chính **sự kiện CloudTrail** đã gây ra thay đổi đó.
+- **Configuration Timeline / History**: dòng thời gian cho thấy một resource đã thay đổi cấu hình thế nào, kèm liên kết tới chính sự kiện CloudTrail đã gây ra thay đổi đó.
 
-Phần "thông minh" nhất là **Config Rules** — đánh giá xem resource có **tuân thủ (compliant)** hay không:
+Phần "thông minh" nhất là **Config Rules** — đánh giá xem resource có tuân thủ (compliant) hay không:
 
 - **Managed rules**: hàng trăm rule dựng sẵn của AWS, ví dụ `s3-bucket-public-read-prohibited` (bucket S3 không được public), `encrypted-volumes` (EBS phải mã hoá), `restricted-ssh` (SG không được mở port 22 ra Internet).
 - **Custom rules**: bạn tự viết bằng Lambda hoặc Guard.
-- Rule có thể chạy khi **cấu hình thay đổi** hoặc theo **chu kỳ**.
+- Rule có thể chạy khi cấu hình thay đổi hoặc theo chu kỳ.
 
-**Điểm cực kỳ hay nhầm:** Config là **detective control** (kiểm soát phát hiện), **KHÔNG phải preventive control** (kiểm soát ngăn chặn). Nó **không chặn** được hành động sai — nó chỉ **đánh dấu** resource là non-compliant sau khi sự việc xảy ra. Nếu đề hỏi "ngăn không cho ai đó tạo resource sai ngay từ đầu" thì đáp án là **IAM policy / SCP**, không phải Config.
+**Điểm cực kỳ hay nhầm:** Config là **detective control** (kiểm soát phát hiện), **KHÔNG** phải preventive control (kiểm soát ngăn chặn). Nó không chặn được hành động sai — nó chỉ đánh dấu resource là non-compliant sau khi sự việc xảy ra. Nếu đề hỏi "ngăn không cho ai đó tạo resource sai ngay từ đầu" thì đáp án là **IAM policy / SCP**, không phải Config.
 
 Các tính năng mở rộng:
 
-- **Remediation**: khi phát hiện non-compliant, Config có thể **tự sửa** bằng cách chạy một **SSM Automation document** (ví dụ tự động đóng port, tự bật mã hoá).
-- **Thông báo & phản ứng khi compliance đổi** — Config có **hai đường** báo ra ngoài:
-  - **Trực tiếp tới SNS**: delivery channel đẩy thẳng thông báo (configuration change + compliance change) tới một **SNS topic**. Đơn giản, nhưng gửi **tất cả** thông báo — bạn phải tự lọc ở phía nhận.
-  - **Qua EventBridge**: khi một resource đổi sang **non-compliant**, Config phát một event tới **EventBridge**; EventBridge **lọc theo pattern** rồi route tới **Lambda** (tự khắc phục), **SNS**, **Step Functions**... Cách này phản ứng **có chọn lọc** và linh hoạt hơn — cùng tinh thần "phát hiện và phản ứng" như mẫu CloudTrail + EventBridge ở mục trước, nhưng tác nhân kích hoạt ở đây là **sự thay đổi compliance** thay vì một API call.
+- **Remediation**: khi phát hiện non-compliant, Config có thể tự sửa bằng cách chạy một SSM Automation document (ví dụ tự động đóng port, tự bật mã hoá).
+- **Thông báo & phản ứng khi compliance đổi** — Config có hai đường báo ra ngoài:
+  - **Trực tiếp tới SNS**: delivery channel đẩy thẳng thông báo (configuration change + compliance change) tới một SNS topic. Đơn giản, nhưng gửi tất cả thông báo — bạn phải tự lọc ở phía nhận.
+  - **Qua EventBridge**: khi một resource đổi sang non-compliant, Config phát một event tới EventBridge; EventBridge lọc theo pattern rồi route tới Lambda (tự khắc phục), SNS, Step Functions... Cách này phản ứng có chọn lọc và linh hoạt hơn — cùng tinh thần "phát hiện và phản ứng" như mẫu CloudTrail + EventBridge ở mục trước, nhưng tác nhân kích hoạt ở đây là sự thay đổi compliance thay vì một API call.
 - **Conformance Pack**: gói gồm nhiều Config rule + remediation, triển khai như một khối duy nhất trên một account hoặc toàn bộ Organization.
 - **Aggregator**: cho cái nhìn tổng hợp đa account / đa region.
-- **Delivery channel**: kênh Config dùng để gửi configuration snapshot/history ra **S3 bucket** (lưu trữ lâu dài), và cũng là nơi khai báo **SNS topic** cho thông báo nói ở trên.
+- **Delivery channel**: kênh Config dùng để gửi configuration snapshot/history ra S3 bucket (lưu trữ lâu dài), và cũng là nơi khai báo SNS topic cho thông báo nói ở trên.
 
-Lưu ý: Config là dịch vụ **theo từng region** (recorder cấu hình ở mỗi region riêng), nhưng aggregator có thể tổng hợp lại.
+Lưu ý: Config là dịch vụ theo từng region (recorder cấu hình ở mỗi region riêng), nhưng aggregator có thể tổng hợp lại.
 
 **Use case:** kiểm tra liên tục "tất cả EBS đã mã hoá chưa", "có bucket nào public không", xem lịch sử thay đổi cấu hình của một resource, tự động khắc phục vi phạm, chứng minh tuân thủ cho kiểm toán.
 
@@ -303,9 +303,9 @@ Lưu ý: Config là dịch vụ **theo từng region** (recorder cấu hình ở
 
 Đây là phần quan trọng nhất cho phòng thi. Ba dịch vụ này nghe đều giống "monitoring", nhưng mỗi cái soi vào một **lăng kính** khác nhau khi cùng nhìn vào một resource:
 
-| Tiêu chí         | **CloudWatch**             | **CloudTrail**                 | **AWS Config**                                         |
+| Tiêu chí         | CloudWatch                 | CloudTrail                     | AWS Config                                             |
 | ---------------- | -------------------------- | ------------------------------ | ------------------------------------------------------ |
-| Câu hỏi cốt lõi  | Hệ thống **chạy thế nào**? | **Ai làm gì** (qua API)?       | Resource **được cấu hình ra sao** & có tuân thủ không? |
+| Câu hỏi cốt lõi  | Hệ thống chạy thế nào?     | Ai làm gì (qua API)?           | Resource được cấu hình ra sao & có tuân thủ không?     |
 | Trọng tâm        | Hiệu năng & vận hành       | Hoạt động API / audit          | Trạng thái cấu hình & compliance                       |
 | Dữ liệu          | Metrics, logs, events      | Bản ghi lời gọi API            | Configuration items, trạng thái compliance             |
 | Trục thời gian   | Real-time + lịch sử số đo  | Nhật ký sự kiện theo thời gian | Ảnh chụp cấu hình & lịch sử thay đổi                   |
@@ -320,11 +320,11 @@ Một câu thần chú để nhớ:
 
 ### Chúng phối hợp với nhau như thế nào
 
-Trong thực tế, ba dịch vụ này **không loại trừ nhau** — chúng ghép thành một câu chuyện hoàn chỉnh. Quay lại tình huống đầu bài: ai đó mở Security Group ra Internet lúc 2 giờ sáng.
+Trong thực tế, ba dịch vụ này **không** loại trừ nhau — chúng ghép thành một câu chuyện hoàn chỉnh. Quay lại tình huống đầu bài: ai đó mở Security Group ra Internet lúc 2 giờ sáng.
 
-1. **AWS Config** phát hiện Security Group giờ **non-compliant** (vi phạm rule "không được mở SSH ra `0.0.0.0/0`) — trả lời "**cái gì** sai".
-2. **CloudTrail** cho biết chính xác **ai** đã gọi API `AuthorizeSecurityGroupIngress`, từ **IP nào**, lúc nào — trả lời "**ai** làm".
-3. **CloudWatch** (qua log/alarm) hoặc **EventBridge** phát thông báo và có thể **trigger tự động sửa** — trả lời "phản ứng ra sao".
+1. **AWS Config** phát hiện Security Group giờ non-compliant (vi phạm rule "không được mở SSH ra `0.0.0.0/0`) — trả lời "cái gì sai".
+2. **CloudTrail** cho biết chính xác ai đã gọi API `AuthorizeSecurityGroupIngress`, từ IP nào, lúc nào — trả lời "ai làm".
+3. **CloudWatch** (qua log/alarm) hoặc EventBridge phát thông báo và có thể trigger tự động sửa — trả lời "phản ứng ra sao".
 
 Ba lăng kính, ba câu trả lời, ghép lại thành bức tranh đầy đủ của một sự cố.
 
@@ -337,32 +337,32 @@ Trong phòng thi, bạn chỉ có khoảng 90 giây mỗi câu. Việc nhận di
 | Keyword/tình huống trong đề                                                 | Đáp án                                              |
 | --------------------------------------------------------------------------- | --------------------------------------------------- |
 | CPU utilization, latency, error rate, metric, dashboard                     | **CloudWatch**                                      |
-| **Memory / RAM / disk space** usage của EC2                                 | **CloudWatch Agent** (không có sẵn mặc định)        |
-| Cần metric EC2 mỗi **1 phút** thay vì 5 phút                                | **Enable Detailed Monitoring**                      |
+| Memory / RAM / disk space usage của EC2                                     | **CloudWatch Agent** (không có sẵn mặc định)        |
+| Cần metric EC2 mỗi 1 phút thay vì 5 phút                                    | **Enable Detailed Monitoring**                      |
 | Cảnh báo khi log xuất hiện một chuỗi cụ thể (`ERROR`...)                    | **CloudWatch Logs Metric Filter** → Alarm           |
-| Gom log từ **nhiều account** về một nơi, real-time                          | **CloudWatch Logs Subscription Filter** (→ Kinesis) |
-| Stream **metric** near-real-time ra data lake (S3) / công cụ bên thứ ba     | **CloudWatch Metric Streams** (→ Firehose)          |
-| Tự động **recover** EC2 khi phần cứng hỏng                                  | **CloudWatch Alarm** + EC2 recover action           |
-| Giám sát **uptime/độ trễ endpoint từ bên ngoài**                            | **CloudWatch Synthetics (Canary)**                  |
-| Tìm **top-N** (IP/URL) đóng góp nhiều nhất                                  | **CloudWatch Contributor Insights**                 |
-| **Ai** đã gọi API / xoá / sửa resource, **source IP**                       | **CloudTrail**                                      |
-| **Audit / governance / compliance forensics**, lưu lịch sử API lâu dài      | **CloudTrail** (trail → S3)                         |
-| Phát hiện **hoạt động API bất thường**                                      | **CloudTrail Insights**                             |
-| Chứng minh log **không bị giả mạo**                                         | **CloudTrail log file integrity validation**        |
-| Resource có **tuân thủ cấu hình** không, **lịch sử thay đổi cấu hình**      | **AWS Config**                                      |
-| **Tự động khắc phục** resource vi phạm                                      | **AWS Config** + SSM Automation (remediation)       |
-| Áp một bộ quy tắc compliance cho **toàn Organization**                      | **Config Conformance Pack**                         |
-| **Phản ứng** với một sự kiện / **cron** serverless / route event tới Lambda | **EventBridge**                                     |
-| Phản ứng **real-time** với một API call cụ thể                              | **CloudTrail/Config + EventBridge**                 |
+| Gom log từ nhiều account về một nơi, real-time                              | **CloudWatch Logs Subscription Filter** (→ Kinesis) |
+| Stream metric near-real-time ra data lake (S3) / công cụ bên thứ ba         | **CloudWatch Metric Streams** (→ Firehose)          |
+| Tự động recover EC2 khi phần cứng hỏng                                      | **CloudWatch Alarm** + EC2 recover action           |
+| Giám sát uptime/độ trễ endpoint từ bên ngoài                                | **CloudWatch Synthetics (Canary)**                  |
+| Tìm top-N (IP/URL) đóng góp nhiều nhất                                      | **CloudWatch Contributor Insights**                 |
+| Ai đã gọi API / xoá / sửa resource, source IP                               | **CloudTrail**                                      |
+| Audit / governance / compliance forensics, lưu lịch sử API lâu dài          | **CloudTrail** (trail → S3)                         |
+| Phát hiện hoạt động API bất thường                                          | **CloudTrail Insights**                             |
+| Chứng minh log không bị giả mạo                                             | **CloudTrail log file integrity validation**        |
+| Resource có tuân thủ cấu hình không, lịch sử thay đổi cấu hình              | **AWS Config**                                      |
+| Tự động khắc phục resource vi phạm                                          | **AWS Config** + SSM Automation (remediation)       |
+| Áp một bộ quy tắc compliance cho toàn Organization                          | **Config Conformance Pack**                         |
+| Phản ứng với một sự kiện / cron serverless / route event tới Lambda         | **EventBridge**                                     |
+| Phản ứng real-time với một API call cụ thể                                  | **CloudTrail/Config + EventBridge**                 |
 
 Vài mẹo phân biệt nhanh khi phân vân:
 
-- Thấy chữ **"who" / "ai"** → gần như chắc chắn là **CloudTrail**.
-- Thấy chữ **"compliant / configuration / cấu hình đúng chuẩn"** → **Config**.
-- Thấy số đo hiệu năng (**CPU, latency, metric, alarm**) → **CloudWatch**.
-- Thấy **"react / trigger / when X happens then do Y"** → **EventBridge**.
-- Thấy **"memory/disk của EC2"** → đừng quên **CloudWatch Agent**.
-- Thấy **"ngăn chặn ngay từ đầu"** → đó là **IAM/SCP**, KHÔNG phải Config (Config chỉ phát hiện sau khi đã xảy ra).
+- Thấy chữ "who" / "ai" → gần như chắc chắn là **CloudTrail**.
+- Thấy chữ "compliant / configuration / cấu hình đúng chuẩn" → **Config**.
+- Thấy số đo hiệu năng (CPU, latency, metric, alarm) → **CloudWatch**.
+- Thấy "react / trigger / when X happens then do Y" → **EventBridge**.
+- Thấy "memory/disk của EC2" → đừng quên **CloudWatch Agent**.
+- Thấy "ngăn chặn ngay từ đầu" → đó là **IAM/SCP**, KHÔNG phải Config (Config chỉ phát hiện sau khi đã xảy ra).
 
 ---
 
@@ -370,17 +370,17 @@ Vài mẹo phân biệt nhanh khi phân vân:
 
 Quay lại bốn câu hỏi lúc 3 giờ sáng đầu bài, giờ bạn đã có địa chỉ rõ ràng cho từng câu:
 
-- **"Hệ thống chạy thế nào?"** → **CloudWatch** đo hiệu năng, lưu log, bắn alarm.
-- **"Ai đã làm gì?"** → **CloudTrail** ghi lại mọi lời gọi API như một camera an ninh.
-- **"Cấu hình có đúng chuẩn không?"** → **AWS Config** theo dõi trạng thái và đánh giá tuân thủ.
-- **"Phản ứng ra sao?"** → **EventBridge** biến sự kiện thành hành động tự động.
+- "Hệ thống chạy thế nào?" → **CloudWatch** đo hiệu năng, lưu log, bắn alarm.
+- "Ai đã làm gì?" → **CloudTrail** ghi lại mọi lời gọi API như một camera an ninh.
+- "Cấu hình có đúng chuẩn không?" → **AWS Config** theo dõi trạng thái và đánh giá tuân thủ.
+- "Phản ứng ra sao?" → **EventBridge** biến sự kiện thành hành động tự động.
 
 Những điều cần khắc cốt ghi tâm cho kỳ thi SAA:
 
-- **CloudWatch = hiệu năng**. Nhớ rằng memory/disk của EC2 **cần Agent**, detailed monitoring cho metric **1 phút**, metric filter biến log thành alarm, subscription filter gom log đa account, billing alarm chỉ ở **us-east-1**.
-- **CloudTrail = "ai làm gì"**. Event history 90 ngày miễn phí nhưng chỉ management events; muốn lâu dài / data events thì tạo **trail → S3**. Phân biệt management / data / insights events.
-- **AWS Config = cấu hình & compliance**. Nó là **detective control** (phát hiện, không ngăn chặn), theo dõi lịch sử thay đổi, và có thể **tự remediate** qua SSM.
+- **CloudWatch = hiệu năng**. Nhớ rằng memory/disk của EC2 cần Agent, detailed monitoring cho metric 1 phút, metric filter biến log thành alarm, subscription filter gom log đa account, billing alarm chỉ ở us-east-1.
+- **CloudTrail = "ai làm gì"**. Event history 90 ngày miễn phí nhưng chỉ management events; muốn lâu dài / data events thì tạo trail → S3. Phân biệt management / data / insights events.
+- **AWS Config = cấu hình & compliance**. Nó là detective control (phát hiện, không ngăn chặn), theo dõi lịch sử thay đổi, và có thể tự remediate qua SSM.
 - **EventBridge = phản ứng theo sự kiện**. Là chất keo dán các dịch vụ lại với nhau cho kiến trúc event-driven và tự động hoá.
-- **Ba lăng kính, một bức tranh**: Config nói **cái gì** sai, CloudTrail nói **ai** làm, CloudWatch/EventBridge giúp **phản ứng**. Trong đề thi chúng là các đáp án loại trừ nhau; trong thực tế chúng bổ trợ cho nhau.
+- **Ba lăng kính, một bức tranh**: Config nói cái gì sai, CloudTrail nói ai làm, CloudWatch/EventBridge giúp phản ứng. Trong đề thi chúng là các đáp án loại trừ nhau; trong thực tế chúng bổ trợ cho nhau.
 
 Nắm chắc ranh giới giữa bốn dịch vụ này, bạn sẽ không còn bị "bốn đáp án nghe đều đúng" đánh lừa nữa.

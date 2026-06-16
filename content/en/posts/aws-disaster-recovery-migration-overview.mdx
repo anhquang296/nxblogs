@@ -8,16 +8,16 @@ enableComment: true
 
 # AWS Disaster Recovery & Migration: Backup, DRS, DMS, MGN, DataSync & Snow Family
 
-Picture yourself as a Solutions Architect, and in the same quarter **two big problems** land on your desk:
+Picture yourself as a Solutions Architect, and in the same quarter two big problems land on your desk:
 
-1. **Disaster strikes.** One morning, your entire on-premises data center (or an AWS region) goes down. The CEO asks exactly two questions: "How much **data did we lose**?" and "**How long** until the system is back up?"
-2. **The whole company moves to the cloud.** Leadership decides that within 6 months, **everything** on-premises must be on AWS: hundreds of servers, a pile of databases of every flavor, and hundreds of TB of files. "How do we move it all with **minimal downtime**?"
+1. **Disaster strikes.** One morning, your entire on-premises data center (or an AWS region) goes down. The CEO asks exactly two questions: "How much data did we lose?" and "How long until the system is back up?"
+2. **The whole company moves to the cloud.** Leadership decides that within 6 months, everything on-premises must be on AWS: hundreds of servers, a pile of databases of every flavor, and hundreds of TB of files. "How do we move it all with minimal downtime?"
 
-It's no accident AWS bundles these two problems into **the same chapter** — they share the same "DNA." The clearest example: the disaster-recovery service (**DRS**) and the server-migration service (**MGN**) actually run on **the same replication engine** underneath; only the purpose differs. And this is exactly the SAA exam's favorite trap: it describes a scenario and asks which service to pick — while the other three options all "sound plausible."
+It's no accident AWS bundles these two problems into the same chapter — they share the same "DNA." The clearest example: the disaster-recovery service (DRS) and the server-migration service (MGN) actually run on **the same replication engine** underneath; only the purpose differs. And this is exactly the SAA exam's favorite trap: it describes a scenario and asks which service to pick — while the other three options all "sound plausible."
 
-This post is a map to help you draw a sharp line between the services in two "families": **Disaster Recovery** (recovering a running system after a disaster) and **Migration** (moving workloads/data **into** AWS). For each service we'll go through: what it **does**, its core **features**, real-world **use cases**, and — most important for the exam room — the **keywords that "give it away"** in a question.
+This post is a map to help you draw a sharp line between the services in two "families": **Disaster Recovery** (recovering a running system after a disaster) and **Migration** (moving workloads/data into AWS). For each service we'll go through: what it does, its core features, real-world use cases, and — most important for the exam room — the keywords that "give it away" in a question.
 
-> **Note:** This is an overview meant to build a mental model and help you recognize the right answer fast in the exam room. Each service here deserves its own deep-dive; this post focuses on **the boundaries between them** and the numbers that get asked.
+> **Note:** This is an overview meant to build a mental model and help you recognize the right answer fast in the exam room. Each service here deserves its own deep-dive; this post focuses on the boundaries between them and the numbers that get asked.
 
 ---
 
@@ -27,19 +27,19 @@ Before the details, pin down two ideas.
 
 **Idea one — distinguish the two families:**
 
-- **Disaster Recovery (DR):** your system is **already running** on AWS when a disaster hits (a region/AZ goes down, data is corrupted, ransomware strikes...). The questions are: **how fast** do we recover, and **how much data** do we lose.
-- **Migration:** your workload is **outside** AWS (on-premises, another cloud) and you want to **bring it into** AWS. The questions are: **what** are you moving (servers, databases, files), and how much **downtime**.
+- **Disaster Recovery (DR):** your system is already running on AWS when a disaster hits (a region/AZ goes down, data is corrupted, ransomware strikes...). The questions are: how fast do we recover, and how much data do we lose.
+- **Migration:** your workload is outside AWS (on-premises, another cloud) and you want to bring it into AWS. The questions are: what are you moving (servers, databases, files), and how much downtime.
 
 **Idea two — the two metrics that decide every DR strategy.** Every DR question revolves around these two numbers:
 
-- <Tooltip content="Recovery Point Objective — the recovery point, measured BACKWARD into the past from the moment of disaster">RPO</Tooltip> is the **maximum amount of data you can afford to lose**. It's the time between the most recent backup/replica and the moment of disaster. An RPO of 1 hour means you accept losing up to 1 hour of data. This number reflects the **backup frequency**.
-- <Tooltip content="Recovery Time Objective — the recovery time, measured FORWARD into the future from the moment of disaster">RTO</Tooltip> is the **maximum acceptable downtime** to get the system running again. An RTO of 10 minutes means that after a disaster, the system must be back within 10 minutes. This number drives the **DR strategy** you choose.
+- <Tooltip content="Recovery Point Objective — the recovery point, measured BACKWARD into the past from the moment of disaster">RPO</Tooltip> is the **maximum amount of data you can afford to lose**. It's the time between the most recent backup/replica and the moment of disaster. An RPO of 1 hour means you accept losing up to 1 hour of data. This number reflects the backup frequency.
+- <Tooltip content="Recovery Time Objective — the recovery time, measured FORWARD into the future from the moment of disaster">RTO</Tooltip> is the **maximum acceptable downtime** to get the system running again. An RTO of 10 minutes means that after a disaster, the system must be back within 10 minutes. This number drives the DR strategy you choose.
 
 RPO answers the question: "How much data will I lose after recovery?"
 
 RTO answers the question: "How long will it take to recover successfully / what is the downtime?"
 
-The golden rule: **the smaller the RPO/RTO, the more it costs.** Wanting "zero data loss, zero downtime" means paying for infrastructure that runs in parallel at all times. The entire DR half of this post is really about finding the balance between **money** and **RPO/RTO**.
+The golden rule: **the smaller the RPO/RTO, the more it costs.** Wanting "zero data loss, zero downtime" means paying for infrastructure that runs in parallel at all times. The entire DR half of this post is really about finding the balance between money and RPO/RTO.
 
 ---
 
@@ -47,35 +47,35 @@ The golden rule: **the smaller the RPO/RTO, the more it costs.** Wanting "zero d
 
 This is the most important "concept" section of the whole chapter, and the exam asks about it a lot. AWS doesn't have a single "DR button" — instead there are **4 strategies**, ordered from cheap-and-slow to expensive-and-fast. You pick one based on your target RPO/RTO.
 
-**1. Backup & Restore (high RPO/RTO, cheapest).** You simply **back up** data periodically (EBS snapshots, RDS snapshots, push to S3, or use AWS Backup) and store it somewhere safe. When disaster strikes, only then do you **rebuild** the infrastructure from scratch and restore the data into it. Since nothing is running in advance, it's dirt cheap, but the RTO is measured in **hours**. Good when the system can tolerate being down for a few hours.
+**1. Backup & Restore (high RPO/RTO, cheapest).** You simply back up data periodically (EBS snapshots, RDS snapshots, push to S3, or use AWS Backup) and store it somewhere safe. When disaster strikes, only then do you rebuild the infrastructure from scratch and restore the data into it. Since nothing is running in advance, it's dirt cheap, but the RTO is measured in hours. Good when the system can tolerate being down for a few hours.
 
 <ExcalidrawDiagram
   src="/aws-dr-backup-and-restore.excalidraw"
   alt="Backup and Restore strategy: on-premises servers and database back up to Amazon S3 via AWS Storage Gateway and AWS Snowball, with an S3 lifecycle policy tiering to Glacier; AWS-native resources (EBS, Redshift, RDS) take scheduled regular snapshots; after a disaster, data is restored into Amazon EC2 launched from an AMI and Amazon RDS"
 />
 
-**2. Pilot Light (lower RPO/RTO, still cheap).** Picture a small "pilot flame" always burning: you keep the **most critical core** — usually the **database** — always running and **continuously replicating** to the DR region, while the application/web tier is **turned off** (you only have AMIs/config ready). When disaster strikes, you just "light up" the rest (start the app servers, point them at the database that already holds the data). Much faster than Backup & Restore because the data is already warm.
+**2. Pilot Light (lower RPO/RTO, still cheap).** Picture a small "pilot flame" always burning: you keep the most critical core — usually the database — always running and continuously replicating to the DR region, while the application/web tier is **turned off** (you only have AMIs/config ready). When disaster strikes, you just "light up" the rest (start the app servers, point them at the database that already holds the data). Much faster than Backup & Restore because the data is already warm.
 
 <ExcalidrawDiagram
   src="/aws-dr-pilot-light.excalidraw"
   alt="Pilot Light strategy: the on-premises database continuously replicates to an always-running Amazon RDS, while the EC2 application tier stays stopped (not running); Route 53 routes traffic to the primary site and can fail over to the standby EC2 when disaster strikes"
 />
 
-**3. Warm Standby (low RPO/RTO).** A **full** copy of the system already runs in the DR region but at **minimum scale** (small instances, few nodes). When disaster strikes, you simply **scale up** to production size and shift traffic over. Because every component is already running (just small), the RTO is very short — you only spend time growing it.
+**3. Warm Standby (low RPO/RTO).** A full copy of the system already runs in the DR region but at minimum scale (small instances, few nodes). When disaster strikes, you simply **scale up** to production size and shift traffic over. Because every component is already running (just small), the RTO is very short — you only spend time growing it.
 
 <ExcalidrawDiagram
   src="/aws-dr-warm-standby.excalidraw"
   alt="Warm Standby strategy: a full but minimally-sized copy runs on AWS (ELB in front of an EC2 Auto Scaling group at minimum capacity, plus an RDS Secondary). The on-premises primary database continuously replicates to the RDS Secondary; Route 53 actively routes traffic to the on-premises primary and keeps AWS on standby. On disaster, the EC2 fleet scales up and fails over to the RDS Secondary"
 />
 
-**4. Multi-Site / Hot Site (RPO/RTO near zero, most expensive).** Run the system **full-scale in both (or more) places at once** in an <Tooltip content="Both sites receive and serve real traffic at the same time; no site is sitting idle waiting">active-active</Tooltip> manner. Traffic is split across both; if one site dies, the other takes the full load almost instantly. RPO/RTO are near zero, but you pay for **two parallel production systems**.
+**4. Multi-Site / Hot Site (RPO/RTO near zero, most expensive).** Run the system full-scale in both (or more) places at once in an <Tooltip content="Both sites receive and serve real traffic at the same time; no site is sitting idle waiting">active-active</Tooltip> manner. Traffic is split across both; if one site dies, the other takes the full load almost instantly. RPO/RTO are near zero, but you pay for two parallel production systems.
 
 <ExcalidrawDiagram
   src="/aws-dr-multi-site.excalidraw"
   alt="Multi-Site (Hot Site) strategy: both the on-premises data center and AWS run at full production scale in active-active mode. Route 53 actively routes traffic to both sites (ELB plus an EC2 Auto Scaling group at production capacity on AWS). The primary database continuously replicates to the RDS Secondary, which the AWS fleet fails over to if the primary is lost"
 />
 
-> **Exam tip:** The question gives you an RTO/RPO constraint **and** a budget, then asks which strategy. The rule: see **"cheapest / can tolerate many hours of downtime"** → Backup & Restore; see **"keep the database always ready but turn off the rest"** → Pilot Light; see **"run a scaled-down copy then scale up"** → Warm Standby; see **"no downtime / active-active / RTO near zero"** → Multi-Site.
+> **Exam tip:** The question gives you an RTO/RPO constraint and a budget, then asks which strategy. The rule: see "cheapest / can tolerate many hours of downtime" → Backup & Restore; see "keep the database always ready but turn off the rest" → Pilot Light; see "run a scaled-down copy then scale up" → Warm Standby; see "no downtime / active-active / RTO near zero" → Multi-Site.
 
 **Keywords:** `RPO`, `RTO`, `backup and restore`, `pilot light`, `warm standby`, `multi-site`, `active-active`, `cheapest DR`, `lowest RTO`.
 
@@ -83,27 +83,27 @@ This is the most important "concept" section of the whole chapter, and the exam 
 
 ## 3. AWS Backup — centralized, governed backups
 
-**AWS Backup** is a **centralized, fully managed backup** service that lets you create, manage, and automate backups for **many services** from one place — instead of hand-writing a separate snapshot script for each service.
+**AWS Backup** is a centralized, fully managed backup service that lets you create, manage, and automate backups for many services from one place — instead of hand-writing a separate snapshot script for each service.
 
-It supports a long list: **EC2, EBS, EFS, FSx, RDS, Aurora, DynamoDB, DocumentDB, Neptune, S3, Storage Gateway**, and even on-premises **VMware** workloads... The beauty is a **single console** for all your backups, rather than one approach per service.
+It supports a long list: EC2, EBS, EFS, FSx, RDS, Aurora, DynamoDB, DocumentDB, Neptune, S3, Storage Gateway, and even on-premises VMware workloads... The beauty is a single console for all your backups, rather than one approach per service.
 
 The components and features to know:
 
-- **Backup Plan:** the backup "recipe" — it defines the **frequency** (cron/rate), the **backup window**, the **retention** period, and a **lifecycle** that automatically moves old backups to cheaper **cold storage**. You can also run **on-demand** backups manually anytime.
-- **Tag-based selection:** pick resources to back up by **tag**, so any new resource created with the right tag is automatically pulled into the backup schedule.
+- **Backup Plan:** the backup "recipe" — it defines the frequency (cron/rate), the backup window, the retention period, and a lifecycle that automatically moves old backups to cheaper cold storage. You can also run on-demand backups manually anytime.
+- **Tag-based selection:** pick resources to back up by tag, so any new resource created with the right tag is automatically pulled into the backup schedule.
 - **Backup Vault:** the "safe" that holds the backups (recovery points). You manage access permissions on this vault.
-- **Cross-Region backup:** copy backups to **another region** — the foundation for region-level DR.
-- **Cross-Account backup:** copy backups to **another account** (via AWS Organizations) — to isolate backups from the production account in case it gets compromised.
+- **Cross-Region backup:** copy backups to another region — the foundation for region-level DR.
+- **Cross-Account backup:** copy backups to another account (via AWS Organizations) — to isolate backups from the production account in case it gets compromised.
 - <Tooltip content="Point-In-Time Recovery — restore to any arbitrary moment in the past, not just discrete snapshot marks">PITR</Tooltip> for the services that support it (such as RDS, Aurora, S3...).
 
 The most "point-scoring" feature on the exam is **AWS Backup Vault Lock**:
 
-- It applies a <Tooltip content="Write Once Read Many — write once, read many times; once written it cannot be altered or deleted within the retention period">WORM</Tooltip> model to the vault: backups become **immutable** — no one can delete or modify them within the retention period, even if the account is taken over. This is the classic shield against **ransomware** and **accidental/malicious deletion**.
-- It has **two modes**:
-  - **Governance mode:** the backups are locked, but a user with **special IAM permissions** can still bypass the lock (override). Good when you want internal discipline while leaving an "escape hatch" for admins.
-  - **Compliance mode:** a **hard** lock. After a "cooling-off" period, **no one** can delete or change the lock configuration anymore — not even the **root user** or **AWS Support**. Use this for strict legal/compliance requirements.
+- It applies a <Tooltip content="Write Once Read Many — write once, read many times; once written it cannot be altered or deleted within the retention period">WORM</Tooltip> model to the vault: backups become **immutable** — no one can delete or modify them within the retention period, even if the account is taken over. This is the classic shield against ransomware and accidental/malicious deletion.
+- It has two modes:
+  - **Governance mode:** the backups are locked, but a user with special IAM permissions can still bypass the lock (override). Good when you want internal discipline while leaving an "escape hatch" for admins.
+  - **Compliance mode:** a hard lock. After a "cooling-off" period, **no one** can delete or change the lock configuration anymore — not even the root user or AWS Support. Use this for strict legal/compliance requirements.
 
-> **Trap:** A question mentioning **"backups that can't be deleted even by root / ransomware protection / immutable compliance requirement"** → the answer is **AWS Backup Vault Lock (Compliance mode)**, not a regular IAM policy (an IAM policy can be changed by the very attacker).
+> **Trap:** A question mentioning "backups that can't be deleted even by root / ransomware protection / immutable compliance requirement" → the answer is **AWS Backup Vault Lock (Compliance mode)**, not a regular IAM policy (an IAM policy can be changed by the very attacker).
 
 **Use case:** unify the backup policy across an entire organization, meet audit/compliance needs, back up across region/account for DR, and protect backups from deletion with Vault Lock.
 
@@ -113,9 +113,9 @@ The most "point-scoring" feature on the exam is **AWS Backup Vault Lock**:
 
 ## 4. AWS Elastic Disaster Recovery (DRS) — continuous replication for failover
 
-**AWS Elastic Disaster Recovery (DRS)** — formerly **CloudEndure Disaster Recovery** — is DR at the **whole-server** level. Instead of just backing up data, DRS **continuously replicates at the block level** your entire servers — operating system, applications, and data alike — into a **low-cost staging area** in AWS.
+**AWS Elastic Disaster Recovery (DRS)** — formerly CloudEndure Disaster Recovery — is DR at the whole-server level. Instead of just backing up data, DRS **continuously replicates at the block level** your entire servers — operating system, applications, and data alike — into a low-cost staging area in AWS.
 
-This "continuous block-level replication" mechanism gives a very small RPO (measured in **seconds**) because every disk change is copied almost instantly. The staging area consumes only minimal resources (disks holding the replica plus a few small instances), so it's cheap. When disaster strikes, DRS **launches** full-size servers from the replica and you fail over — RTO measured in **minutes**.
+This "continuous block-level replication" mechanism gives a very small RPO (measured in seconds) because every disk change is copied almost instantly. The staging area consumes only minimal resources (disks holding the replica plus a few small instances), so it's cheap. When disaster strikes, DRS launches full-size servers from the replica and you fail over — RTO measured in minutes.
 
 <ExcalidrawDiagram
   src="/aws-dr-elastic-disaster-recovery.excalidraw"
@@ -124,7 +124,7 @@ This "continuous block-level replication" mechanism gives a very small RPO (meas
 
 Strengths:
 
-- The source can be a **physical, virtual, or other-cloud** server — not just EC2.
+- The source can be a physical, virtual, or other-cloud server — not just EC2.
 - Supports failover and **failback** (returning home after the incident passes).
 - Lets you run **drills** (DR rehearsals) without affecting production.
 
@@ -136,20 +136,20 @@ Strengths:
 
 ## 5. AWS Application Migration Service (MGN) — lift-and-shift into AWS
 
-**AWS Application Migration Service (MGN)** is AWS's primary **migration** service for the <Tooltip content="Lift-and-shift / rehost — moving an existing server to the cloud as-is, without modifying the application">lift-and-shift</Tooltip> approach. It **replaces** the older, retired **AWS Server Migration Service (SMS)**.
+**AWS Application Migration Service (MGN)** is AWS's primary migration service for the <Tooltip content="Lift-and-shift / rehost — moving an existing server to the cloud as-is, without modifying the application">lift-and-shift</Tooltip> approach. It replaces the older, retired AWS Server Migration Service (SMS).
 
-And here's the "aha": MGN uses **the exact same continuous block replication mechanism as DRS**. It continuously copies your source server (physical/virtual/cloud) into a staging area in AWS; when you're ready, you perform a **cutover** — MGN automatically **converts** the replica into a **natively running EC2 instance** and boots it. Because replication has been running in the background all along, the **downtime at cutover is extremely short**.
+And here's the "aha": MGN uses **the exact same continuous block replication mechanism as DRS**. It continuously copies your source server (physical/virtual/cloud) into a staging area in AWS; when you're ready, you perform a cutover — MGN automatically converts the replica into a natively running EC2 instance and boots it. Because replication has been running in the background all along, the downtime at cutover is extremely short.
 
-So **what's the difference between DRS and MGN?** Same engine, different **purpose**:
+So what's the difference between DRS and MGN? Same engine, different purpose:
 
-| Criterion       | **DRS** (Disaster Recovery)                       | **MGN** (Migration)                                  |
+| Criterion       | DRS (Disaster Recovery)                           | MGN (Migration)                                      |
 | --------------- | ------------------------------------------------- | ---------------------------------------------------- |
 | Purpose         | Protect a running system against disaster         | Move servers into AWS once                            |
-| Continuity      | Replicates **forever**, fails over only on incident | Replicates until **cutover**, then stops            |
-| After it's done | Source stays production, AWS is the DR site        | Source is **decommissioned**, AWS is production       |
+| Continuity      | Replicates forever, fails over only on incident   | Replicates until cutover, then stops                 |
+| After it's done | Source stays production, AWS is the DR site        | Source is decommissioned, AWS is production           |
 | Hint words      | "failover", "recovery", "DR"                       | "migrate", "lift-and-shift", "rehost"                |
 
-> **Exam tip:** See **"migrate / lift-and-shift many servers into AWS"** → **MGN**. See **"continuously replicate to protect against disaster / failover"** → **DRS**. Same technology — don't let the question fool you.
+> **Exam tip:** See "migrate / lift-and-shift many servers into AWS" → **MGN**. See "continuously replicate to protect against disaster / failover" → **DRS**. Same technology — don't let the question fool you.
 
 **Use case:** migrate a fleet of on-premises servers (or from another cloud) onto EC2 with minimal downtime, without reinstalling applications from scratch.
 
@@ -159,20 +159,20 @@ So **what's the difference between DRS and MGN?** Same engine, different **purpo
 
 ## 6. AWS Database Migration Service (DMS) — migrate databases while the source keeps running
 
-**AWS Database Migration Service (DMS)** specializes in migrating **databases** into AWS. Its core selling point: throughout the migration, the **source database keeps operating normally** — the application doesn't have to go down.
+**AWS Database Migration Service (DMS)** specializes in migrating databases into AWS. Its core selling point: throughout the migration, the source database keeps operating normally — the application doesn't have to go down.
 
 How it works:
 
-- DMS runs on a **replication instance** (an EC2 instance managed by DMS) sitting between source and target.
-- It supports **one-time migration** (full load) and/or **continuous replication** via <Tooltip content="Change Data Capture — captures the changes (insert/update/delete) happening at the source and continuously applies them to the target to keep both in sync">CDC</Tooltip>. Thanks to CDC, you can do a full load first, let DMS catch up on new changes, and once both sides are nearly in sync, cut over to the target with tiny downtime.
-- DMS itself is **resilient**.
+- DMS runs on a replication instance (an EC2 instance managed by DMS) sitting between source and target.
+- It supports one-time migration (full load) and/or continuous replication via <Tooltip content="Change Data Capture — captures the changes (insert/update/delete) happening at the source and continuously applies them to the target to keep both in sync">CDC</Tooltip>. Thanks to CDC, you can do a full load first, let DMS catch up on new changes, and once both sides are nearly in sync, cut over to the target with tiny downtime.
+- DMS itself is resilient.
 
 There are two migration flavors, and this is the part the exam loves to probe:
 
 ### 6.1. Homogeneous vs heterogeneous + the Schema Conversion Tool
 
-- **Homogeneous migration** — **the same engine type** (e.g. Oracle → Oracle, PostgreSQL → PostgreSQL). Since the schema structures are compatible, you **only need DMS** to move the data.
-- **Heterogeneous migration** — **a different engine type** (e.g. Microsoft SQL Server → Aurora, Oracle → PostgreSQL). Now the schema and code (stored procedures, data types...) are **incompatible**, so you also need the <Tooltip content="AWS Schema Conversion Tool — converts a database's schema and code from one engine to another before DMS moves the data">SCT</Tooltip>: use it to **convert the schema** to the target engine first, **then** use DMS to move the data.
+- **Homogeneous migration** — the same engine type (e.g. Oracle → Oracle, PostgreSQL → PostgreSQL). Since the schema structures are compatible, you only need DMS to move the data.
+- **Heterogeneous migration** — a different engine type (e.g. Microsoft SQL Server → Aurora, Oracle → PostgreSQL). Now the schema and code (stored procedures, data types...) are incompatible, so you also need the <Tooltip content="AWS Schema Conversion Tool — converts a database's schema and code from one engine to another before DMS moves the data">SCT</Tooltip>: use it to convert the schema to the target engine first, **then** use DMS to move the data.
 
 DMS supports many sources and targets: the source can be a database on-premises, on EC2, RDS, Aurora, S3, Azure SQL...; the target can be RDS, Aurora, Redshift, DynamoDB, S3, OpenSearch, Kinesis, Kafka...
 
@@ -181,10 +181,10 @@ DMS supports many sources and targets: the source can be a database on-premises,
 When the question revolves around moving data **between AWS databases**, there are a few familiar paths besides DMS:
 
 - **Snapshot & restore:** take a snapshot and restore it to a new instance — simple, but with downtime.
-- **DMS:** when you need a migration with **little/no downtime** (provided both the new and old instances run at the same time).
-- **MySQL/MariaDB:** use **Percona XtraBackup** to push backup files to **S3** and restore them into RDS/Aurora MySQL — faster than `mysqldump` for large datasets.
-- **RDS → Aurora:** create an **Aurora Read Replica** from the RDS instance, then **promote** it into a standalone Aurora cluster when `replication lag = 0`; or restore from a snapshot.
-- **Cross-region:** **copy the snapshot** to another region, or use a **read replica** across regions.
+- **DMS:** when you need a migration with little/no downtime (provided both the new and old instances run at the same time).
+- **MySQL/MariaDB:** use Percona XtraBackup to push backup files to S3 and restore them into RDS/Aurora MySQL — faster than `mysqldump` for large datasets.
+- **RDS → Aurora:** create an Aurora Read Replica from the RDS instance, then promote it into a standalone Aurora cluster when `replication lag = 0`; or restore from a snapshot.
+- **Cross-region:** copy the snapshot to another region, or use a read replica across regions.
 
 **Use case:** migrate a database into AWS or change engines with minimal downtime; keep two databases continuously in sync; consolidate data from multiple sources into one analytics store.
 
@@ -196,12 +196,12 @@ When the question revolves around moving data **between AWS databases**, there a
 
 When a question is about lifting an entire on-premises data center to AWS, beyond MGN and DMS above there are a few more tools in the "toolbox" to know:
 
-- **AWS Application Discovery Service:** gathers information about on-premises servers before a migration — configuration, utilization, and the **dependencies** between servers — to **plan** the migration. It comes in two flavors: **Agentless Discovery** (for **VMware vCenter** environments) and **Agent-based Discovery** (install an agent for finer detail). The collected data shows up in **AWS Migration Hub** — the central place to track migration progress.
-- **VM Import/Export:** **import** an existing on-premises virtual machine image into an **EC2 AMI/instance** (and export back out if needed). Useful when you already have VMs "frozen" to an internal standard.
-- **Download Amazon Linux 2 as a VM:** AWS lets you download Amazon Linux 2 (and newer releases) as a VM image to **run on-premises** (on VMware, VirtualBox, Hyper-V, KVM) — handy for developing/testing against an AWS-like environment right on site.
-- **AWS Storage Gateway** (brief mention): the **hybrid** bridge connecting on-premises infrastructure to storage on AWS — it lets on-premises applications use S3/cloud storage as if it were local storage, and often shows up in hybrid architectures during a gradual move to the cloud.
+- **AWS Application Discovery Service:** gathers information about on-premises servers before a migration — configuration, utilization, and the dependencies between servers — to plan the migration. It comes in two flavors: Agentless Discovery (for VMware vCenter environments) and Agent-based Discovery (install an agent for finer detail). The collected data shows up in AWS Migration Hub — the central place to track migration progress.
+- **VM Import/Export:** import an existing on-premises virtual machine image into an EC2 AMI/instance (and export back out if needed). Useful when you already have VMs "frozen" to an internal standard.
+- **Download Amazon Linux 2 as a VM:** AWS lets you download Amazon Linux 2 (and newer releases) as a VM image to run on-premises (on VMware, VirtualBox, Hyper-V, KVM) — handy for developing/testing against an AWS-like environment right on site.
+- **AWS Storage Gateway** (brief mention): the hybrid bridge connecting on-premises infrastructure to storage on AWS — it lets on-premises applications use S3/cloud storage as if it were local storage, and often shows up in hybrid architectures during a gradual move to the cloud.
 
-**Use case:** the **assessment & planning** phase before a migration (Discovery + Migration Hub), importing existing VMs, and maintaining a hybrid model during the transition.
+**Use case:** the assessment & planning phase before a migration (Discovery + Migration Hub), importing existing VMs, and maintaining a hybrid model during the transition.
 
 **Keywords:** `discover on-premises servers and dependencies`, `plan migration`, `Migration Hub`, `import existing VM to EC2`, `VM Import/Export`, `hybrid (Storage Gateway)`.
 
@@ -209,34 +209,34 @@ When a question is about lifting an entire on-premises data center to AWS, beyon
 
 ## 8. Transferring large datasets into AWS — online vs offline
 
-When you need to bring a **large block of data** (files/objects) into AWS, the core choice is **online (over the network)** vs **offline (ship a physical device)**.
+When you need to bring a large block of data (files/objects) into AWS, the core choice is online (over the network) vs offline (ship a physical device).
 
 ### 8.1. AWS DataSync — online transfer, on a schedule
 
-**AWS DataSync** is an **online** data transfer service at scale: it moves files/objects between **on-premises ↔ AWS** and even **AWS ↔ AWS**.
+**AWS DataSync** is an online data transfer service at scale: it moves files/objects between on-premises ↔ AWS and even AWS ↔ AWS.
 
-- To transfer from on-premises, you install a **DataSync Agent** (a VM) on site; it reads the data and pushes it to AWS.
-- The sources are diverse: **NFS, SMB, HDFS**, self-managed object storage (and even other clouds like Azure and Google Cloud). The AWS-side targets: **S3, EFS, and the FSx family** (Windows File Server, Lustre, OpenZFS, NetApp ONTAP).
-- It runs **on a schedule** (hourly/daily/weekly) and **incrementally** — after the first run, it only transfers what changed.
-- It **preserves metadata** (permissions, timestamps...) — important when migrating file systems.
+- To transfer from on-premises, you install a DataSync Agent (a VM) on site; it reads the data and pushes it to AWS.
+- The sources are diverse: NFS, SMB, HDFS, self-managed object storage (and even other clouds like Azure and Google Cloud). The AWS-side targets: S3, EFS, and the FSx family (Windows File Server, Lustre, OpenZFS, NetApp ONTAP).
+- It runs on a schedule (hourly/daily/weekly) and incrementally — after the first run, it only transfers what changed.
+- It preserves metadata (permissions, timestamps...) — important when migrating file systems.
 
-> **Note:** DataSync does **not** sync continuously in real time; it runs on a **schedule**. If you need a permanent hybrid bridge between on-premises and the cloud, that's a job for **Storage Gateway**, not DataSync.
+> **Note:** DataSync does **not** sync continuously in real time; it runs on a schedule. If you need a permanent hybrid bridge between on-premises and the cloud, that's a job for Storage Gateway, not DataSync.
 
 ### 8.2. AWS Snow Family — offline transfer via physical devices
 
-When the network is **too slow or too expensive** to push tens of TB/PB over the wire, AWS ships you a **physical device** to copy data onto and ship back — the **Snow Family**. As the SAA exam classically describes it, this family includes:
+When the network is too slow or too expensive to push tens of TB/PB over the wire, AWS ships you a physical device to copy data onto and ship back — the **Snow Family**. As the SAA exam classically describes it, this family includes:
 
 - **AWS Snowcone:** the smallest, portable device (a few TB), good for harsh environments/tight spaces; it can run DataSync onboard to push data when a network is available.
-- **AWS Snowball Edge:** a suitcase-sized device scaling to **petabytes** (across many devices). It comes in two variants: **Storage Optimized** (capacity-focused) and **Compute Optimized** (compute-focused). Snowball Edge can also run **edge computing** (EC2/Lambda) right on the device in places with no network.
-- **AWS Snowmobile:** a shipping-container truck for **exabyte-scale** data (up to ~100PB per truck) — for relocating a giant data center.
+- **AWS Snowball Edge:** a suitcase-sized device scaling to petabytes (across many devices). It comes in two variants: Storage Optimized (capacity-focused) and Compute Optimized (compute-focused). Snowball Edge can also run edge computing (EC2/Lambda) right on the device in places with no network.
+- **AWS Snowmobile:** a shipping-container truck for exabyte-scale data (up to ~100PB per truck) — for relocating a giant data center.
 
-> **Trap (real-world update):** The exam may still mention all three, but in the real world AWS has **retired Snowmobile (2024)** and **discontinued both Snowcone lines (HDD & SSD) as of Nov 2024** (existing-customer support until Nov 2025). So the Snow Family **today** is effectively just the latest-generation **Snowball Edge**. In the exam room, pick by the classic description; in the real world, remember this reality.
+> **Trap (real-world update):** The exam may still mention all three, but in the real world AWS has retired Snowmobile (2024) and discontinued both Snowcone lines (HDD & SSD) as of Nov 2024 (existing-customer support until Nov 2025). So the Snow Family today is effectively just the latest-generation Snowball Edge. In the exam room, pick by the classic description; in the real world, remember this reality.
 
 ### 8.3. Which one to choose?
 
 AWS's rule of thumb: estimate the time to transfer over the network — **if it would take more than ~1 week**, using the **Snow Family** will be faster than pushing it online.
 
-| Criterion         | **DataSync**                              | **Snow Family**                          |
+| Criterion         | DataSync                                  | Snow Family                              |
 | ----------------- | ----------------------------------------- | ---------------------------------------- |
 | Channel           | Online (over the network)                 | Offline (physical device)                |
 | Sensible scale    | When the link is good enough              | When the network is slow/expensive, or data is huge |
@@ -250,9 +250,9 @@ AWS's rule of thumb: estimate the time to transfer over the network — **if it 
 
 ## 9. VMware Cloud on AWS
 
-**VMware Cloud on AWS** lets you run a **VMware vSphere** environment (a full <Tooltip content="Software-Defined Data Center — a data center defined entirely in software, with virtualized compute/storage/network using the VMware toolset">SDDC</Tooltip>: vSphere, vSAN, NSX) **on AWS bare-metal infrastructure**.
+**VMware Cloud on AWS** lets you run a VMware vSphere environment (a full <Tooltip content="Software-Defined Data Center — a data center defined entirely in software, with virtualized compute/storage/network using the VMware toolset">SDDC</Tooltip>: vSphere, vSAN, NSX) on AWS bare-metal infrastructure.
 
-Its audience is very specific: enterprises **already running VMware on-premises** who want to **extend or migrate** to AWS **without refactoring/re-platforming** their applications. They keep their familiar VMware tools, skills, and processes, but run them on the cloud.
+Its audience is very specific: enterprises already running VMware on-premises who want to extend or migrate to AWS without refactoring/re-platforming their applications. They keep their familiar VMware tools, skills, and processes, but run them on the cloud.
 
 **Use case:** migrate VMware vSphere workloads to AWS "as-is"; use on-premises as the primary site and VMware Cloud on AWS as the DR site; or extend on-premises data center capacity into the cloud when needed.
 
@@ -262,15 +262,15 @@ Its audience is very specific: enterprises **already running VMware on-premises*
 
 ## 10. Telling them apart for good — comparison table
 
-This is the most confusing part, since many services "all sound like moving/copying data." Look through **four lenses**: **what** it moves, **one-time vs continuous**, **online vs offline**, and the **purpose**.
+This is the most confusing part, since many services "all sound like moving/copying data." Look through four lenses: what it moves, one-time vs continuous, online vs offline, and the purpose.
 
-| Criterion          | **DRS**                | **MGN**                  | **DMS**                       | **DataSync**          | **Snow Family**       | **AWS Backup**         |
+| Criterion          | DRS                    | MGN                      | DMS                           | DataSync              | Snow Family           | AWS Backup             |
 | ------------------ | ---------------------- | ------------------------ | ----------------------------- | --------------------- | --------------------- | ---------------------- |
 | Purpose            | DR (failover)          | Server migration         | Database migration            | Move files/objects    | Move large datasets   | Centralized backup     |
 | What it moves      | Whole server (block)   | Whole server (block)     | Database (data + schema)      | Files / objects       | Files / objects       | Recovery points        |
-| One-time / continuous | Continuous          | One-time (cutover)       | One-time **or** continuous (CDC) | Scheduled (incremental) | One-time           | Scheduled + on-demand  |
-| Online / Offline   | Online                 | Online                   | Online                        | Online                | **Offline**           | Online                 |
-| Different engine?  | —                      | —                        | Needs **SCT** if engines differ | —                   | —                     | —                      |
+| One-time / continuous | Continuous          | One-time (cutover)       | One-time or continuous (CDC)  | Scheduled (incremental) | One-time           | Scheduled + on-demand  |
+| Online / Offline   | Online                 | Online                   | Online                        | Online                | Offline               | Online                 |
+| Different engine?  | —                      | —                        | Needs SCT if engines differ    | —                   | —                     | —                      |
 
 A mantra to remember:
 
@@ -289,34 +289,34 @@ In the exam you have about 90 seconds per question. The table below maps common 
 
 | Keyword/scenario in the question                                                  | Answer                                          |
 | --------------------------------------------------------------------------------- | ----------------------------------------------- |
-| "How much **data loss** is acceptable", data loss tolerance                        | **RPO**                                          |
-| "How much **downtime** is acceptable", time to recover                            | **RTO**                                          |
-| **Cheapest** DR, can tolerate many hours of downtime                              | **Backup & Restore**                             |
-| Keep the **database running & replicating**, build the rest at failover           | **Pilot Light**                                  |
-| A **full copy running scaled-down**, scale up on disaster                         | **Warm Standby**                                 |
-| **Active-active**, no downtime, RTO near zero                                     | **Multi-Site / Hot Site**                        |
-| **Centralized backup** across many services from one place                        | **AWS Backup**                                   |
-| **Immutable backup / ransomware protection / can't be deleted even by root**     | **AWS Backup Vault Lock** (Compliance mode)      |
-| Back up to **another region / another account**                                   | **AWS Backup** cross-region/cross-account        |
-| **Continuously replicate servers** for **fast failover** on disaster             | **Elastic Disaster Recovery (DRS)**              |
-| **Lift-and-shift / rehost** a fleet of servers to AWS                             | **Application Migration Service (MGN)**          |
-| Migrate a **database** while the **source keeps running**, low downtime          | **Database Migration Service (DMS)**             |
-| Migrate a database with a **different engine** (Oracle→Aurora...)                 | **DMS + Schema Conversion Tool (SCT)**           |
-| **Discover on-premises servers & dependencies** to plan                          | **Application Discovery Service** (+ Migration Hub) |
-| **Import** an existing on-premises **VM** as EC2                                  | **VM Import/Export**                             |
-| Move **large files online**, on a schedule, into S3/EFS/FSx                       | **DataSync**                                     |
-| Network **too slow**, move **petabytes offline**                                 | **Snowball Edge**                                |
-| Move **exabyte / ~100PB** (per the classic exam framing)                          | **Snowmobile**                                   |
-| Run **VMware vSphere** on AWS, no re-platforming                                  | **VMware Cloud on AWS**                          |
+| "How much data loss is acceptable", data loss tolerance                           | **RPO**                                          |
+| "How much downtime is acceptable", time to recover                                | **RTO**                                          |
+| Cheapest DR, can tolerate many hours of downtime                                  | **Backup & Restore**                             |
+| Keep the database running & replicating, build the rest at failover               | **Pilot Light**                                  |
+| A full copy running scaled-down, scale up on disaster                             | **Warm Standby**                                 |
+| Active-active, no downtime, RTO near zero                                         | **Multi-Site / Hot Site**                        |
+| Centralized backup across many services from one place                            | **AWS Backup**                                   |
+| Immutable backup / ransomware protection / can't be deleted even by root          | **AWS Backup Vault Lock** (Compliance mode)      |
+| Back up to another region / another account                                       | **AWS Backup** cross-region/cross-account        |
+| Continuously replicate servers for fast failover on disaster                      | **Elastic Disaster Recovery (DRS)**              |
+| Lift-and-shift / rehost a fleet of servers to AWS                                 | **Application Migration Service (MGN)**          |
+| Migrate a database while the source keeps running, low downtime                   | **Database Migration Service (DMS)**             |
+| Migrate a database with a different engine (Oracle→Aurora...)                     | **DMS + Schema Conversion Tool (SCT)**           |
+| Discover on-premises servers & dependencies to plan                               | **Application Discovery Service** (+ Migration Hub) |
+| Import an existing on-premises VM as EC2                                          | **VM Import/Export**                             |
+| Move large files online, on a schedule, into S3/EFS/FSx                           | **DataSync**                                     |
+| Network too slow, move petabytes offline                                          | **Snowball Edge**                                |
+| Move exabyte / ~100PB (per the classic exam framing)                              | **Snowmobile**                                   |
+| Run VMware vSphere on AWS, no re-platforming                                      | **VMware Cloud on AWS**                          |
 
 A few quick tie-breakers when you're torn:
 
-- See **"failover / recovery / disaster protection"** for servers → **DRS** (don't confuse with MGN).
-- See **"migrate / lift-and-shift / rehost"** servers → **MGN**.
-- See two **differently named database engines** → **DMS + SCT**.
-- See **"can't be deleted / immutable / ransomware protection"** → **Backup Vault Lock** (not IAM).
-- See **"network too slow / data too large / offline transfer"** → **Snow Family**.
-- See **"cheapest"** among the DR options → lean toward **Backup & Restore**; see **"RTO near zero"** → **Multi-Site**.
+- See "failover / recovery / disaster protection" for servers → **DRS** (don't confuse with MGN).
+- See "migrate / lift-and-shift / rehost" servers → **MGN**.
+- See two differently named database engines → **DMS + SCT**.
+- See "can't be deleted / immutable / ransomware protection" → **Backup Vault Lock** (not IAM).
+- See "network too slow / data too large / offline transfer" → **Snow Family**.
+- See "cheapest" among the DR options → lean toward **Backup & Restore**; see "RTO near zero" → **Multi-Site**.
 
 ---
 
@@ -324,16 +324,16 @@ A few quick tie-breakers when you're torn:
 
 Back to the two problems from the opening, now every question has a clear address:
 
-- **"How much data is lost? How long to recover?"** → measured by **RPO/RTO**, and you choose one of the **4 strategies** (Backup & Restore → Pilot Light → Warm Standby → Multi-Site) to balance money against speed.
-- **"How do we move the whole company to AWS?"** → **MGN** for servers, **DMS (+SCT)** for databases, **DataSync/Snow Family** for bulk data, **VMware Cloud on AWS** for VMware workloads.
+- "How much data is lost? How long to recover?" → measured by **RPO/RTO**, and you choose one of the 4 strategies (Backup & Restore → Pilot Light → Warm Standby → Multi-Site) to balance money against speed.
+- "How do we move the whole company to AWS?" → **MGN** for servers, DMS (+SCT) for databases, DataSync/Snow Family for bulk data, VMware Cloud on AWS for VMware workloads.
 
 Things to burn into memory for the SAA exam:
 
-- **RPO = how much data you lose** (drives backup frequency); **RTO = how much downtime** (drives DR strategy). Smaller = more expensive.
+- **RPO = how much data you lose** (drives backup frequency); RTO = how much downtime (drives DR strategy). Smaller = more expensive.
 - **The 4 DR strategies** along the money ↔ speed axis: Backup & Restore (cheap, slow) → Pilot Light → Warm Standby → Multi-Site (expensive, fastest).
-- **AWS Backup** = centralized backup; remember **cross-region/cross-account** and **Vault Lock** (WORM, ransomware protection, Compliance mode = hard lock).
-- **DRS vs MGN**: the same block-replication engine; **DRS** for **disaster protection** (continuous), **MGN** for a **one-time lift-and-shift**.
-- **DMS** migrates databases while the source keeps running; **a different engine → needs SCT**.
-- **DataSync** (online, scheduled) vs **Snow Family** (offline, slow network/huge data); **VMware Cloud on AWS** to lift VMware as-is into the cloud.
+- **AWS Backup** = centralized backup; remember cross-region/cross-account and Vault Lock (WORM, ransomware protection, Compliance mode = hard lock).
+- **DRS vs MGN**: the same block-replication engine; DRS for disaster protection (continuous), MGN for a one-time lift-and-shift.
+- **DMS** migrates databases while the source keeps running; a different engine → needs SCT.
+- **DataSync** (online, scheduled) vs Snow Family (offline, slow network/huge data); VMware Cloud on AWS to lift VMware as-is into the cloud.
 
 Master the boundaries between these services, and you'll stop being fooled by "four answers that all sound right" in the exam room.

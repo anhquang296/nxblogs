@@ -90,12 +90,12 @@ More important for the exam is the classification by who owns and pays for the k
 
 A core limit: a direct KMS `Encrypt`/`Decrypt` API call processes **at most 4 KB** of data. So how do you encrypt a 1 GB file? To answer that, you need the concept of a data key and KMS's two-tier key model.
 
-- **Master key (KMS key)** is the root key that never leaves KMS. It does not directly encrypt your large data; its job is to encrypt and decrypt other keys.
-- **Data key (Data Encryption Key)** is a key KMS generates on demand to encrypt the actual data. This is the key that works directly with your data, and it is itself protected (encrypted) by the KMS key.
+- **KMS key (master key)** is the root key that never leaves KMS. It does not directly encrypt your data; its main job is to encrypt and decrypt the Data Encryption Keys.
+- **Data Encryption Key (data key)** is a key KMS generates on demand to encrypt the actual data. This is the key that works directly with your data, and it is itself protected (encrypted) by the KMS key.
 
 The mechanism that combines these two tiers is called **envelope encryption**: the data sits inside an "envelope" locked by the data key, and the data key sits inside a larger "envelope" locked by the KMS key. This technique shows up constantly on the exam.
 
-The flow to obtain a data key via the `GenerateDataKey` API:
+The envelope encryption flow:
 
 1. `GenerateDataKey` returns two things: the data key in plaintext for you to use right away, and that same data key in encrypted form, encrypted by the KMS key (called the **encrypted data key**).
 2. You use the plaintext data key to encrypt the large block of data right on your own machine (no network round trip, no 4 KB limit), then wipe the plaintext data key from memory as soon as possible.
@@ -200,6 +200,10 @@ The security team's second question — "where do the DB passwords and API keys 
 ### 5.1. SSM Parameter Store
 
 **AWS Systems Manager Parameter Store** is a hierarchical store for configuration data and secrets. You store values as plain text or SecureString (encrypted with KMS), organized along a path tree like `/my-app/prod/db-url`.
+
+But there's a crucial point most exam-takers miss — and it's the key to ending the hesitation when a question offers both Parameter Store and Secrets Manager: **Parameter Store is not a standalone secrets service**. It's a component inside AWS Systems Manager — the same house as Run Command, Automation, Session Manager, and Patch Manager. It exists so those operational tools have somewhere to read parameters from: when an Automation document or Run Command needs to know "which AMI" or "which config," it reads from Parameter Store. In other words, Parameter Store was born from the needs of the SSM operations suite, not from a need to manage secrets. The fact that it can also store secrets (via SecureString) is a secondary feature, not its reason for existence.
+
+The practical exam takeaway: when the scenario leans toward real secrets management — automatic rotation, database credentials, the lifecycle of a secret — then even though Parameter Store "can store it," the correct design choice is still **Secrets Manager**. Parameter Store fits operational config and simple, rarely-changing secrets.
 
 Core features:
 
@@ -322,7 +326,9 @@ The fourth question — "how do I know I'm being attacked or leaking data" — b
 
 ### 8.1. Amazon GuardDuty — threat detection
 
-**Amazon GuardDuty** is an intelligent threat-detection service that uses machine learning, anomaly detection, and threat intelligence to find malicious activity. The big advantage: it's a one-click enable, no agents to install.
+**Amazon GuardDuty** is an intelligent threat-detection service that uses machine learning, anomaly detection, and threat intelligence to find malicious activity.
+
+The big advantage: it's a one-click enable, no agents to install.
 
 It analyzes existing log sources:
 
