@@ -120,28 +120,35 @@ Read strategy quyết định cache được nạp thế nào; write strategy qu
 ```ts
 async function updateProduct(id: string, data: Product) {
   await saveProductToDb(id, data)
+
   await redis.set(`product:${id}`, JSON.stringify(data), 'EX', 300)
+  
   return data
 }
 ```
 
-Bài toán nó giải quyết: dữ liệu cũ. Vì cache được cập nhật theo từng lần ghi, một lần đọc ngay sau đó luôn thấy bản mới nhất. Đây là điểm khác biệt then chốt so với Lazy Loading vốn để cache "trôi" khỏi database giữa các lần miss.
+Bài toán nó giải quyết: **data consistency**. Vì cache được cập nhật theo từng lần ghi, một lần đọc ngay sau đó luôn thấy bản mới nhất. Đây là điểm khác biệt then chốt so với Lazy Loading vốn để cache "trôi" khỏi database giữa các lần miss.
 
-Đổi lại có ba nhược điểm. Một là **write penalty**: mỗi lần ghi tốn hai chuyến đi (cache và database), thêm độ trễ cho đường ghi. Hai là cache phình to với cả những dữ liệu chẳng ai đọc — vì ta ghi vào cache mọi thứ được ghi, kể cả thứ sẽ không bao giờ được truy vấn lại. Ba là vấn đề "missing data": ngay sau khi tạo một cache node mới (hoặc node bị thay), cache rỗng, và những dữ liệu chỉ-được-ghi-trong-quá-khứ sẽ không có trong cache cho tới lần ghi tiếp theo. Vì lý do thứ hai và thứ ba, AWS khuyến nghị **kết hợp** Write-Through với Lazy Loading và gắn TTL, thay vì dùng đơn lẻ.
+Đổi lại có ba nhược điểm
+- Một là **write penalty**: mỗi lần ghi tốn hai chuyến đi (cache và database), thêm độ trễ cho đường ghi.
+- Hai là cache phình to với cả những dữ liệu chẳng ai đọc — vì ta ghi vào cache mọi thứ được ghi, kể cả thứ sẽ không bao giờ được truy vấn lại.
+- Ba là vấn đề "missing data": ngay sau khi tạo một cache node mới (hoặc node bị thay), cache rỗng, và những dữ liệu chỉ-được-ghi-trong-quá-khứ sẽ không có trong cache cho tới lần ghi tiếp theo. Vì lý do thứ hai và thứ ba, AWS khuyến nghị **kết hợp** Write-Through với Lazy Loading và gắn TTL, thay vì dùng đơn lẻ.
 
 ### 3.2. Write-Back (Write-Behind)
 
 **Write-Back** (hay **Write-Behind**) là chiến lược trong đó ứng dụng ghi vào cache trước và coi như xong ngay, còn việc đẩy dữ liệu xuống database được làm bất đồng bộ sau đó (theo lô, theo lịch, hoặc khi nhàn rỗi).
 
-Bài toán nó giải quyết: đường ghi cực nhanh dưới khối lượng ghi rất lớn. Vì người dùng chỉ chờ thao tác ghi vào bộ nhớ (cache), độ trễ ghi gần như tức thì, và nhiều lần ghi có thể được gộp lại thành ít lần ghi database hơn. Đây là cơ chế quen thuộc bên trong các database (ví dụ <Tooltip content="Write-ahead log / buffer — cơ chế đệm ghi trong bộ nhớ rồi flush xuống đĩa theo lô, giúp ghi nhanh mà vẫn bền">buffer ghi của Postgres</Tooltip>), nơi tính bền vững được bảo vệ bằng các kỹ thuật riêng.
+Bài toán nó giải quyết: các hệ thống cần tối thiểu hoá write latency với khối lượng rất lớn. Vì người dùng chỉ chờ thao tác ghi vào bộ nhớ (cache), độ trễ ghi gần như tức thì, và nhiều lần ghi có thể được gộp lại thành ít lần ghi database hơn. Đây là cơ chế quen thuộc bên trong các database (ví dụ <Tooltip content="Write-ahead log / buffer — cơ chế đệm ghi trong bộ nhớ rồi flush xuống đĩa theo lô, giúp ghi nhanh mà vẫn bền">buffer ghi của Postgres</Tooltip>), nơi tính bền vững được bảo vệ bằng các kỹ thuật riêng.
 
 Nhược điểm chí mạng là **nguy cơ mất dữ liệu**: nếu cache chết trước khi flush kịp xuống database, phần dữ liệu chưa flush biến mất. Vì đánh đổi này, **không có dịch vụ cache nào của AWS cung cấp write-back được quản lý sẵn cho database của bạn** — nó là một pattern ở tầng ứng dụng, hiếm khi là đáp án trong đề SAA. Bạn cần nhận ra cái tên để loại trừ nó khi đề nhấn mạnh "không được mất dữ liệu".
+
+> Nhưng các hệ thống tiên tiến ngày nay có cơ chế đảm bảo dữ liệu không bị mất khi data node bị chết mà chưa flush dữ liệu vào primary database.
 
 ### 3.3. Write-Around
 
 **Write-Around** là chiến lược trong đó dữ liệu được ghi thẳng xuống database và bỏ qua cache hoàn toàn; cache chỉ được nạp về sau qua đường đọc (Lazy Loading) nếu dữ liệu đó thực sự được đọc.
 
-Bài toán nó giải quyết: tránh làm "ô nhiễm" cache bằng dữ liệu ghi-nhiều-đọc-ít. Hãy nghĩ tới log sự kiện hoặc dữ liệu cảm biến: ghi liên tục nhưng hiếm khi đọc lại ngay. Nếu dùng Write-Through, mỗi lần ghi lại nhét một thứ vô dụng vào cache, đẩy những key thật sự nóng ra ngoài (cache churn). Write-Around tránh điều đó bằng cách chỉ để cache chứa thứ được đọc.
+Bài toán nó giải quyết: **tránh làm đầy cache với những dữ liệu được ghi nhiều nhưng ít được truy xuất**. Hãy nghĩ tới log sự kiện hoặc dữ liệu cảm biến: ghi liên tục nhưng hiếm khi đọc lại ngay. Nếu dùng Write-Through, mỗi lần ghi lại nhét một thứ vô dụng vào cache, đẩy những key thật sự nóng ra ngoài (cache churn). Write-Around tránh điều đó bằng cách chỉ để cache chứa thứ được đọc.
 
 Đổi lại, dữ liệu vừa ghi sẽ gây một lần cache miss ở lần đọc đầu tiên — chấp nhận được nếu dữ liệu đó hiếm khi được đọc ngay sau khi ghi.
 

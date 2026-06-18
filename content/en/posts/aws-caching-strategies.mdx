@@ -120,28 +120,36 @@ Read strategy decides how the cache gets loaded; write strategy decides how the 
 ```ts
 async function updateProduct(id: string, data: Product) {
   await saveProductToDb(id, data)
+
   await redis.set(`product:${id}`, JSON.stringify(data), 'EX', 300)
+
   return data
 }
 ```
 
-The problem it solves: stale data. Because the cache is updated on every write, a read immediately afterward always sees the latest version. This is the key difference from Lazy Loading, which lets the cache "drift" away from the database between misses.
+The problem it solves: **data consistency**. Because the cache is updated on every write, a read immediately afterward always sees the latest version. This is the key difference from Lazy Loading, which lets the cache "drift" away from the database between misses.
 
-In return there are three downsides. One is the **write penalty**: every write costs two trips (cache and database), adding latency to the write path. Two is the cache bloating with data nobody reads — because we write everything to the cache, including things that will never be queried again. Three is the "missing data" problem: right after creating a new cache node (or one being replaced), the cache is empty, and data that was only written in the past won't be in the cache until the next write. Because of the second and third reasons, AWS recommends **combining** Write-Through with Lazy Loading and adding a TTL, rather than using it alone.
+In return there are three downsides:
+
+- One is the **write penalty**: every write costs two trips (cache and database), adding latency to the write path.
+- Two is the cache bloating with data nobody reads — because we write everything to the cache, including things that will never be queried again.
+- Three is the "missing data" problem: right after creating a new cache node (or one being replaced), the cache is empty, and data that was only written in the past won't be in the cache until the next write. Because of the second and third reasons, AWS recommends **combining** Write-Through with Lazy Loading and adding a TTL, rather than using it alone.
 
 ### 3.2. Write-Back (Write-Behind)
 
 **Write-Back** (or **Write-Behind**) is the strategy where the application writes to the cache first and considers itself done immediately, while pushing the data down to the database asynchronously afterward (in batches, on a schedule, or when idle).
 
-The problem it solves: an extremely fast write path under very high write volume. Because the user only waits for the in-memory write (the cache), write latency is nearly instant, and many writes can be coalesced into fewer database writes. This is a familiar mechanism inside databases (for example, <Tooltip content="Write-ahead log / buffer — a mechanism that buffers writes in memory then flushes them to disk in batches, making writes fast while staying durable">Postgres's write buffer</Tooltip>), where durability is protected by dedicated techniques.
+The problem it solves: systems that need to minimize write latency at very high volume. Because the user only waits for the in-memory write (the cache), write latency is nearly instant, and many writes can be coalesced into fewer database writes. This is a familiar mechanism inside databases (for example, <Tooltip content="Write-ahead log / buffer — a mechanism that buffers writes in memory then flushes them to disk in batches, making writes fast while staying durable">Postgres's write buffer</Tooltip>), where durability is protected by dedicated techniques.
 
 The fatal downside is the **risk of data loss**: if the cache dies before it can flush to the database, the unflushed data is gone. Because of this trade-off, **no AWS cache service offers managed write-back to your database** — it's an application-layer pattern and rarely the answer on the SAA exam. You need to recognize the name so you can rule it out when the question stresses "no data loss."
+
+> That said, modern advanced systems do have mechanisms to guarantee no data is lost even when a data node dies before flushing its data to the primary database.
 
 ### 3.3. Write-Around
 
 **Write-Around** is the strategy where data is written straight to the database and skips the cache entirely; the cache is only populated later via the read path (Lazy Loading) if that data is actually read.
 
-The problem it solves: avoiding "polluting" the cache with write-heavy, read-rarely data. Think of event logs or sensor data: written continuously but rarely read back right away. With Write-Through, every write stuffs something useless into the cache, pushing the genuinely hot keys out (cache churn). Write-Around avoids that by letting the cache hold only what gets read.
+The problem it solves: **avoiding filling the cache with data that's written a lot but rarely read**. Think of event logs or sensor data: written continuously but rarely read back right away. With Write-Through, every write stuffs something useless into the cache, pushing the genuinely hot keys out (cache churn). Write-Around avoids that by letting the cache hold only what gets read.
 
 In return, freshly written data causes one cache miss on its first read — acceptable if that data is rarely read right after being written.
 
