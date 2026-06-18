@@ -1,0 +1,295 @@
+---
+title: 'AWS VPC Networking: Site-to-Site VPN, Direct Connect, Transit Gateway, Endpoints và những gì cần nhớ cho kỳ thi SAA'
+date: '2026-06-16'
+tags: ['Devops', 'AWS', 'SAA']
+description: 'Tổng quan các dịch vụ kết nối mạng VPC của AWS cho kỳ thi SAA — Site-to-Site VPN, Direct Connect & Direct Connect Gateway, VPC Peering, Transit Gateway, VPC Endpoints/PrivateLink, Egress-Only Internet Gateway, Traffic Mirroring, Network Firewall và chi phí data transfer. Mỗi dịch vụ giải quyết vấn đề gì, dùng khi nào, và cần nhớ điều gì để đi thi.'
+enableComment: true
+---
+
+# AWS VPC Networking: Site-to-Site VPN, Direct Connect, Transit Gateway, Endpoints và những gì cần nhớ cho kỳ thi SAA
+
+Hệ thống của bạn đã lớn lên. Ban đầu chỉ có một <Tooltip content="Virtual Private Cloud — mạng riêng ảo của bạn trong AWS, nơi đặt các tài nguyên như EC2, RDS">VPC</Tooltip> gọn gàng. Giờ thì có hàng chục VPC nằm rải rác trên nhiều account, cộng thêm một data center on-premises (tại chỗ, do công ty tự vận hành) vẫn còn giữ phần lớn dữ liệu nội bộ. Và một loạt câu hỏi kết nối bắt đầu dồn tới:
+
+- Làm sao nối data center on-premises với VPC trên AWS một cách an toàn — nhanh thì làm thế nào, mà ổn định băng thông cao thì làm thế nào?
+- Hai VPC ở hai account khác nhau cần "nói chuyện" với nhau bằng IP nội bộ — nối kiểu gì? Mà nếu là năm chục VPC thì sao?
+- EC2 trong subnet private cần đọc dữ liệu từ S3 — có cách nào đi thẳng trong mạng AWS thay vì vòng ra internet không?
+- Một instance chỉ chạy IPv6 cần tải bản cập nhật từ internet, nhưng tuyệt đối không được cho ai ngoài internet chủ động kết nối vào — dùng gì?
+- Đội security muốn "soi" toàn bộ gói tin trong VPC để dò xâm nhập, và lọc lưu lượng độc hại ở tầng VPC — bằng công cụ nào?
+- Và cuối cùng, đội tài chính cầm hóa đơn AWS chỉ vào một dòng phình to ghi "data transfer" và hỏi: tiền này ở đâu ra?
+
+Điều thú vị: **mỗi câu hỏi ở trên ứng với đúng một dịch vụ networking mà AWS sinh ra để giải quyết nó.** Không có một "service mạng" vạn năng — thay vào đó là cả một họ công cụ kết nối, mỗi cái trám một nhu cầu cụ thể: nối ra ngoài, nối lẫn nhau, nối riêng tư tới dịch vụ AWS, soi và lọc lưu lượng, và tối ưu chi phí truyền dữ liệu.
+
+Bài viết này là tấm bản đồ giúp bạn phân biệt chúng. Với mỗi dịch vụ, mình sẽ đi qua: nó giải quyết vấn đề gì, tính năng cốt lõi, use case thực tế, và những điểm hay bị hỏi trong phòng thi <Tooltip content="AWS Certified Solutions Architect – Associate, chứng chỉ kiến trúc sư giải pháp AWS mức Associate">SAA</Tooltip>.
+
+> **Lưu ý:** Đây là góc nhìn overview để xây mental model và nhận diện nhanh khi đi thi. Phần lớn các bẫy trong đề SAA nằm ở **ranh giới** giữa các dịch vụ — VPN hay Direct Connect, Peering hay Transit Gateway, Gateway Endpoint hay Interface Endpoint — nên bài này tập trung vào lý do tồn tại và sự khác nhau giữa chúng.
+
+---
+
+## 1. Bức tranh tổng thể: kết nối là bài toán trung tâm
+
+Toàn bộ các dịch vụ trong bài rơi vào sáu nhóm, mỗi nhóm trả lời một câu hỏi kết nối khác nhau:
+
+| Câu hỏi kết nối                                       | Nhóm                      | Dịch vụ chính                       |
+| ----------------------------------------------------- | ------------------------- | ----------------------------------- |
+| "Nối VPC với data center on-premises thế nào?"        | **Hybrid**                | Site-to-Site VPN, Direct Connect    |
+| "Nối nhiều VPC / nhiều account với nhau?"             | **VPC với VPC & mở rộng** | VPC Peering, Transit Gateway        |
+| "Truy cập dịch vụ AWS riêng tư, không ra internet?"   | **Truy cập private**      | VPC Endpoints / PrivateLink         |
+| "Cho instance IPv6 ra internet nhưng chặn chiều vào?" | **IPv6 outbound**         | Egress-Only Internet Gateway        |
+| "Soi và lọc lưu lượng để bảo mật?"                    | **Giám sát & lọc**        | Traffic Mirroring, Network Firewall |
+| "Vì sao hóa đơn data transfer cao?"                   | **Chi phí**               | Quy luật tính phí truyền dữ liệu    |
+
+Một ý xuyên suốt cần ghim trước: khi nối hai mạng riêng (VPC với VPC, hay VPC với on-premises), nguyên tắc nền tảng là các dải địa chỉ phải **không trùng nhau**. Mỗi mạng được mô tả bằng một <Tooltip content="Classless Inter-Domain Routing — cách viết một dải địa chỉ IP, ví dụ 10.0.0.0/16 gồm các IP từ 10.0.0.0 đến 10.0.255.255">CIDR</Tooltip> (một dải IP). Nếu hai mạng dùng chung dải IP, router không biết một địa chỉ thuộc về bên nào — nên mọi hình thức kết nối ngang hàng đều yêu cầu CIDR không đè lên nhau. Giữ ý này trong đầu, giờ ta đi qua từng nhóm.
+
+---
+
+## 2. Site-to-Site VPN: nối on-premises qua internet, nhanh và mã hóa
+
+**Site-to-Site VPN** tạo một đường hầm mã hóa giữa data center on-premises và VPC, chạy **trên internet công cộng**. Ưu điểm lớn nhất là dựng cực nhanh (vài phút đến vài chục phút) và không cần kéo cáp vật lý gì cả.
+
+Nền tảng của nó là <Tooltip content="Internet Protocol Security — bộ giao thức tạo đường hầm mã hóa giữa hai mạng, bảo vệ dữ liệu khi truyền qua mạng công cộng">IPsec</Tooltip> — bộ giao thức bọc gói tin trong một "đường hầm" mã hóa, để dù dữ liệu đi qua internet thì kẻ nghe lén ở giữa cũng chỉ thấy mớ byte vô nghĩa. Một kết nối VPN cần hai đầu, mỗi đầu là một "cổng":
+
+- **Virtual Private Gateway** là cổng VPN phía AWS — bạn gắn nó vào VPC. Có thể đặt một <Tooltip content="Autonomous System Number — số định danh một mạng tự trị trong giao thức định tuyến BGP; mỗi bên của kết nối BGP có một Autonomous System Number riêng">Autonomous System Number</Tooltip> tùy chỉnh cho Virtual Private Gateway nếu muốn.
+- **Customer Gateway** đại diện cho thiết bị phía on-premises (router vật lý hoặc phần mềm). Trong AWS, bạn khai báo Customer Gateway bằng địa chỉ IP public của thiết bị đó.
+
+### 2.1. Luồng đi của một request, từ on-premises tới EC2
+
+Để thấy các mảnh ghép trên — route table, BGP, route propagation, Security Group — phối hợp ra sao, hãy lần theo một request cụ thể. Giả sử server on-premises có IP `192.168.1.10`, EC2 trong VPC có private IP `10.0.1.20`; VPC dùng CIDR `10.0.0.0/16`, còn mạng on-premises dùng `192.168.0.0/16`.
+
+1. **Server on-prem tạo request.** Server gửi gói tin đến đích `10.0.1.20`. Nó không biết gì về VPN — chỉ thấy đây là một địa chỉ thuộc mạng khác, nên đẩy gói tin tới <Tooltip content="Default gateway — router mặc định mà một thiết bị gửi gói tin tới khi đích không nằm trong mạng nội bộ của nó">default gateway</Tooltip> (router nội bộ).
+2. **Router on-prem định tuyến vào tunnel.** Router on-premises có một route khai rằng dải `10.0.0.0/16` (CIDR của VPC) phải đi qua VPN tunnel. Đây là bước cấu hình quan trọng: thiếu route này thì gói tin không bao giờ vào được tunnel.
+3. **Customer Gateway mã hóa.** Customer Gateway bọc gói tin gốc trong một lớp đóng gói (encapsulation — gói tin gốc trở thành phần tải nằm bên trong một gói tin mới) và mã hóa bằng IPsec, rồi gửi qua internet tới IP public của tunnel endpoint phía AWS.
+4. **Virtual Private Gateway giải mã.** Virtual Private Gateway phía AWS nhận gói, giải mã, bóc lớp đóng gói, lấy lại gói tin gốc với đích `10.0.1.20`.
+5. **Định tuyến trong VPC.** Route table của subnet chứa EC2 phải có một route trỏ dải on-premises (`192.168.0.0/16`) về phía Virtual Private Gateway thì gói tin mới tới được EC2. Route này vào route table theo hai cách: với định tuyến động, Customer Gateway và Virtual Private Gateway trao đổi dải IP của nhau qua giao thức BGP (Border Gateway Protocol) rồi tính năng route propagation trên route table sẽ tự động cập nhật route; với định tuyến tĩnh, bạn sẽ tự thêm route vào route table.
+6. **Security Group cho phép.** Security Group của EC2 phải có inbound rule cho phép lưu lượng từ dải IP on-premises (ví dụ `192.168.1.0/24`) trên đúng cổng cần dùng (ví dụ TCP `443` hoặc `22`). Đây là chỗ hay bị quên nhất khi debug kiểu "ping thì được mà gọi service thì không": ping chạy được nhờ rule ICMP, còn service lại cần đúng cổng của nó.
+7. **EC2 phản hồi, theo chiều ngược lại.** EC2 gửi response về `192.168.1.10`. Route table của VPC thấy đích thuộc dải on-premises nên đẩy gói về Virtual Private Gateway, mã hóa, qua tunnel, tới Customer Gateway giải mã, rồi về server on-prem. Vì Security Group là stateful (nó nhớ kết nối đã được mở), lưu lượng phản hồi được cho ra tự động mà không cần thêm outbound rule. Và vì cả hai chiều đều nằm trong tunnel, EC2 không cần Internet Gateway hay IP public.
+
+<ExcalidrawDiagram
+  src="/site-to-site-vpn-request-flow.excalidraw"
+  alt="Luồng đi của một request qua Site-to-Site VPN: từ server on-premises (192.168.1.10) tạo request, qua Customer Gateway mã hóa IPsec, đi qua đường hầm trên internet công cộng, tới Virtual Private Gateway giải mã, được route table của VPC định tuyến vào subnet, và Security Group (cho phép dải 192.168.1.0/24) chuyển tới EC2 (10.0.1.20); một đường phản hồi nét đứt đi ngược lại cho thấy traffic hai chiều đều nằm trong tunnel, không cần Internet Gateway hay IP public"
+/>
+
+**Vì sao route table tự cập nhật được qua BGP, mà Security Group không tự mở theo?** Vì Security Group giải quyết bài toán bảo mật, nên phải do con người chủ động quyết định. Nếu Security Group tự mở theo những dải IP mà BGP quảng bá tới, thì bất kỳ ai quảng bá được một dải mạng vào tunnel cũng có thể tự "mở cửa" vào instance của bạn — một lỗ hổng nghiêm trọng. Vì thế AWS tách bạch hai việc: định tuyến có thể tự động, nhưng "ai được phép vào" thì bạn phải tự liệt kê.
+
+### 2.2. AWS VPN CloudHub
+
+Khi bạn có nhiều site muốn nối với nhau, **VPN CloudHub** là một mẹo dùng lại đúng Virtual Private Gateway làm trung tâm: một Virtual Private Gateway + nhiều Customer Gateway (mỗi site một Customer Gateway với Autonomous System Number BGP khác nhau). Kết quả là các site không chỉ nối được vào VPC mà còn **nói chuyện được với nhau** qua Virtual Private Gateway, theo mô hình hub-and-spoke (trục bánh xe — một trung tâm tỏa ra nhiều nhánh).
+
+- **Vấn đề nó giải quyết:** nối nhiều chi nhánh với nhau và với AWS, chi phí thấp, đi qua internet.
+- **Cần nhớ:** CloudHub chạy trên kết nối VPN sẵn có nên vẫn mang đặc tính của VPN — qua internet, băng thông và độ trễ không được bảo đảm.
+
+Vì chạy trên internet, throughput và độ trễ của Site-to-Site VPN **không được cam kết**, và mỗi tunnel giới hạn quanh **1.25 Gbps**. Khi cần nhiều hơn thế, hoặc cần đường riêng ổn định, ta chuyển sang Direct Connect.
+
+---
+
+## 3. AWS Direct Connect & Direct Connect Gateway: đường riêng, ổn định, không qua internet
+
+**AWS Direct Connect (DX)** là một kết nối mạng **vật lý, riêng (private)** kéo thẳng từ data center của bạn tới AWS, không đi qua internet công cộng. Đổi lại độ phức tạp khi thiết lập, bạn nhận được độ trễ ổn định, băng thông cao và tính riêng tư — vì lưu lượng không bao giờ chạm tới internet.
+
+Cách hoạt động: tại một **Direct Connect Location** (điểm kết nối vật lý của AWS), router của bạn được nối với router của AWS. Có hai kiểu mua kết nối:
+
+- **Dedicated (chuyên dụng):** một cổng vật lý dành riêng cho bạn, dung lượng **1 / 10 / 100 Gbps**. Yêu cầu qua AWS, do đối tác Direct Connect lắp đặt.
+- **Hosted:** mua qua đối tác, dung lượng linh hoạt từ **50 Mbps đến 10 Gbps**, có thể tăng/giảm theo nhu cầu.
+
+Trên một kết nối DX, bạn tạo các <Tooltip content="Virtual Interface — giao diện ảo cấu hình trên kết nối Direct Connect để định tuyến lưu lượng tới một loại đích cụ thể">VIF</Tooltip> (Virtual Interface) tùy theo bạn muốn tới đâu:
+
+- **Private VIF**: truy cập tài nguyên trong VPC bằng IP private (ví dụ EC2). Nối tới Virtual Private Gateway hoặc Direct Connect Gateway.
+- **Public VIF**: truy cập các dịch vụ AWS công cộng (S3, DynamoDB...) bằng IP public, nhưng đi trên đường DX riêng chứ không qua internet.
+- **Transit VIF**: nối tới Transit Gateway (xem mục 6).
+
+### 3.1. Direct Connect Gateway
+
+Mặc định một Private VIF chỉ nối tới một Virtual Private Gateway trong một region. Khi bạn có nhiều VPC ở **nhiều region khác nhau** và muốn dùng chung một kết nối DX, **Direct Connect Gateway** là tài nguyên toàn cục đứng giữa: một kết nối DX nối vào một DX Gateway, rồi từ đó tỏa tới nhiều VPC ở nhiều region (và nhiều account).
+
+### 3.2. Hai điểm cực kỳ hay ra thi
+
+- **DX không được mã hóa mặc định.** Nó riêng tư (không qua internet) nhưng dữ liệu trên đó không được mã hóa. Cần mã hóa thì chồng một Site-to-Site VPN lên trên DX (mục 4).
+- **Dựng DX rất lâu.** Vì là hạ tầng vật lý, một kết nối Dedicated mới thường mất hàng tuần đến hơn một tháng để có. Đề thi hay khai thác điểm này: cần kết nối hybrid **ngay lập tức** thì câu trả lời là Site-to-Site VPN (dựng trong vài phút), không phải DX.
+
+Về độ bền (resiliency), AWS khuyến nghị hai mức:
+
+- **High resiliency:** hai kết nối DX tại hai Direct Connect Location khác nhau.
+- **Maximum resiliency:** nhiều kết nối, kết thúc trên các thiết bị tách biệt, tại nhiều location.
+
+- **Use case:** truyền dữ liệu khối lượng lớn đều đặn, ứng dụng hybrid cần độ trễ ổn định, hoặc truy cập dịch vụ AWS công cộng mà tránh hẳn internet.
+
+---
+
+## 4. Direct Connect + Site-to-Site VPN: kết hợp để mã hóa và để dự phòng
+
+Hai dịch vụ trên không loại trừ nhau — ghép chúng lại giải đúng hai bài toán mà mỗi cái đứng một mình không làm tốt:
+
+- **Cần đường riêng nhưng phải mã hóa:** chạy một Site-to-Site VPN (IPsec) **lên trên** Direct Connect (qua Public VIF). Bạn vừa có tính riêng tư và độ ổn định của DX, vừa có lớp mã hóa của VPN — đáp ứng các yêu cầu compliance bắt buộc "mã hóa khi truyền".
+- **Cần dự phòng cho DX:** một kết nối DX đơn lẻ mà hỏng thì on-premises mất liên lạc với AWS, và dựng DX thứ hai lại lâu. Giải pháp rẻ và nhanh: dùng **Site-to-Site VPN làm đường backup** cho DX. Khi DX chết, lưu lượng tự fail-over sang VPN (qua internet) — chấp nhận hiệu năng thấp hơn để giữ kết nối không đứt.
+
+- **Cần nhớ:** thấy đề nói "DX bị lỗi, cần phương án backup tiết kiệm" thì chọn Site-to-Site VPN. Thấy "DX nhưng yêu cầu mã hóa dữ liệu khi truyền" thì chọn VPN over Direct Connect.
+
+---
+
+## 5. VPC Peering: nối hai VPC thành một mạng phẳng
+
+**VPC Peering** kết nối hai VPC để chúng giao tiếp bằng IP private như thể nằm chung một mạng. Đây là cách đơn giản nhất khi chỉ có một vài VPC cần nói chuyện với nhau.
+
+Ba quy tắc bắt buộc nhớ, vì đề thi xoáy đúng vào đây:
+
+- **Không trùng CIDR:** hai VPC peering phải có dải IP không đè lên nhau.
+- **Không bắc cầu:** đây là giới hạn quan trọng nhất. Nếu A peering với B, và B peering với C, thì A **không** tự động tới được C. Muốn A nói chuyện với C, bạn phải tạo thêm một peering A–C trực tiếp.
+- **Phải sửa route table:** ở mỗi VPC, bạn phải thêm route trỏ dải IP của VPC kia qua peering connection thì lưu lượng mới chạy.
+
+Quy tắc "không bắc cầu" ở trên là điểm hay bị bỏ sót nhất — hình dưới minh họa cụ thể: A đã peering với B, B đã peering với C (cả hai kết nối đều đang hoạt động), nhưng lưu lượng từ A vẫn **không** tự đi qua B để tới C. Muốn A nói chuyện với C, bạn phải tạo thêm một peering A–C trực tiếp riêng.
+
+<ExcalidrawDiagram
+  src="/aws-vpc-peering-not-transitive.excalidraw"
+  alt="VPC Peering không bắc cầu: VPC A peering với VPC B và VPC B peering với VPC C, cả hai kết nối đều hoạt động, nhưng đường đi từ A tới C bị chặn vì peering không có tính bắc cầu; muốn A kết nối tới C phải tạo một peering A–C trực tiếp riêng"
+/>
+
+Vài điểm cộng: peering hoạt động **cross-region** và **cross-account**; và bạn có thể tham chiếu Security Group của VPC bên kia ngay trong rule, tiện cho việc khai báo quyền — điều này chỉ áp dụng khi hai VPC nằm cùng region (kể cả khi khác account).
+
+- **Use case:** nối một số ít VPC với nhau bằng đường riêng tư, đơn giản.
+
+> Khi số VPC lớn, VPC peering connection giữa các VPC tạo thành mạng lưới rối rắm, trở nên không quản lý nổi, và đó chính là lúc Transit Gateway xuất hiện.
+
+---
+
+## 6. Transit Gateway: trung tâm kết nối ở quy mô lớn
+
+**Transit Gateway (TGW)** là một trung tâm trung chuyển mạng cấp region: một hub duy nhất nối hàng nghìn VPC, các kết nối Site-to-Site VPN và Direct Connect, xuyên nhiều account, theo mô hình hub-and-spoke. Nó sinh ra để chữa đúng cái đau của VPC Peering — peering không bắc cầu và bùng nổ số kết nối.
+
+Sơ đồ dưới đây cho thấy mô hình hub-and-spoke đó: thay vì đấu trực tiếp từng cặp VPC, mọi VPC (kể cả ở account khác, như "third-party account") đều gắn vào một Transit Gateway duy nhất ở trung tâm, và một route table của TGW quyết định attachment nào đi tới được attachment nào.
+
+<ExcalidrawDiagram
+  src="/transit-gateway-multi-account.excalidraw"
+  alt="Transit Gateway nối nhiều VPC xuyên account theo mô hình hub-and-spoke: bên trong AWS Cloud có 'your account' chứa VPC 1 và VPC 2, cùng 'third-party account' chứa VPC 3 và VPC 4, mỗi VPC đều có các instance; cả bốn VPC đều gắn vào một Transit Gateway ở trung tâm, và một route table gắn với Transit Gateway điều khiển định tuyến giữa các VPC"
+/>
+
+Khác biệt cốt lõi so với peering: TGW cho phép **định tuyến bắc cầu (transitive)**. Mọi thứ gắn vào hub đều có thể đi tới nhau qua hub, thay vì phải đấu trực tiếp từng cặp.
+
+Tính năng nổi bật, mỗi cái đều là một "từ khóa" trong đề thi:
+
+- **Cross-account qua RAM:** chia sẻ TGW cho các account khác bằng <Tooltip content="AWS Resource Access Manager — dịch vụ chia sẻ tài nguyên AWS giữa nhiều account trong một tổ chức">RAM</Tooltip>.
+- **Cross-region:** hai TGW ở hai region có thể peering với nhau.
+- **Route table để phân vùng:** TGW có route table riêng, cho phép kiểm soát attachment nào được tới attachment nào — dùng để cô lập (segmentation) các mảng mạng.
+- **Hỗ trợ IP multicast:** TGW là dịch vụ AWS **duy nhất** hỗ trợ <Tooltip content="IP multicast — gửi một gói tin tới đồng thời nhiều người nhận đã đăng ký, thay vì gửi riêng từng bản sao tới từng người">IP multicast</Tooltip>. Thấy "multicast" thì nghĩ ngay TGW.
+- **Tăng băng thông VPN bằng ECMP:** một Site-to-Site VPN bị giới hạn ~1.25 Gbps mỗi tunnel. Với TGW, bạn dùng <Tooltip content="Equal-Cost Multi-Path routing — định tuyến chia tải đồng thời qua nhiều đường có cùng 'chi phí', nhờ đó cộng dồn băng thông của các đường lại">ECMP</Tooltip> để gộp nhiều kết nối VPN song song lại, cộng dồn băng thông vượt qua trần của một kết nối đơn.
+
+- **Use case:** trung tâm kết nối cho hàng trăm VPC và nhiều account; chia sẻ một Direct Connect cho nhiều account; mở rộng băng thông VPN; phân vùng mạng có kiểm soát.
+- **Cần nhớ:** nhiều VPC / cross-account / cần định tuyến bắc cầu thì chọn Transit Gateway. Tăng băng thông Site-to-Site VPN thì dùng TGW kèm ECMP.
+
+---
+
+## 7. VPC Endpoints (PrivateLink): tới dịch vụ AWS mà không ra internet
+
+Mặc định, để EC2 trong VPC gọi một dịch vụ AWS công cộng như S3 hay DynamoDB, lưu lượng phải đi ra qua Internet Gateway (hoặc qua NAT Gateway nếu ở subnet private) rồi vòng qua internet. **VPC Endpoints** mở một đường đi **riêng tư, nằm gọn trong mạng AWS**, không cần Internet Gateway hay NAT — bảo mật hơn, độ trễ thấp hơn, và (như sẽ thấy ở mục 10) còn rẻ hơn.
+
+Có hai loại endpoint, và phân biệt đúng chúng là một câu gần như chắc chắn có trong đề:
+
+### 7.1. Gateway Endpoint
+
+- **Chỉ dành cho S3 và DynamoDB.** Đúng hai dịch vụ này, không hơn.
+- Hoạt động bằng cách thêm một route vào route table (đích là một prefix list của dịch vụ). Không có ENI, không cần IP.
+- **Miễn phí.**
+
+Thấy "truy cập S3/DynamoDB riêng tư, không qua internet, tiết kiệm chi phí" thì chọn **Gateway Endpoint**.
+
+### 7.2. Interface Endpoint (AWS PrivateLink)
+
+- Dành cho **hầu hết các dịch vụ AWS còn lại**, cũng như dịch vụ của bạn hoặc bên thứ ba.
+- Hoạt động bằng cách dựng một <Tooltip content="Elastic Network Interface — card mạng ảo gắn vào instance/subnet, mang một IP private trong VPC">ENI</Tooltip> mang IP private ngay trong subnet của bạn. Vì là ENI nên nó dùng **Security Group** để kiểm soát truy cập.
+- Có chi phí (theo giờ + theo GB xử lý).
+- Truy cập được qua cả Direct Connect và VPN — nên đây là lựa chọn khi cần tới dịch vụ private từ **on-premises**.
+
+**AWS PrivateLink** là công nghệ đằng sau Interface Endpoint, và là cách an toàn nhất để **một nhà cung cấp dịch vụ "phơi" service của họ ra cho hàng nghìn VPC khác** mà không cần peering, không cần Internet Gateway, không cần sửa route table: phía khách dựng một Interface Endpoint, nối tới một <Tooltip content="Network Load Balancer — bộ cân bằng tải tầng 4 (TCP/UDP), chịu được lưu lượng rất lớn với độ trễ thấp">NLB</Tooltip> đặt trước service của nhà cung cấp.
+
+- **Cần nhớ một bẫy on-premises:** Gateway Endpoint **không** truy cập được từ on-premises (qua DX/VPN). Nếu đề nói "cần truy cập S3 riêng tư từ data center on-premises", câu trả lời là **Interface Endpoint** cho S3, không phải Gateway Endpoint.
+
+---
+
+## 8. Egress-Only Internet Gateway: đường ra internet cho IPv6
+
+Để hiểu dịch vụ này, cần một ý nền tảng về IPv6. Với IPv4, các instance trong subnet private thường dùng **NAT Gateway** để ra internet một chiều: chúng được phép chủ động kết nối ra ngoài (tải cập nhật, gọi API), nhưng internet không thể chủ động kết nối ngược vào. NAT làm được điều đó nhờ instance dùng IP private, ẩn sau IP public của NAT.
+
+Nhưng IPv6 thì khác hẳn: trong AWS, **mọi địa chỉ IPv6 đều là địa chỉ public, định tuyến được toàn cầu** — không có khái niệm "IPv6 private" để giấu sau NAT. Vậy làm sao cho một instance IPv6 ra internet một chiều mà vẫn chặn chiều vào?
+
+Đó chính là việc của **Egress-Only Internet Gateway** — phiên bản IPv6 của NAT Gateway: cho phép instance IPv6 trong VPC **đi ra** internet, nhưng **chặn** mọi kết nối do internet chủ động khởi tạo vào.
+
+- **Use case:** instance chạy IPv6 cần tải cập nhật / gọi dịch vụ ngoài, nhưng không được phép bị tiếp cận từ internet.
+- **Cần nhớ:** "IPv6 + chỉ ra ngoài + chặn chiều vào" thì chọn Egress-Only Internet Gateway. (NAT Gateway là tương đương cho IPv4.)
+
+---
+
+## 9. Giám sát & lọc lưu lượng: Traffic Mirroring và Network Firewall
+
+Hai dịch vụ cuối không phải để "nối", mà để **nhìn vào** và **lọc** lưu lượng trong VPC — đây là phần chạm tới khía cạnh bảo mật mạng.
+
+### 9.1. VPC Traffic Mirroring
+
+**VPC Traffic Mirroring** sao chép lưu lượng mạng (vào/ra) từ một ENI nguồn và gửi bản sao tới một đích để phân tích — đích có thể là một ENI hoặc một Network Load Balancer đứng trước cụm thiết bị phân tích.
+
+- Bạn có thể **lọc** chỉ bắt loại lưu lượng quan tâm (theo giao thức, cổng, dải IP) và bắt toàn bộ hay một phần gói tin.
+- **Không xâm lấn:** không cần cài agent lên instance nguồn.
+- Nguồn và đích có thể cùng VPC, hoặc khác VPC (qua peering / Transit Gateway).
+
+- **Use case:** đưa lưu lượng vào các thiết bị <Tooltip content="Intrusion Detection System — hệ thống phát hiện xâm nhập, phân tích lưu lượng mạng để nhận diện hành vi tấn công">IDS</Tooltip>, soi nội dung (content inspection), gỡ lỗi mạng, điều tra sau sự cố.
+
+### 9.2. AWS Network Firewall
+
+Để hiểu vì sao cần dịch vụ này, hãy nhớ giới hạn của những công cụ lọc sẵn có. Security Group và <Tooltip content="Network Access Control List — danh sách quy tắc lọc lưu lượng ở mức subnet, hoạt động không trạng thái (stateless)">NACL</Tooltip> chỉ làm việc ở tầng 3/4 (IP và cổng). <Tooltip content="Web Application Firewall — tường lửa lọc lưu lượng HTTP/HTTPS tầng 7, chặn web exploit như SQL injection, XSS">WAF</Tooltip> lọc HTTP ở tầng 7 nhưng chỉ gắn được lên ALB, CloudFront, API Gateway. Vậy nếu cần bảo vệ **toàn bộ một VPC** ở tầng mạng, với khả năng soi gói tin sâu, thì sao?
+
+Đó là **AWS Network Firewall** — tường lửa được quản lý, bảo vệ ở mức **toàn VPC**, từ tầng 3 đến tầng 7. Một ý hữu ích để nhớ về "tầng": tầng 3/4 là địa chỉ IP và cổng (ai nói với ai), còn tầng 7 là nội dung ứng dụng (HTTP, tên miền) — soi sâu tới tầng 7 nghĩa là firewall hiểu được cả nội dung chứ không chỉ địa chỉ.
+
+Tính năng cốt lõi:
+
+- Bảo vệ lưu lượng giữa các VPC, lưu lượng ra/vào internet, và cả lưu lượng tới/từ Direct Connect & Site-to-Site VPN.
+- Bên dưới, nó dùng **AWS Gateway Load Balancer** để chuyển hướng lưu lượng qua các engine kiểm tra.
+- Rule đa dạng: stateful/stateless, lọc theo **tên miền** (cho/cấm danh sách domain, URL), ngăn chặn xâm nhập (<Tooltip content="Intrusion Prevention System — hệ thống ngăn chặn xâm nhập, không chỉ phát hiện mà còn chủ động chặn lưu lượng tấn công">IPS</Tooltip>), soi theo chữ ký.
+- Quản lý tập trung trên nhiều account qua **AWS Firewall Manager**; gửi log sang S3, CloudWatch, Kinesis Data Firehose.
+
+- **Cần nhớ:** lọc/soi lưu lượng ở mức toàn VPC, tầng 3–7, lọc theo domain thì chọn **Network Firewall**. Phân biệt với WAF (chỉ HTTP tầng 7 trên ALB/CloudFront/API Gateway), Shield (chống DDoS), Security Group/NACL (lọc cơ bản tầng 3/4).
+
+---
+
+## 10. Chi phí networking & data transfer trên AWS
+
+Đây là nhóm câu hỏi tối ưu chi phí rất hay xuất hiện trong đề SAA. Không cần nhớ con số chính xác (giá thay đổi và tùy region), chỉ cần nắm **thứ tự đắt rẻ** và các nguyên tắc.
+
+Quy luật nền tảng về chiều và phạm vi của lưu lượng:
+
+- **Lưu lượng đi vào (ingress) từ internet: miễn phí.** Lưu lượng **đi ra (egress)** internet mới tốn tiền — đây là chiều đắt nhất (khoảng vài cent mỗi GB, tùy region).
+- **Cùng một Availability Zone, dùng IP private: miễn phí.** Đây là mức rẻ nhất.
+- **Khác AZ trong cùng region:** có phí nhỏ mỗi GB mỗi chiều (khoảng $0.01/GB).
+- **Khác region:** đắt hơn nữa.
+- Dùng **IP private** thay vì IP public/Elastic IP cho lưu lượng nội bộ — vừa rẻ hơn vừa nhanh hơn.
+
+Từ các quy luật đó, suy ra các đòn tối ưu kinh điển:
+
+- **Giữ lưu lượng "tám" nhiều trong cùng AZ** để khỏi mất phí cross-AZ — đánh đổi với tính sẵn sàng (HA), nên cân nhắc.
+- **Dùng Gateway Endpoint cho S3** thay vì đẩy lưu lượng S3 qua NAT Gateway + Internet Gateway: vừa bỏ được phí xử lý của NAT, vừa miễn phí (Gateway Endpoint không tính tiền).
+- **Dùng CloudFront** để phục vụ nội dung ra internet: lưu lượng từ S3 sang CloudFront miễn phí, và egress từ CloudFront rẻ hơn so với đẩy thẳng từ S3 ra internet.
+- **Dùng Direct Connect** cho việc truyền khối lượng lớn, đều đặn với on-premises: giá mỗi GB trên DX rẻ hơn so với truyền qua internet, lại ổn định.
+
+- **Cần nhớ:** "giảm chi phí data transfer" thì nghĩ tới: cùng AZ + IP private, VPC Endpoint cho S3/DynamoDB, CloudFront cho egress, Direct Connect cho on-premises khối lượng lớn. Và luôn nhớ: ingress miễn phí, egress mới tốn tiền.
+
+---
+
+## 11. Tổng hợp cho phòng thi
+
+Những tình huống và cặp dễ nhầm — ghim lại cho chắc trước khi vào phòng thi:
+
+| Tình huống / cặp dễ nhầm                                       | Chốt nhanh                                                                               |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Cần nối on-premises với AWS **ngay**, qua internet, mã hóa     | **Site-to-Site VPN** (dựng vài phút; ~1.25 Gbps/tunnel)                                  |
+| Cần đường riêng, ổn định, băng thông cao, không qua internet   | **Direct Connect** (nhưng dựng mất hàng tuần đến cả tháng)                               |
+| DX bị lỗi, cần backup tiết kiệm                                | **Site-to-Site VPN** làm đường fail-over                                                 |
+| DX nhưng yêu cầu mã hóa khi truyền                             | **VPN over Direct Connect** (VPN chạy trên Public VIF)                                   |
+| DX cần tới nhiều VPC ở nhiều region                            | **Direct Connect Gateway**                                                               |
+| Truy cập dịch vụ AWS công cộng (S3) qua DX, tránh internet     | **Public VIF**                                                                           |
+| Nối một vài VPC bằng IP private                                | **VPC Peering** (không trùng CIDR, không bắc cầu, phải sửa route table)                  |
+| Nối hàng trăm VPC / cross-account / định tuyến bắc cầu         | **Transit Gateway**                                                                      |
+| Tăng băng thông Site-to-Site VPN vượt 1.25 Gbps                | **Transit Gateway + ECMP**                                                               |
+| Cần IP multicast                                               | **Transit Gateway** (dịch vụ AWS duy nhất hỗ trợ)                                        |
+| Truy cập **S3/DynamoDB** riêng tư, miễn phí                    | **Gateway Endpoint**                                                                     |
+| Truy cập dịch vụ AWS khác / dịch vụ riêng, hoặc từ on-premises | **Interface Endpoint / PrivateLink** (dùng ENI + Security Group)                         |
+| Phơi service của mình ra nhiều VPC một cách an toàn            | **PrivateLink + NLB**                                                                    |
+| IPv6 ra internet một chiều, chặn chiều vào                     | **Egress-Only Internet Gateway** (NAT Gateway là bản IPv4)                               |
+| Lọc/soi toàn VPC ở tầng 3–7, lọc theo domain                   | **AWS Network Firewall**                                                                 |
+| Sao chép lưu lượng để đưa vào IDS / phân tích gói tin          | **VPC Traffic Mirroring**                                                                |
+| Giảm chi phí data transfer                                     | Cùng AZ + IP private; Gateway Endpoint cho S3; CloudFront cho egress; DX cho on-premises |

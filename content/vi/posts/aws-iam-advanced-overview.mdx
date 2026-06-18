@@ -290,19 +290,19 @@ Lấy ví dụ cụ thể: bạn gán permission set FullAccess cho group Develo
 
 Trước hết: **Active Directory (AD)** là dịch vụ thư mục của Microsoft, dùng phổ biến trong doanh nghiệp để quản lý tập trung người dùng, máy tính và quyền trong một "miền" (domain) — đăng nhập máy Windows, áp <Tooltip content="Group Policy — cơ chế của Active Directory để áp đặt cấu hình và chính sách đồng loạt lên nhiều máy/người dùng trong miền">Group Policy</Tooltip>, dùng giao thức Kerberos/LDAP để xác thực. **AWS Directory Services** mang AD lên đám mây với ba lựa chọn, khác nhau ở mức độ "AD thật" và khả năng kết nối on-premises:
 
-| Lựa chọn | Bản chất | Kết nối on-prem | Khi nào dùng |
+| Lựa chọn | Bản chất | Kết nối on-premises | Khi nào dùng |
 | --- | --- | --- | --- |
-| **AWS Managed Microsoft AD** | AD Microsoft thật, do AWS vận hành | Có — lập trust hai chiều với AD on-prem | Cần đầy đủ tính năng AD, MFA, chạy workload Windows/AD-aware trên AWS, đồng thời liên thông với AD công ty |
-| **AD Connector** | Cổng proxy, chuyển tiếp yêu cầu xác thực về AD on-prem | Bắt buộc — chỉ là cầu nối | Muốn dùng dịch vụ AWS bằng tài khoản AD on-prem có sẵn, không lưu gì trên cloud |
+| **AWS Managed Microsoft AD** | AD Microsoft thật, do AWS vận hành | Có — lập trust hai chiều với AD on-premises | Cần đầy đủ tính năng AD, MFA, chạy workload Windows/AD-aware trên AWS, đồng thời liên thông với AD công ty |
+| **AD Connector** | Cổng proxy, chuyển tiếp yêu cầu xác thực về AD on-premises | Bắt buộc — chỉ là cầu nối | Muốn dùng dịch vụ AWS bằng tài khoản AD on-premises có sẵn, không lưu gì trên cloud |
 | **Simple AD** | Thư mục tương thích AD, chạy trên <Tooltip content="Samba — phần mềm mã nguồn mở hiện thực các giao thức của Windows/Active Directory; Simple AD dùng Samba để cung cấp tính năng AD cơ bản với chi phí thấp">Samba</Tooltip> | Không — đứng độc lập | Tổ chức nhỏ, nhu cầu cơ bản, chưa có AD nào, muốn rẻ |
 
 Vài điểm phân biệt hay được hỏi:
 
-- **Managed Microsoft AD** là lựa chọn duy nhất là AD Microsoft thực thụ và có thể lập trust với AD on-prem (người dùng on-prem đăng nhập tài nguyên AWS mà không cần nhân bản tài khoản).
-- **AD Connector** không lưu trữ bất kỳ dữ liệu danh tính nào trên AWS — mọi yêu cầu xác thực đều được chuyển thẳng về AD on-prem. Nếu đề nói "không muốn để dữ liệu danh tính trên cloud, chỉ proxy về AD nội bộ" → đây là đáp án.
+- **Managed Microsoft AD** là lựa chọn duy nhất là AD Microsoft thực thụ và có thể lập trust với AD on-premises (người dùng on-premises đăng nhập tài nguyên AWS mà không cần nhân bản tài khoản).
+- **AD Connector** không lưu trữ bất kỳ dữ liệu danh tính nào trên AWS — mọi yêu cầu xác thực đều được chuyển thẳng về AD on-premises. Nếu đề nói "không muốn để dữ liệu danh tính trên cloud, chỉ proxy về AD nội bộ" → đây là đáp án.
 - **Simple AD** rẻ và đơn giản nhưng không hỗ trợ trust với miền AD khác, không MFA, thiếu nhiều tính năng nâng cao. Hợp với nhu cầu tối thiểu.
 
-> **Bẫy thường gặp:** "Chỉ chuyển tiếp xác thực về AD on-prem, không giữ dữ liệu trên AWS" → **AD Connector**. "Cần AD Microsoft thật + trust với on-prem" → **Managed Microsoft AD**. "Nhỏ, rẻ, độc lập, không cần trust" → **Simple AD**.
+> **Bẫy thường gặp:** "Chỉ chuyển tiếp xác thực về AD on-premises, không giữ dữ liệu trên AWS" → **AD Connector**. "Cần AD Microsoft thật + trust với on-premises" → **Managed Microsoft AD**. "Nhỏ, rẻ, độc lập, không cần trust" → **Simple AD**.
 
 ---
 
@@ -354,8 +354,8 @@ Trong phòng thi bạn chỉ có khoảng 90 giây mỗi câu, nên việc nhậ
 | **Account khác gọi** SQS/SNS/Lambda/EventBridge của bạn | Resource-based policy |
 | **Một Deny ghi đè mọi Allow** | Explicit Deny luôn thắng |
 | **SSO** cho nhiều AWS account + ứng dụng SAML, đăng nhập bằng Okta/Entra ID | IAM Identity Center |
-| **Proxy** xác thực về AD on-prem, không lưu dữ liệu trên cloud | AD Connector |
-| **AD Microsoft thật** trên AWS + trust với on-prem, hỗ trợ MFA | AWS Managed Microsoft AD |
+| **Proxy** xác thực về AD on-premises, không lưu dữ liệu trên cloud | AD Connector |
+| **AD Microsoft thật** trên AWS + trust với on-premises, hỗ trợ MFA | AWS Managed Microsoft AD |
 | **Thư mục AD nhỏ, rẻ, độc lập**, không cần trust | Simple AD |
 | **Dựng nhanh** môi trường multi-account có guardrail + Account Factory | AWS Control Tower |
 | **Phát hiện** tài nguyên không tuân thủ trên toàn tổ chức | Detective guardrail / AWS Config |

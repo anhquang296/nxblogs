@@ -30,6 +30,7 @@
 - Available MDX components: `<Posts />`, `<Tags />`, `<Avatar />`, and feature-specific components registered in `src/mdx-components.tsx`
 - When mentioning a technical concept or term (e.g., data shards, parity shards, erasure coding), always briefly explain what it is so the reader can understand without prior knowledge
 - For emphasis, use bold (`**text**`) only — never italic (`*text*` or `_text_`). Default to plain text; bold is not a substitute for plain prose. Bold only: (1) a list item's leading label, (2) a key term on first definition (max one per section), (3) a single pivot word or critical warning. Never bold whole phrases or sentences; aim for ≤1 bold per paragraph. To emphasize multiple items, use a list, not bold
+- Avoid arrow and symbol shorthand in prose (e.g., `↔`, `->`, `→`, `<-`, `=>`, `<=>`). Spell the relationship out in words instead: write "the client sends a request to the server, and the server responds" rather than "client ↔ server"; write "a cache miss leads to a database read" rather than "cache miss -> DB read". This keeps prose readable and accessible to screen readers. Exception: arrows inside code blocks, code spans, or diagrams are fine where they carry real syntactic meaning (e.g., TypeScript `=>`, shell pipes)
 
 # Code Style
 
