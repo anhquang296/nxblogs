@@ -86,7 +86,7 @@ Lex is the service for building conversational chatbots, using the same <Tooltip
 
 **Typical flow — booking an appointment by phone:**
 
-<ExcalidrawDiagram src="/lex-connect-appointment-flow.excalidraw" alt="Amazon Connect + Lex appointment-booking flow: a phone call reaches Connect, is streamed to Lex which recognizes the intent, Lex invokes Lambda, and Lambda schedules the booking into the CRM" />
+<ExcalidrawDiagram src="/lex-connect-appointment-flow.excalidraw" alt="Phone appointment-booking flow from Connect to Lex, Lambda then written into the CRM" />
 
 A customer dials Connect's virtual contact-center number (**call**). Connect streams the call audio to Lex (**stream**); Lex recognizes the speech and identifies the "book an appointment" **intent** along with the slots it needs (date, time). Once the intent is clear, Lex calls a Lambda function (**invoke**) to run the business logic — check availability and write the booking into the <Tooltip content="Customer Relationship Management — a system for managing customer relationships and data">CRM</Tooltip> system (**schedule**). The whole thing runs automatically, with no human agent.
 
@@ -121,7 +121,7 @@ Comprehend Medical is a version of Comprehend specialized for clinical text, und
 
 **Typical flow — feeding Comprehend Medical:**
 
-<ExcalidrawDiagram src="/comprehend-medical-flow.excalidraw" alt="Amazon Comprehend Medical ingestion paths: clinical documents in S3 (batch), streaming data via Kinesis Data Firehose (real-time), and audio via Amazon Transcribe (speech to text) all converge on Comprehend Medical, which extracts medical entities and PHI" />
+<ExcalidrawDiagram src="/comprehend-medical-flow.excalidraw" alt="Three ingestion paths from S3, Kinesis Data Firehose and Transcribe into Comprehend Medical" />
 
 Comprehend Medical has three common ingestion paths. Clinical documents are kept in the Amazon S3 object store and submitted for batch analysis (**documents**). Continuously generated data is streamed through <Tooltip content="Amazon Data Firehose / Kinesis Data Firehose — a fully managed streaming-data delivery pipeline that lands data at its destination in near real time">Kinesis Data Firehose</Tooltip> for near-real-time processing (**real-time**). And spoken input — a doctor dictating notes, or a patient conversation — is first run through Amazon Transcribe to turn it into text (**text**). All three converge on Comprehend Medical, which extracts the medical entities and PHI (**extract**).
 

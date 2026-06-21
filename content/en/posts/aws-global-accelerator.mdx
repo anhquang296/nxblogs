@@ -60,7 +60,7 @@ These three strengths work together to create the traffic flow:
 2. Traffic enters **AWS Backbone Network** — the private highway
 3. Traffic arrives at your **endpoint** (ALB, NLB, EC2, Elastic IP) in the target Region
 
-<ExcalidrawDiagram src="/global-accelerator-how-it-works.excalidraw" alt="AWS Global Accelerator - How it works" />
+<ExcalidrawDiagram src="/global-accelerator-how-it-works.excalidraw" alt="Client enters anycast IP at the nearest edge location, then travels the backbone to the endpoint" />
 
 ---
 
@@ -74,11 +74,11 @@ Result: variable latency — sometimes fast, sometimes slow — especially for u
 
 For example, say you're in Vietnam and your call goes to a server in `us-east-1` (Virginia, USA). On the public internet, traffic has to hop through a chain of independent networks — domestic ISP (Viettel/VNPT), the national peering point (VNIX), out via a submarine cable (AAG/APG), through international peering points (Equinix Singapore, Tokyo), across Tier-1 transit providers (NTT, Telia, Cogent), and finally to a US ISP that delivers it to the destination server. Each network is operated by a different company — no single party is responsible for the whole path.
 
-<ExcalidrawDiagram src="/public-internet-vn-to-us-path.excalidraw" alt="Public internet path from Vietnam to a US server — many hops through ISPs and peering points" />
+<ExcalidrawDiagram src="/public-internet-vn-to-us-path.excalidraw" alt="Public internet path from Vietnam to the US, many hops through ISPs and peering points" />
 
 Over the **AWS Backbone Network**, traffic enters AWS at the nearest Edge Location (HCMC or Singapore) and travels directly over AWS-owned fiber to the destination Region. A single operator (AWS) owns and runs the entire path — no peering, no <Tooltip content="Border Gateway Protocol — routing protocol used between autonomous networks on the internet">BGP</Tooltip> dependency, minimal jitter.
 
-<ExcalidrawDiagram src="/aws-backbone-vn-to-us-path.excalidraw" alt="AWS Backbone Network path from Vietnam to us-east-1 — few hops, deterministic route" />
+<ExcalidrawDiagram src="/aws-backbone-vn-to-us-path.excalidraw" alt="AWS backbone network path to the us-east-1 region, few hops and a deterministic route" />
 
 ### 2.2. Static IP — no DNS propagation dependency
 
@@ -180,7 +180,7 @@ When you put CloudFront in front of an ALB for a dynamic API that doesn't need c
 
 **Both services can be used together**: CloudFront for static assets + Global Accelerator for API/WebSocket traffic. This is a common architecture when your application has both static and dynamic content.
 
-<ExcalidrawDiagram src="/cloudfront-vs-global-accelerator-path.excalidraw" alt="CloudFront vs Global Accelerator - Traffic path comparison" />
+<ExcalidrawDiagram src="/cloudfront-vs-global-accelerator-path.excalidraw" alt="Traffic path comparison of CloudFront and Global Accelerator used together" />
 
 ---
 

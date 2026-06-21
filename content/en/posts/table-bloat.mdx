@@ -15,7 +15,7 @@ Below is a compilation of my notes based on the original article from Tiger Data
 
 <ExcalidrawDiagram
   src="/postgresql-database-architecture.excalidraw"
-  alt="PostgreSQL architecture: from Client to Pages on disk"
+  alt="PostgreSQL architecture: from client down to pages on disk"
 />
 
 
@@ -28,7 +28,7 @@ When a database contains too much "garbage" data (bloat), table scans (sequentia
 
 To understand why a database slows down when bloated, we need to move past the logical row-based mindset (Excel style) and look at how PostgreSQL organizes data physically.
 
-<ExcalidrawDiagram src="/database-page.excalidraw" alt="Database page tuple" />
+<ExcalidrawDiagram src="/database-page.excalidraw" alt="A tuple is a data row, an 8KB page is its container on disk" />
 
 Think of your Database as a giant notebook.
 
@@ -48,7 +48,7 @@ The rule: Databases operate on Pages. To get 1 item (Tuple), you have to lift th
 
 ### MVCC Mechanism and the Formation of "Dead Tuples"
 
-<ExcalidrawDiagram src="/database-dead-tuple.excalidraw" alt="Database dead tuple" />
+<ExcalidrawDiagram src="/database-dead-tuple.excalidraw" alt="DELETE and UPDATE leave dead tuples behind under MVCC" />
 
 This is the most interesting part. When we execute SQL commands, Postgres behaves differently from what you might intuitively expect:
 
@@ -70,7 +70,7 @@ This is the mechanism of the <Tooltip content="Multi-Version Concurrency Control
 * <Tooltip content="PostgreSQL maintenance command that reclaims storage occupied by dead tuples">VACUUM</Tooltip>: Scans and marks the space of Dead Tuples as "reusable" for new data. However, it does **not** return the space to the operating system (OS). The physical file size of the table does not shrink.
 * <Tooltip content="Background daemon that automatically triggers VACUUM based on table activity">Autovacuum</Tooltip>: A background daemon that automatically triggers VACUUM.
 
-<ExcalidrawDiagram src="/database-fragmentation.excalidraw" alt="Database fragmentation" />
+<ExcalidrawDiagram src="/database-fragmentation.excalidraw" alt="Fragmentation: pages with few live tuples after VACUUM still cost much I/O" />
 
 Even after VACUUM has been performed, data pages that had dead tuples cleaned up now have free space ready for INSERT/UPDATE operations. This improvement is immediately visible as the database stops growing in size.
 

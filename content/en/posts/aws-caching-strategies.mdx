@@ -18,7 +18,7 @@ The SAA exam tests exactly this skill: read a scenario, recognize which caching 
 
 <ExcalidrawDiagram
   src="/aws-caching-strategies-overview.excalidraw"
-  alt="AWS caching layers — CloudFront (edge cache), API Gateway (API cache), ElastiCache (Lazy Loading + Write-Through) with RDS/Aurora, and DAX with DynamoDB"
+  alt="AWS caching layers from CloudFront at the edge to DAX in front of DynamoDB"
 />
 
 > This post focuses on the **AWS-service angle for the SAA exam**. If you want to go deep on the general caching theory (consistency, the classic traps, scaling), read the Cache Handbook series: [Caching fundamentals](/posts/cache-fundamentals), [Cache Consistency](/posts/cache-consistency), [6 classic traps](/posts/cache-pitfalls), and [Cache Stampede](/posts/cache-stampede).
@@ -54,7 +54,7 @@ The read flow:
 
 <ExcalidrawDiagram
   src="/aws-caching-strategies-lazy-loading.excalidraw"
-  alt="Cache-Aside / Lazy Loading flow — the application reads the cache, and on a miss queries the database then writes the result back into the cache"
+  alt="Cache-aside flow on a miss, the application queries the database then writes back into the cache"
 />
 
 ```ts
@@ -110,7 +110,7 @@ Read strategy decides how the cache gets loaded; write strategy decides how the 
 
 <ExcalidrawDiagram
   src="/aws-caching-strategies-write-strategies.excalidraw"
-  alt="The three write strategies compared — Write-Through (write to both synchronously), Write-Back (write cache first, flush to DB later), Write-Around (write straight to DB, skip the cache)"
+  alt="Comparing the three write strategies write-through, write-back, and write-around"
 />
 
 ### 3.1. Write-Through

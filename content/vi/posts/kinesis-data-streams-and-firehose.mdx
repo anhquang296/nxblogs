@@ -16,7 +16,7 @@ Cách đơn giản nhất? Viết một consumer application tự poll data từ
 
 Bài viết này sẽ đi sâu vào cả hai service — từ kiến trúc <Tooltip content="Đơn vị song song hoá của Kinesis — mỗi shard là một log tuần tự, append-only với throughput cố định (1 MB/s write, 2 MB/s read)">shard</Tooltip> của Kinesis Data Streams (rất giống Kafka partition), các limit cố định trên mỗi shard, fan-out modes, cho đến pipeline bên trong của Data Firehose: Lambda transformation, Glue format conversion, buffering internals, và lý do kỹ thuật vì sao Firehose phải buffer data trước khi ghi.
 
-<ExcalidrawDiagram src="/kinesis-firehose-overview.excalidraw" alt="Kinesis Data Streams & Data Firehose Overview — Producers, Shards, Firehose Pipeline, Destinations" />
+<ExcalidrawDiagram src="/kinesis-firehose-overview.excalidraw" alt="Tổng quan từ producer qua shard của Kinesis đến pipeline Firehose và destination" />
 
 ---
 
@@ -71,7 +71,7 @@ Mỗi shard trong Kinesis Data Streams có throughput **cố định và không 
 
 Điều này có nghĩa: nếu stream của bạn cần nhận **10 MB/s** dữ liệu, bạn cần **tối thiểu 10 shards** (10 shards × 1 MB/s = 10 MB/s). Muốn 100 MB/s? 100 shards. Throughput tổng tăng **tuyến tính** với số lượng shard.
 
-<ExcalidrawDiagram src="/kinesis-shard-limits.excalidraw" alt="Kinesis Shard — Fixed limits per shard, partition key routing, write 1 MB/s, read 2 MB/s" />
+<ExcalidrawDiagram src="/kinesis-shard-limits.excalidraw" alt="Limit cố định mỗi shard và định tuyến record qua partition key" />
 
 Giống Kafka, producer dùng <Tooltip content="Chuỗi do producer cung cấp, được hash để xác định record đi vào shard nào. Records cùng partition key luôn vào cùng shard, đảm bảo ordering trong shard đó">partition key</Tooltip> để xác định record đi vào shard nào: `MD5(partition_key)` tạo ra một hash value 128-bit, giá trị này được map vào **hash key range** của shard tương ứng. Mỗi shard sở hữu một dải hash key range riêng, và các dải này ghép lại phủ toàn bộ không gian hash.
 
@@ -238,7 +238,7 @@ Với destination là S3, khi enable **All or Failed data**, Firehose sẽ ghi c
 
 Bây giờ hãy đi sâu vào bên trong Firehose — dữ liệu đi qua những bước nào từ lúc nhận đến lúc ghi xuống storage.
 
-<ExcalidrawDiagram src="/firehose-pipeline.excalidraw" alt="Amazon Data Firehose Pipeline — Source → Lambda Transform → Format Conversion → Buffer → Destination + S3 Backup" />
+<ExcalidrawDiagram src="/firehose-pipeline.excalidraw" alt="Pipeline Firehose từ source qua Lambda transform, format conversion, buffer đến destination" />
 
 ### 7.1. Nhận và gom records
 

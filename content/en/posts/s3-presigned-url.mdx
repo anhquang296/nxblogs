@@ -110,7 +110,7 @@ The backend still has full control:
 
 But the backend **never touches the file** — the heavy lifting (data transfer) is handled by S3.
 
-<ExcalidrawDiagram src="/s3-presigned-url-architecture.excalidraw" alt="S3 Presigned URL Architecture" />
+<ExcalidrawDiagram src="/s3-presigned-url-architecture.excalidraw" alt="Backend only signs URLs while the client uploads and downloads directly with S3" />
 
 ---
 
@@ -174,7 +174,7 @@ PUT is only suitable when the upload source is server-side or when you need mult
 
 ### 5.2. Sequence Diagram
 
-<ExcalidrawDiagram src="/s3-presigned-url-upload-flow.excalidraw" alt="Upload Flow via Presigned POST" />
+<ExcalidrawDiagram src="/s3-presigned-url-upload-flow.excalidraw" alt="File upload flow via presigned POST from client to S3" />
 
 ### 5.3. Backend: Create Presigned POST
 
@@ -363,7 +363,7 @@ Presigned GET URL is suitable because:
 
 ### 6.2. Sequence Diagram
 
-<ExcalidrawDiagram src="/s3-presigned-url-download-flow.excalidraw" alt="Download Flow via Presigned GET" />
+<ExcalidrawDiagram src="/s3-presigned-url-download-flow.excalidraw" alt="Private document download flow via presigned GET URL" />
 
 ### 6.3. Backend: Sign Presigned GET URL
 
@@ -491,7 +491,7 @@ S3 bucket policy for OAC:
 
 ### 7.4. Sequence Diagram
 
-<ExcalidrawDiagram src="/s3-presigned-url-cloudfront-cookies.excalidraw" alt="CloudFront Signed Cookies Flow" />
+<ExcalidrawDiagram src="/s3-presigned-url-cloudfront-cookies.excalidraw" alt="Issuing CloudFront signed cookies to display images via the CDN" />
 
 ### 7.5. Backend: Create Signed Cookies
 

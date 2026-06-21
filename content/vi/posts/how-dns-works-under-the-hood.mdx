@@ -12,7 +12,7 @@ Bạn gõ `google.com` và nhấn Enter. Vài chục mili-giây sau, trang chủ
 
 Hãy hình dung Internet là một thành phố khổng lồ với hàng tỷ ngôi nhà. Mỗi ngôi nhà có một địa chỉ số dài lằng nhằng kiểu `142.250.66.78` (IPv4) hay `2607:f8b0:4006:80c::200e` (IPv6). Không ai nhớ nổi từng đó địa chỉ. Vì vậy chúng ta cần một **cuốn danh bạ**: gõ tên ("google.com"), trả về địa chỉ. Cuốn danh bạ ấy chính là DNS — Domain Name System.
 
-![DNS hoạt động dưới lớp vỏ](/how-dns-work-under-the-hood.svg)
+![Hành trình một DNS query qua resolver, root, TLD và authoritative server](/how-dns-work-under-the-hood.svg)
 
 Bài viết này sẽ bóc tách lớp vỏ ấy: ai giữ cuốn danh bạ, ai đi tra giùm bạn, vì sao tra một cái tên lại đi qua tới bốn loại server khác nhau, và vì sao toàn bộ quá trình đó vẫn chỉ tốn vài mili-giây.
 

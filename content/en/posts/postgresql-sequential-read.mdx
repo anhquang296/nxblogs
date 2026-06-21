@@ -22,7 +22,7 @@ Most of the fuzziness comes from collapsing the layers into one. This post pulls
 
 <ExcalidrawDiagram
   src="/postgresql-sequential-read-overview.excalidraw"
-  alt="The 4-layer sequential-read stack — Query executor (Seq Scan vs Index Scan), PostgreSQL I/O layer (read() 8KB, multi-block read), Kernel (page cache + read-ahead), Storage (platter, seek + rotational latency); each layer decides on its own information"
+  alt="The four-layer sequential read stack from query executor down to storage"
 />
 
 And because most of the latency gap between "sequential" and "random" is born in the physics of a spinning disk, we start with the disk itself.
@@ -31,7 +31,7 @@ And because most of the latency gap between "sequential" and "random" is born in
 
 The whole "sequential is faster than random" story — the thing that drives the planner's choice — originates in the mechanics of a spinning **hard disk drive (HDD)**. On a database whose data sits on an HDD, this gap is **everything**. So before discussing any I/O pattern, let's agree on the physical vocabulary.
 
-![HDD Disk](/hdd-disk.svg)
+![Physical anatomy of an HDD with platter, track, sector, actuator arm and read/write head](/hdd-disk.svg)
 
 An HDD consists of **platters** (magnetic disks) stacked on a <Tooltip content="The rotating shaft that holds and spins the whole stack of platters at a fixed speed">spindle</Tooltip>, spinning at a fixed speed measured in **RPM** (revolutions per minute — commonly 7,200 or 15,000). Each platter surface is divided into **tracks** (concentric rings), and each track into <Tooltip content="The smallest physical unit a disk reads or writes — 512 bytes on older drives, 4 KB on modern ones. You can't read half a sector">sectors</Tooltip>. The set of the same track across every platter is called a <Tooltip content="The same track across every platter surface; reading a whole cylinder needs no head movement">cylinder</Tooltip>. And to read data, an **actuator arm** carries the **read/write heads** — all heads fixed to the same arm and moving together.
 
@@ -77,7 +77,7 @@ Now we have the vocabulary to define the two patterns precisely. **Sequential re
 
 <ExcalidrawDiagram
   src="/sequential-vs-random-io-pattern.excalidraw"
-  alt="Comparing the two patterns — sequential reads adjacent blocks 100,101,102…, the head streams continuously at ~150 MB/s; random jumps to 10, 4732, 88, 2901 with a seek + rotation at each step, throughput collapsing to a few hundred KB/s"
+  alt="Comparing sequential read of adjacent blocks with random read jumping around"
 />
 
 A common point of confusion: suppose a table has 50 pages and we need to read from page 10 to page 20. This is a **sequential read**, even though we skipped pages 1–9. What matters isn't "reading from the start of the file" but that the 11 pages we need are adjacent and accessed in order. Starting from the middle of the file doesn't make it random.
@@ -105,7 +105,7 @@ A very common assumption: "the database reads one page at a time, one `read()` p
 
 <ExcalidrawDiagram
   src="/read-syscall-three-numbers.excalidraw"
-  alt="The three independent numbers of read() — (a) the application requests count bytes; (b) how much the kernel touches the disk is decided by page cache + read-ahead, not by count; (c) the device always works in whole 4KB blocks / 512B sectors"
+  alt="The three independent numbers of read(): bytes requested, bytes hitting disk and the physical block unit"
 />
 
 **How much `read()` requests.** The syscall signature is:
@@ -144,7 +144,7 @@ Read-ahead (prefetch at the OS layer) is the mechanism by which the kernel **pro
 
 <ExcalidrawDiagram
   src="/kernel-read-ahead-window.excalidraw"
-  alt="Read-ahead window lifecycle — block 0 cache miss triggers a synchronous read plus asynchronous prefetch of blocks 1–15; the app reads 0,1,2,3 all from cache; hitting the readahead marker at block 12, the kernel launches the next window of blocks 16–47 in the background"
+  alt="Read-ahead window lifecycle with prefetch and a readahead marker launching the next batch"
 />
 
 **Pattern detection.** The kernel tracks the sequence of `read()`s per file descriptor. Seeing offsets rising steadily and adjacently (N, N+1, N+2...), it concludes this is sequential access and turns read-ahead on. Seeing offsets jump around, it narrows or disables read-ahead — because predicting ahead would be wrong, and prefetching the wrong thing only wastes disk bandwidth and RAM cache.
@@ -169,7 +169,7 @@ A seq scan **reduces** seeks; it does not **eliminate** them.
 
 <ExcalidrawDiagram
   src="/logical-vs-physical-contiguity.excalidraw"
-  alt="Logical vs physical — heap file pages 0..4 are logically contiguous and scanned in order, but they map to extents scattered across the platter, forcing the head to jump back and forth; a seq scan turns into physical random I/O"
+  alt="Heap file pages contiguous in logic but scattered across extents on the platter"
 />
 
 There are still many sources of seeks even when you're "reading sequentially":

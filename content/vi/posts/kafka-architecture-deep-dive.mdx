@@ -20,7 +20,7 @@ Bài viết này sẽ đi sâu vào kiến trúc bên trong của Kafka — từ
 
 <ExcalidrawDiagram
   src="/kafka-architecture-overview.excalidraw"
-  alt="Kafka Architecture Overview — Producers, Brokers, Partitions, Consumer Groups, KRaft"
+  alt="Tổng quan kiến trúc Kafka từ producer qua broker đến consumer group"
 />
 
 ---
@@ -54,7 +54,7 @@ Kafka đi ngược lại hoàn toàn: **consumer quyết định**. Kafka broker
 
 Trước khi đi sâu vào từng thành phần, hãy nhìn bức tranh toàn cảnh về cách dữ liệu di chuyển bên trong Kafka:
 
-<ExcalidrawDiagram src="/kafka-data-flow-overview.excalidraw" alt="Kafka Data Flow Overview" />
+<ExcalidrawDiagram src="/kafka-data-flow-overview.excalidraw" alt="Luồng dữ liệu trong Kafka qua topic, partition và consumer group" />
 
 Bốn khái niệm cốt lõi cần nắm:
 
@@ -145,7 +145,7 @@ Mỗi segment bao gồm ba file:
 | `.index`     | Ánh xạ **offset → vị trí byte** trong file `.log` | Sparse index — không lưu mọi offset, chỉ lưu mỗi N offset một entry. Khi cần tìm offset X, Kafka binary search trong `.index` để tìm entry gần nhất, rồi scan forward trong `.log`. |
 | `.timeindex` | Ánh xạ **timestamp → offset**                     | Cho phép consumer tìm message theo thời gian thay vì offset. Ví dụ: "đọc từ 14:00 hôm nay" → tìm offset tương ứng → đọc từ đó.                                                      |
 
-<ExcalidrawDiagram src="/kafka-broker-storage.excalidraw" alt="Kafka Broker Storage Structure" />
+<ExcalidrawDiagram src="/kafka-broker-storage.excalidraw" alt="Cấu trúc lưu trữ trên broker với segment và file log, index, timeindex" />
 
 Thiết kế này mang lại hai lợi ích lớn:
 
@@ -205,7 +205,7 @@ Trong kiến trúc ban đầu, Kafka sử dụng <Tooltip content="Một dịch 
 
 Vấn đề là ZooKeeper là một **hệ thống hoàn toàn riêng biệt** mà bạn phải triển khai, giám sát, và bảo trì song song với Kafka cluster. Một ZooKeeper ensemble thường cần 3-5 node riêng, có kiến trúc và cách vận hành khác hẳn Kafka. Đội vận hành phải hiểu hai hệ thống thay vì một. Ngoài ra, ZooKeeper trở thành **điểm nghẽn** khi cluster lớn lên — metadata updates phải đi qua ZooKeeper, và ZooKeeper không được thiết kế cho khối lượng metadata của các cluster hàng ngàn partition.
 
-<ExcalidrawDiagram src="/kafka-zookeeper-vs-kraft.excalidraw" alt="ZooKeeper vs KRaft Architecture" />
+<ExcalidrawDiagram src="/kafka-zookeeper-vs-kraft.excalidraw" alt="So sánh kiến trúc ZooKeeper và KRaft trong quản lý metadata cluster" />
 
 Từ phiên bản 3.3+, Kafka giới thiệu <Tooltip content="Kafka Raft">KRaft</Tooltip> — một giao thức đồng thuận được tích hợp trực tiếp vào Kafka, loại bỏ hoàn toàn sự phụ thuộc vào ZooKeeper:
 
@@ -266,7 +266,7 @@ Ví dụ: partition 0 chứa cả `order_created`, `order_updated`, và `order_c
 
 Quy tắc "1 partition — 1 consumer" chỉ áp dụng **trong cùng một group**. Giữa các group khác nhau, cùng một event hoàn toàn có thể được xử lý bởi nhiều nơi.
 
-<ExcalidrawDiagram src="/kafka-partition-consumer-groups.excalidraw" alt="Kafka Partition and Consumer Groups" />
+<ExcalidrawDiagram src="/kafka-partition-consumer-groups.excalidraw" alt="Nhiều consumer group đọc độc lập cùng partition với offset riêng" />
 
 Ví dụ với event `order_created`:
 
@@ -322,7 +322,7 @@ Một follower bị loại khỏi ISR khi nó **lag quá xa** so với leader (c
 
 ISR quan trọng vì nó quyết định **mức độ an toàn** của dữ liệu thông qua cờ `acks` của producer:
 
-<ExcalidrawDiagram src="/kafka-replication.excalidraw" alt="Kafka Replication and ISR" />
+<ExcalidrawDiagram src="/kafka-replication.excalidraw" alt="Replication giữa leader và follower replica cùng vai trò của ISR theo acks" />
 
 | `acks` | Hành vi                                               | Độ bền dữ liệu                                                  | Latency    |
 | ------ | ----------------------------------------------------- | --------------------------------------------------------------- | ---------- |
@@ -416,7 +416,7 @@ Database truyền thống phải random seek đến đúng row, đọc index, nh
 
 Khi consumer request dữ liệu, Kafka cần đọc từ disk và gửi qua network. Trong cách thông thường, dữ liệu phải đi qua **4 lần copy** và **2 lần context switch** (chuyển đổi giữa kernel mode và user mode)
 
-<ExcalidrawDiagram src="/kafka-zero-copy.excalidraw" alt="Traditional vs Zero-copy Data Transfer" />
+<ExcalidrawDiagram src="/kafka-zero-copy.excalidraw" alt="So sánh truyền dữ liệu truyền thống với zero-copy qua sendfile" />
 
 Kafka sử dụng **`sendfile()` system call** (trên Linux) để loại bỏ hoàn toàn bước copy qua user space
 

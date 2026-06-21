@@ -51,28 +51,28 @@ This is the most important "concept" section of the whole chapter, and the exam 
 
 <ExcalidrawDiagram
   src="/aws-dr-backup-and-restore.excalidraw"
-  alt="Backup and Restore strategy: on-premises servers and database back up to Amazon S3 via AWS Storage Gateway and AWS Snowball, with an S3 lifecycle policy tiering to Glacier; AWS-native resources (EBS, Redshift, RDS) take scheduled regular snapshots; after a disaster, data is restored into Amazon EC2 launched from an AMI and Amazon RDS"
+  alt="Backup and restore strategy: periodic backup to S3, rebuild infrastructure and restore only on disaster"
 />
 
 **2. Pilot Light (lower RPO/RTO, still cheap).** Picture a small "pilot flame" always burning: you keep the most critical core — usually the database — always running and continuously replicating to the DR region, while the application/web tier is **turned off** (you only have AMIs/config ready). When disaster strikes, you just "light up" the rest (start the app servers, point them at the database that already holds the data). Much faster than Backup & Restore because the data is already warm.
 
 <ExcalidrawDiagram
   src="/aws-dr-pilot-light.excalidraw"
-  alt="Pilot Light strategy: the on-premises database continuously replicates to an always-running Amazon RDS, while the EC2 application tier stays stopped (not running); Route 53 routes traffic to the primary site and can fail over to the standby EC2 when disaster strikes"
+  alt="Pilot light strategy: database always running and replicating, application tier off and ready for failover"
 />
 
 **3. Warm Standby (low RPO/RTO).** A full copy of the system already runs in the DR region but at minimum scale (small instances, few nodes). When disaster strikes, you simply **scale up** to production size and shift traffic over. Because every component is already running (just small), the RTO is very short — you only spend time growing it.
 
 <ExcalidrawDiagram
   src="/aws-dr-warm-standby.excalidraw"
-  alt="Warm Standby strategy: a full but minimally-sized copy runs on AWS (ELB in front of an EC2 Auto Scaling group at minimum capacity, plus an RDS Secondary). The on-premises primary database continuously replicates to the RDS Secondary; Route 53 actively routes traffic to the on-premises primary and keeps AWS on standby. On disaster, the EC2 fleet scales up and fails over to the RDS Secondary"
+  alt="Warm standby strategy: a scaled-down copy running on AWS, scale up on failover"
 />
 
 **4. Multi-Site / Hot Site (RPO/RTO near zero, most expensive).** Run the system full-scale in both (or more) places at once in an <Tooltip content="Both sites receive and serve real traffic at the same time; no site is sitting idle waiting">active-active</Tooltip> manner. Traffic is split across both; if one site dies, the other takes the full load almost instantly. RPO/RTO are near zero, but you pay for two parallel production systems.
 
 <ExcalidrawDiagram
   src="/aws-dr-multi-site.excalidraw"
-  alt="Multi-Site (Hot Site) strategy: both the on-premises data center and AWS run at full production scale in active-active mode. Route 53 actively routes traffic to both sites (ELB plus an EC2 Auto Scaling group at production capacity on AWS). The primary database continuously replicates to the RDS Secondary, which the AWS fleet fails over to if the primary is lost"
+  alt="Multi-site strategy: both sites running full-scale active-active, RTO near zero"
 />
 
 > **Exam tip:** The question gives you an RTO/RPO constraint and a budget, then asks which strategy. The rule: see "cheapest / can tolerate many hours of downtime" → Backup & Restore; see "keep the database always ready but turn off the rest" → Pilot Light; see "run a scaled-down copy then scale up" → Warm Standby; see "no downtime / active-active / RTO near zero" → Multi-Site.
@@ -119,7 +119,7 @@ This "continuous block-level replication" mechanism gives a very small RPO (meas
 
 <ExcalidrawDiagram
   src="/aws-dr-elastic-disaster-recovery.excalidraw"
-  alt="AWS Elastic Disaster Recovery (DRS): the AWS Replication Agent on each source server (OS, apps, DB disks) in a corporate data center or any cloud performs continuous block-level replication (seconds) into a low-cost Staging area in AWS (minimal EC2 instances and EBS volumes); on disaster, DRS fails over (minutes) by launching full-size target EC2 instances and EBS volumes in Production, and can fail back to the source afterward"
+  alt="DRS continuously replicates blocks into a cheap staging area, failover launches full-size servers on disaster"
 />
 
 Strengths:

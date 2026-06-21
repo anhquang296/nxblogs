@@ -69,7 +69,7 @@ Every rate limiter in existence is a variant of one of these 5 algorithms. This 
 
 **How it works.** Divide the time axis into fixed windows (e.g., each minute). Count the number of requests falling into the current window. If it exceeds the limit → reject. New window → reset to 0.
 
-<ExcalidrawDiagram src="/rate-limiting-fixed-window.excalidraw" alt="Fixed Window Counter" />
+<ExcalidrawDiagram src="/rate-limiting-fixed-window.excalidraw" alt="Fixed window counter counts requests per fixed window then resets to 0" />
 
 **Code:**
 
@@ -185,7 +185,7 @@ A few more lines than fixed window, the math isn't hard but easy to get wrong (e
 
 **How it works.** Each user has a "bucket" containing N tokens (capacity = `C`). The bucket is continuously refilled at a rate of `r` tokens/second, never exceeding `C`. Each request costs 1 token (or more). No tokens left → reject.
 
-<ExcalidrawDiagram src="/rate-limiting-token-bucket.excalidraw" alt="Token Bucket" />
+<ExcalidrawDiagram src="/rate-limiting-token-bucket.excalidraw" alt="Token bucket refills tokens steadily, each request spends one token, reject when empty" />
 
 ```ts
 async function tokenBucket(userId: string, capacity: number, refillPerSec: number) {
@@ -232,7 +232,7 @@ The code isn't long, but must be atomic (Lua script), refill math must be precis
 
 **How it works.** Incoming requests **queue up FIFO** in a bucket. A consumer drains requests at a fixed rate of `r`/second and processes them. Queue full → reject. Unlike token bucket: <Tooltip content="A rate-limiting algorithm using a FIFO queue: requests are drained at a fixed rate, smoothing output regardless of how spiky the input is.">leaky bucket</Tooltip> doesn't let bursts through — output is always smooth at exactly rate `r`.
 
-<ExcalidrawDiagram src="/rate-limiting-leaky-bucket.excalidraw" alt="Leaky Bucket" />
+<ExcalidrawDiagram src="/rate-limiting-leaky-bucket.excalidraw" alt="Leaky bucket queues requests FIFO, draining at a fixed rate to smooth the output" />
 
 ```ts
 async function leakyBucketEnqueue(userId: string, maxQueue: number) {

@@ -16,19 +16,19 @@ Before zooming into the storage layer, here is the wider PostgreSQL process/memo
 
 <ExcalidrawDiagram
   src="/postgresql-architecture-overview.excalidraw"
-  alt="PostgreSQL process and memory architecture — Client connects to Postmaster which forks a Backend process; Backend uses local memory (work_mem, catalog cache, optimizer/executor) and reads/writes through Shared memory (shared buffers, WAL buffers, CLOG buffers); Background workers (BGWriter, Checkpointer, WAL writer, Auto vacuum, etc.) flush shared memory to Disk (data files, WAL, archive, logs)"
+  alt="PostgreSQL process and memory architecture, storage sits in the bottom-right"
 />
 
 <ExcalidrawDiagram
   src="/postgresql-storage-internals-overview.excalidraw"
-  alt="End-to-end read path: Backend → Shared Buffer Manager → Heap files on disk"
+  alt="Read path from backend through the Shared Buffer Manager down to the heap file on disk"
 />
 
 ## 1. How a table is laid out on disk
 
 <ExcalidrawDiagram
   src="/postgresql-table-folder-structure.excalidraw"
-  alt="Filesystem tree showing PGDATA layout — base/ database OID dir containing all files of a single table: main fork segments, FSM/VM forks, index files, and TOAST relation"
+  alt="PGDATA directory holding a table's files under base and the database OID"
 />
 
 Every PostgreSQL table eventually reduces to **a set of files on the filesystem**. The `PGDATA` environment variable points to the data directory (e.g. `/var/lib/postgresql/16/main`). Inside it, the heap file path for a given table follows this pattern:
@@ -53,7 +53,7 @@ A table isn't just one fork — it's three. **Fork** is a term borrowed from the
 
 <ExcalidrawDiagram
   src="/postgresql-heap-file-hierarchy.excalidraw"
-  alt="PGDATA layout — base/ → database OID dir → relfilenode with main / _fsm / _vm forks and segment splits"
+  alt="The three forks main, _fsm, _vm of a relation and segment files past 1 GB"
 />
 
 - **Main fork** (`<relfilenode>`): the actual heap data — the tuples you've `INSERT`ed.
@@ -72,7 +72,7 @@ PostgreSQL never reads or writes single bytes, tuples, or rows. The fundamental 
 
 <ExcalidrawDiagram
   src="/postgresql-page-anatomy.excalidraw"
-  alt="Heap page anatomy — PageHeader at top, line pointers grow down, free space in middle, tuples grow up, special area at bottom"
+  alt="An 8 KB heap page with line pointers growing down and tuples growing up"
 />
 
 A page's layout, from offset 0 to 8191:
@@ -105,7 +105,7 @@ Each physical tuple is a byte blob made of three parts: the **header (23 bytes +
 
 <ExcalidrawDiagram
   src="/postgresql-tuple-header-anatomy.excalidraw"
-  alt="HeapTupleHeader fields — t_xmin, t_xmax, t_cid, t_ctid, t_infomask2, t_infomask, t_hoff — plus null bitmap and user data"
+  alt="HeapTupleHeader fields with null bitmap and user data inside a tuple"
 />
 
 The header holds everything MVCC needs to decide whether the tuple is visible to a given transaction. The important fields:
@@ -159,7 +159,7 @@ To support those three questions, the buffer manager is built from three paralle
 
 <ExcalidrawDiagram
   src="/postgresql-shared-buffer-architecture.excalidraw"
-  alt="Shared buffer architecture — backends issue BufferTag lookups against the buffer table, which resolves to a buffer_id indexing into the descriptor array and the parallel buffer pool, with storage I/O driven by bgwriter and checkpointer"
+  alt="Three-layer buffer table, descriptor array and buffer pool looking up a page via BufferTag"
 />
 
 A **BufferTag** is the cluster-wide unique key for a page, made of five fields:

@@ -16,7 +16,7 @@ This is exactly the problem that the combo of **Amazon Kinesis Data Streams** an
 
 This post will deep dive into both services — from Kinesis Data Streams' <Tooltip content="Kinesis's unit of parallelism — each shard is a sequential, append-only log with fixed throughput (1 MB/s write, 2 MB/s read)">shard</Tooltip> architecture (very similar to Kafka partitions), the fixed limits per shard, fan-out modes, to Data Firehose's internal pipeline: Lambda transformation, Glue format conversion, buffering internals, and the technical reasons why Firehose must buffer data before writing.
 
-<ExcalidrawDiagram src="/kinesis-firehose-overview.excalidraw" alt="Kinesis Data Streams & Data Firehose Overview — Producers, Shards, Firehose Pipeline, Destinations" />
+<ExcalidrawDiagram src="/kinesis-firehose-overview.excalidraw" alt="Overview from producer through Kinesis shards to the Firehose pipeline and destination" />
 
 ---
 
@@ -71,7 +71,7 @@ Each shard in Kinesis Data Streams has **fixed, unchangeable** throughput:
 
 This means: if your stream needs to ingest **10 MB/s** of data, you need **at least 10 shards** (10 shards × 1 MB/s = 10 MB/s). Need 100 MB/s? 100 shards. Total throughput scales **linearly** with the number of shards.
 
-<ExcalidrawDiagram src="/kinesis-shard-limits.excalidraw" alt="Kinesis Shard — Fixed limits per shard, partition key routing, write 1 MB/s, read 2 MB/s" />
+<ExcalidrawDiagram src="/kinesis-shard-limits.excalidraw" alt="Fixed limits per shard and record routing via partition key" />
 
 Like Kafka, producers use the <Tooltip content="A producer-supplied string that is hashed to decide which shard a record goes to. Records sharing the same partition key always land on the same shard, preserving ordering within that shard">partition key</Tooltip> to determine which shard a record goes to: `MD5(partition_key)` produces a 128-bit hash value, which is mapped to the corresponding shard's **hash key range**. Each shard owns a distinct range, and all ranges together cover the entire hash space.
 
@@ -238,7 +238,7 @@ When the destination is S3 and **All or Failed data** backup is enabled, Firehos
 
 Now let's dive into Firehose's internals — what steps does data go through from reception to storage.
 
-<ExcalidrawDiagram src="/firehose-pipeline.excalidraw" alt="Amazon Data Firehose Pipeline — Source → Lambda Transform → Format Conversion → Buffer → Destination + S3 Backup" />
+<ExcalidrawDiagram src="/firehose-pipeline.excalidraw" alt="Firehose pipeline from source through Lambda transform, format conversion, buffer to destination" />
 
 ### 7.1. Receiving and Collecting Records
 

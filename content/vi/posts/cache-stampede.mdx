@@ -52,7 +52,7 @@ Cache Miss (hot key)
               → Tất cả services phụ thuộc DB đều fail
 ```
 
-<ExcalidrawDiagram src="/cache-stampede-anatomy.excalidraw" alt="Cache Stampede Anatomy" />
+<ExcalidrawDiagram src="/cache-stampede-anatomy.excalidraw" alt="Hiệu ứng domino từ cache miss tới cascading failure của database" />
 
 ---
 
@@ -64,7 +64,7 @@ Cache Miss (hot key)
 
 Khi nhiều requests cùng hỏi một key đang bị miss, thay vì tất cả đều gọi DB, hệ thống **chỉ cho phép DUY NHẤT một request** đi xuống. Các requests còn lại **đợi** cho đến khi request đầu tiên hoàn thành, rồi nhận chung kết quả.
 
-<ExcalidrawDiagram src="/cache-stampede-coalescing.excalidraw" alt="Request Coalescing Flow" />
+<ExcalidrawDiagram src="/cache-stampede-coalescing.excalidraw" alt="Chỉ một request xuống database, các request còn lại đợi chung kết quả" />
 
 ### Implementation với Node.js + TypeScript
 
@@ -276,7 +276,7 @@ Trong đó:
 - `β` (beta): Hệ số điều chỉnh, mặc định = 1. Tăng β → refresh sớm hơn
 - `random()`: Số ngẫu nhiên (0, 1]
 
-<ExcalidrawDiagram src="/cache-stampede-xfetch.excalidraw" alt="XFetch Probability Curve" />
+<ExcalidrawDiagram src="/cache-stampede-xfetch.excalidraw" alt="Xác suất refresh sớm tăng dần khi càng gần thời điểm expiry" />
 
 ### Implementation
 

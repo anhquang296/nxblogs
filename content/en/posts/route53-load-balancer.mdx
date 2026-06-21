@@ -28,7 +28,7 @@ Route 53 provides **8 routing policies** that let you turn DNS resolution into d
 
 Most engineers think of Load Balancers as ALB or NLB — services operating at Layer 4/7, sitting between client and server to distribute requests. But Route 53 operates at the **DNS layer** — much earlier in the request lifecycle.
 
-<ExcalidrawDiagram src="/route53-dns-vs-alb-layer.excalidraw" alt="Route 53 vs ALB: Which Layer Do They Operate At?" />
+<ExcalidrawDiagram src="/route53-dns-vs-alb-layer.excalidraw" alt="Route 53 routes at the DNS layer, ALB at Layer 4/7 after the client connects" />
 
 The core difference:
 
@@ -74,7 +74,7 @@ This is the default mode when you create a record on Route 53. One domain points
 
 This is the **star** of this article. Weighted Routing lets you assign weights to each record, and Route 53 distributes traffic proportionally.
 
-<ExcalidrawDiagram src="/route53-weighted-routing.excalidraw" alt="Weighted Routing: Split Traffic by Ratio" />
+<ExcalidrawDiagram src="/route53-weighted-routing.excalidraw" alt="Weighted routing splits traffic across endpoints by percentage" />
 
 Example: you need to split traffic for `api.example.com` between Production (80%) and Canary (20%). You create **2 records with the same name** with routing policy = Weighted:
 
@@ -115,7 +115,7 @@ Users in Vietnam will automatically be routed to Singapore or Tokyo — whicheve
 
 Failover routing operates on an **Active-Passive** model: you designate a Primary and a Secondary record. Route 53 continuously checks the Primary's health via health checks. When the Primary "falls", traffic automatically switches to the Secondary.
 
-<ExcalidrawDiagram src="/route53-failover-routing.excalidraw" alt="Failover Routing: Automatic Failover During Incidents" />
+<ExcalidrawDiagram src="/route53-failover-routing.excalidraw" alt="Failover routing switches to standby when the primary fails its health check" />
 
 | Record name | Type | Routing policy | Failover type | Value | Set ID | TTL | Health check |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -224,7 +224,7 @@ Then gradually change the weights following a canary roadmap:
 
 Blue/Green is simpler than canary: two environments, instant switch.
 
-<ExcalidrawDiagram src="/route53-bluegreen-canary.excalidraw" alt="Blue/Green + Canary: Transition Roadmap" />
+<ExcalidrawDiagram src="/route53-bluegreen-canary.excalidraw" alt="Blue/green gradually shifts traffic from the blue version to the green version" />
 
 **Step 1:** Both environments are ready. Traffic is 100% on Blue.
 
@@ -305,7 +305,7 @@ If you've read the [ALB or NLB](/posts/alb-or-nlb) article, this is the final pi
 | **Failover speed** | Minutes (TTL) | Seconds | Seconds |
 | **Scope** | Global | Regional | Regional |
 
-<ExcalidrawDiagram src="/route53-alb-nlb-decision-tree.excalidraw" alt="Which Load Balancer to Choose?" />
+<ExcalidrawDiagram src="/route53-alb-nlb-decision-tree.excalidraw" alt="Decision tree for choosing between Route 53, ALB, and NLB" />
 
 ---
 
@@ -318,7 +318,7 @@ In practice, Route 53 and ALB/NLB **don't exclude each other** — they compleme
 - **Route 53 (Global Layer):** Latency-based or Geolocation routing to send users to the nearest region
 - **ALB (Regional Layer):** Path-based routing to distribute requests to the right microservice within that region
 
-<ExcalidrawDiagram src="/route53-combo-architecture.excalidraw" alt="Combined Architecture: Route 53 + ALB" />
+<ExcalidrawDiagram src="/route53-combo-architecture.excalidraw" alt="Route 53 distributes across regions, ALB routes within each region" />
 
 With this architecture:
 

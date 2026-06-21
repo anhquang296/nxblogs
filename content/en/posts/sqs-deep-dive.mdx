@@ -18,7 +18,7 @@ This is exactly the problem that <Tooltip content="Simple Queue Service">Amazon 
 
 This post will dive deep into SQS internals — from how messages are stored and replicated across distributed servers, the difference between Standard Queue and <Tooltip content="First In, First Out — messages are consumed in the exact order they were sent">FIFO</Tooltip> Queue (and why Standard Queue delivers messages out of order), visibility timeout, long polling, Dead Letter Queue, to real-world patterns like Auto Scaling Group integration and using SQS as a buffer for database writes.
 
-<ExcalidrawDiagram src="/sqs-overview.excalidraw" alt="Amazon SQS Overview — Producers, Queue, Consumers" />
+<ExcalidrawDiagram src="/sqs-overview.excalidraw" alt="Producer sends messages into the queue, consumer polls them out to process" />
 
 ---
 
@@ -88,7 +88,7 @@ When a consumer calls `ReceiveMessage`, SQS doesn't scan all nodes. Instead, it 
 
 <ExcalidrawDiagram
   src="/sqs-standard-vs-fifo.excalidraw"
-  alt="SQS Standard Queue — How Things Appear vs How Things Actually Are"
+  alt="Standard Queue shards messages across nodes so delivery is out of order"
 />
 
 This isn't a bug — it's a **deliberate trade-off**, which is why AWS calls it **best-effort ordering**. By not enforcing ordering, SQS can distribute messages across more nodes, serve requests from any node, and achieve near-unlimited throughput. If ordering had to be enforced, SQS would need to coordinate between nodes — consuming time, reducing throughput, and limiting scale.
@@ -123,7 +123,7 @@ Understanding the lifecycle of a message in SQS is foundational to understanding
 
 A message goes through the following stages:
 
-<ExcalidrawDiagram src="/sqs-message-lifecycle.excalidraw" alt="SQS Message Lifecycle" />
+<ExcalidrawDiagram src="/sqs-message-lifecycle.excalidraw" alt="Message lifecycle through visible, in-flight, and delete states" />
 
 **Step 1 — SendMessage**: The producer sends a message. SQS synchronously replicates it across multiple nodes, returning a `MessageId` once quorum is achieved.
 
@@ -226,7 +226,7 @@ When configuring a DLQ, you set **`maxReceiveCount`** — the maximum number of 
 
 <ExcalidrawDiagram
   src="/sqs-dlq-flow.excalidraw"
-  alt="Dead Letter Queue Flow — Failed messages move to DLQ after maxReceiveCount, triggering CloudWatch Alarm for admin monitoring"
+  alt="Messages failing past maxReceiveCount move to the DLQ and trigger a CloudWatch alarm"
 />
 
 A DLQ is essentially just a normal SQS queue — you create a queue, then configure it as the DLQ target for the source queue.
@@ -279,7 +279,7 @@ One of the most powerful SQS patterns is combining it with an **Auto Scaling Gro
 
 ### Architecture
 
-<ExcalidrawDiagram src="/sqs-asg-scaling.excalidraw" alt="SQS with Auto Scaling Group — Queue-based Scaling" />
+<ExcalidrawDiagram src="/sqs-asg-scaling.excalidraw" alt="Auto Scaling Group scales EC2 consumers by queue depth via a CloudWatch alarm" />
 
 The flow:
 
@@ -316,7 +316,7 @@ This is the pattern we mentioned in the introduction — using SQS as a **shock 
 
 <ExcalidrawDiagram
   src="/sqs-buffer-database-writes.excalidraw"
-  alt="SQS as Buffer for Database Writes — Decoupling Pattern"
+  alt="SQS buffers between the Enqueue and Dequeue groups, decoupling the application from the database"
 />
 
 The flow:
@@ -368,7 +368,7 @@ The **fan-out pattern** solves this by combining <Tooltip content="Simple Notifi
 
 ### Architecture
 
-<ExcalidrawDiagram src="/sqs-sns-fan-out.excalidraw" alt="SNS + SQS Fan-Out Pattern — Buying Service sends one message to SNS Topic, fans out to multiple SQS queues" />
+<ExcalidrawDiagram src="/sqs-sns-fan-out.excalidraw" alt="SNS topic fans out one message to multiple independent SQS queues" />
 
 How it works:
 
@@ -409,7 +409,7 @@ A common use case for the fan-out pattern is handling **S3 event notifications**
 
 This means if you want three different services to react when a file is uploaded to `images/` — you cannot create three separate S3 event rules.
 
-<ExcalidrawDiagram src="/sqs-s3-fan-out.excalidraw" alt="S3 Events Fan-Out — S3 sends event to SNS Topic, fans out to multiple SQS queues and Lambda" />
+<ExcalidrawDiagram src="/sqs-s3-fan-out.excalidraw" alt="S3 event fans out through an SNS topic to multiple SQS queues and Lambda" />
 
 The solution: configure S3 to send event notifications to **a single SNS Topic**. SNS then fans out to multiple SQS queues and/or Lambda functions. Each downstream service receives its own copy of the event and processes independently — one service creates thumbnails, another extracts metadata, a third indexes into a search engine.
 

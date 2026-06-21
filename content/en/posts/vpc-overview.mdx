@@ -34,7 +34,7 @@ Concrete assumptions:
 
 <ExcalidrawDiagram
   src="/vpc-request-journey-overview.excalidraw"
-  alt="VPC Architecture Overview — 3 flows: inbound through ALB, EC2 to S3 via Endpoint, EC2 to internet via NAT Gateway"
+  alt="VPC architecture overview with 3 packet journeys inside"
 />
 
 ---
@@ -109,7 +109,7 @@ IGW is stateless — no filtering, no caching, no load balancing. It can afford 
 
 <ExcalidrawDiagram
   src="/vpc-igw-nat-translation.excalidraw"
-  alt="Internet Gateway — NAT 1:1 translation from ALB public IP to ALB private IP"
+  alt="Internet Gateway does 1:1 NAT from ALB public IP to private IP"
 />
 
 ### 4. Route Table — The Road Signs
@@ -141,7 +141,7 @@ Note: the route table **doesn't process packets** — it's just config. The actu
 
 <ExcalidrawDiagram
   src="/vpc-route-table-lookup.excalidraw"
-  alt="Route Table — Public subnet and private subnet route tables with different default routes"
+  alt="Public subnet and private subnet route tables with different default routes"
 />
 
 ### 5. ALB receives request, forwards to EC2
@@ -150,7 +150,7 @@ The packet arrives at ALB in the public subnet. ALB **terminates the connection*
 
 A note on ALB's IP: unlike EC2 instances that can hold a stable Elastic IP, an internet-facing ALB does not have a fixed public IP. AWS dynamically assigns IPs to ALB's ENIs (one per Availability Zone), and these IPs can change at any time. That's why you must always point DNS to ALB's DNS name (e.g. `my-alb-123456.ap-southeast-1.elb.amazonaws.com`), never to an IP address. The IP `52.10.10.10` in our assumption table is a snapshot for this packet-tracing exercise only.
 
-<ExcalidrawDiagram src="/vpc-alb-routing-to-private-subnet.excalidraw" alt="VPC alb routing to private subnet" />
+<ExcalidrawDiagram src="/vpc-alb-routing-to-private-subnet.excalidraw" alt="ALB creates a new connection forwarding the request to EC2 in the private subnet" />
 
 The new packet created by ALB:
 
@@ -208,7 +208,7 @@ Key characteristics of Gateway Endpoint:
 
 <ExcalidrawDiagram
   src="/vpc-ec2-routing-to-s3.excalidraw"
-  alt="VPC Gateway Endpoint — EC2 to S3 through AWS backbone, no internet, no NAT"
+  alt="EC2 calls S3 via VPC Gateway Endpoint over AWS backbone, no internet, no NAT"
 />
 
 ---
@@ -256,7 +256,7 @@ Quick comparison — IGW vs NAT Gateway:
 
 <ExcalidrawDiagram
   src="/vpc-nat-gateway-outbound.excalidraw"
-  alt="NAT Gateway — EC2 in private subnet to Stripe via NAT Gateway and IGW, showing double NAT"
+  alt="EC2 in private subnet calls Stripe via NAT Gateway and IGW, with double NAT along the way"
 />
 
 ---

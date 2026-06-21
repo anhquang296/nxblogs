@@ -18,7 +18,7 @@ NAT Instance — nghe quen thuộc nhưng bạn chưa bao giờ setup. Nó cũng
 
 <ExcalidrawDiagram
   src="/nat-instance-vs-nat-gateway-overview.excalidraw"
-  alt="NAT Instance vs NAT Gateway — Side-by-side architecture comparison showing packet flow from private subnet to internet"
+  alt="So sánh kiến trúc NAT Instance và NAT Gateway, packet đi từ private subnet ra internet"
 />
 
 ---
@@ -84,7 +84,7 @@ Mặc định, AWS bật **Source/Destination Check** trên mọi EC2 instance. 
 
 <ExcalidrawDiagram
   src="/nat-instance-source-dest-check.excalidraw"
-  alt="Source/Destination Check — Packet with mismatched IPs gets dropped when check is enabled, forwarded when disabled"
+  alt="Source/Destination Check bật thì drop packet lệch IP, tắt thì cho forward"
 />
 
 Nhưng NAT Instance thì khác — công việc của nó **chính là** forward packet cho người khác. Hãy xem packet mà NAT Instance nhận từ EC2 trong private subnet:

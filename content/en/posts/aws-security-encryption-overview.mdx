@@ -309,7 +309,7 @@ The one-line mnemonic: WAF = granular rules on a resource; Firewall Manager = ap
 
 AWS publishes a whitepaper on DDoS resiliency that bundles its recommendations into numbered best practices (BP1, BP2, ...) and layers them onto a reference architecture. The recurring theme: block attacks as close to the edge as possible, before they ever reach the core infrastructure in the VPC.
 
-![AWS DDoS Resiliency reference architecture — Users and Internet flow through edge services (Global Accelerator BP1, Route 53 BP3, WAF BP2, CloudFront BP1) into a Region (BP8) with a VPC (BP5), public subnet (WAF BP2, Elastic Load Balancing BP6, API Gateway BP4) and private subnet (Auto Scaling group BP7, Transit Gateway), plus a corporate data center connected via DX/VPN](/aws-security-encryption-ddos-best-practices.png)
+![AWS DDoS reference architecture absorbing attacks at the edge before they reach the VPC](/aws-security-encryption-ddos-best-practices.png)
 
 Read the architecture above in layers: user traffic enters through the edge services (Global Accelerator, Route 53, WAF, CloudFront) — where most of the attack is absorbed — and only then reaches the VPC holding the ELB, API Gateway, and the compute tier (Auto Scaling group) inside the subnets. A few core principles the exam likes to ask about:
 

@@ -12,7 +12,7 @@ You type `google.com` and hit Enter. A few dozen milliseconds later, the Google 
 
 Imagine the Internet as an enormous city with billions of houses. Each house has a long numerical address like `142.250.66.78` (IPv4) or `2607:f8b0:4006:80c::200e` (IPv6). Nobody can remember that many addresses. That's why we need a **phone book**: type a name ("google.com"), get back an address. That phone book is DNS — Domain Name System.
 
-![How DNS works under the hood](/how-dns-work-under-the-hood.svg)
+![Journey of a DNS query through resolver, root, TLD, and authoritative server](/how-dns-work-under-the-hood.svg)
 
 This article will peel back that layer: who holds the phone book, who looks things up for you, why resolving a single name goes through four different types of servers, and why the entire process still only takes a few milliseconds.
 

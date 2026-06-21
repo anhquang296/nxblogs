@@ -86,7 +86,7 @@ Lex là service xây chatbot hội thoại, dùng chung công nghệ <Tooltip co
 
 **Flow điển hình — đặt lịch hẹn qua điện thoại:**
 
-<ExcalidrawDiagram src="/lex-connect-appointment-flow.excalidraw" alt="Amazon Connect + Lex appointment-booking flow: a phone call reaches Connect, is streamed to Lex which recognizes the intent, Lex invokes Lambda, and Lambda schedules the booking into the CRM" />
+<ExcalidrawDiagram src="/lex-connect-appointment-flow.excalidraw" alt="Luồng đặt lịch qua điện thoại từ Connect tới Lex, Lambda rồi ghi vào CRM" />
 
 Khách hàng gọi vào số tổng đài ảo của Connect (**call**). Connect stream âm thanh cuộc gọi sang Lex (**stream**); Lex nhận dạng giọng nói rồi xác định **intent** "đặt lịch hẹn" cùng các slot cần thiết (ngày, giờ). Khi intent đã rõ, Lex gọi một hàm Lambda (**invoke**) để chạy nghiệp vụ — kiểm tra lịch trống rồi ghi lịch hẹn vào hệ thống <Tooltip content="Customer Relationship Management — hệ thống quản lý quan hệ và dữ liệu khách hàng">CRM</Tooltip> (**schedule**). Toàn bộ diễn ra tự động, không cần nhân viên trực tổng đài.
 
@@ -121,7 +121,7 @@ Comprehend Medical là phiên bản Comprehend chuyên cho văn bản y khoa, hi
 
 **Flow điển hình — nạp dữ liệu vào Comprehend Medical:**
 
-<ExcalidrawDiagram src="/comprehend-medical-flow.excalidraw" alt="Các đường nạp dữ liệu của Amazon Comprehend Medical: tài liệu lâm sàng lưu trong S3 (theo lô), dữ liệu streaming qua Kinesis Data Firehose (thời gian thực), và âm thanh qua Amazon Transcribe (chuyển thành văn bản) đều hội tụ về Comprehend Medical để trích xuất thực thể y tế và PHI" />
+<ExcalidrawDiagram src="/comprehend-medical-flow.excalidraw" alt="Ba đường nạp dữ liệu từ S3, Kinesis Data Firehose và Transcribe vào Comprehend Medical" />
 
 Comprehend Medical có ba đường nạp dữ liệu phổ biến. Tài liệu lâm sàng được lưu trong kho object Amazon S3 rồi đưa vào phân tích theo lô (**documents**). Dữ liệu phát sinh liên tục thì stream qua <Tooltip content="Amazon Data Firehose / Kinesis Data Firehose — pipeline phân phối dữ liệu streaming được quản lý hoàn toàn, đưa dữ liệu tới đích gần thời gian thực">Kinesis Data Firehose</Tooltip> để xử lý gần thời gian thực (**real-time**). Còn lời nói — ví dụ bác sĩ đọc ghi chú hay hội thoại với bệnh nhân — thì cho qua Amazon Transcribe để chuyển thành văn bản trước (**text**). Cả ba đều hội tụ về Comprehend Medical để trích xuất thực thể y tế và PHI (**extract**).
 

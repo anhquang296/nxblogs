@@ -66,7 +66,7 @@ Aurora provides 2 default endpoint types:
 - **Writer Endpoint**: always points to the current primary instance. Even if the primary changes after failover, the endpoint DNS remains the same.
 - **Reader Endpoint**: automatically load-balances across all read replicas. Applications only need to connect to a single DNS.
 
-<ExcalidrawDiagram src="/aurora-cluster-endpoints.excalidraw" alt="Aurora Cluster Endpoints" />
+<ExcalidrawDiagram src="/aurora-cluster-endpoints.excalidraw" alt="Writer endpoint points to the primary, reader endpoint load-balances across replicas" />
 
 ---
 
@@ -83,7 +83,7 @@ You only need to define a scaling policy (e.g., target CPU 60%, min 1 replica, m
 2. Automatically register new replicas with the **Reader Endpoint**
 3. Automatically remove replicas when load decreases
 
-<ExcalidrawDiagram src="/aurora-auto-scale.excalidraw" alt="Aurora Replicas Auto Scaling" />
+<ExcalidrawDiagram src="/aurora-auto-scale.excalidraw" alt="Auto scaling adds replicas when CPU is high, all sharing the same shared storage" />
 
 Looking at the diagram: the client sends write traffic through the **Writer Endpoint** to the primary instance. Read traffic goes through the **Reader Endpoint**, distributed to replicas. When CPU goes high, Aurora automatically expands with more replicas (the "Endpoint Extended" section) — all still using the shared **Shared Storage Volume**.
 
@@ -95,7 +95,7 @@ In practice, not all read queries are the same. A `SELECT * FROM users WHERE id 
 
 **Custom Endpoints** let you group a **subset** of replicas into a separate endpoint, dedicated to a specific workload.
 
-<ExcalidrawDiagram src="/aurora-custom-endpoint.excalidraw" alt="Aurora Custom Endpoints" />
+<ExcalidrawDiagram src="/aurora-custom-endpoint.excalidraw" alt="Custom endpoint groups powerful replicas dedicated to heavy queries" />
 
 The diagram shows: the Writer Endpoint points to the primary, the Reader Endpoint points to `db.r3.large` instances for general reads, and the **Custom Endpoint** points to `db.r5.2xlarge` instances — dedicated to heavy queries like dashboards and reports.
 

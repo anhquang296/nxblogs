@@ -47,7 +47,7 @@ S3 provides features that you can configure to support your specific use case. F
 
 Buckets and the objects in them are private and can be accessed only if you explicitly grant access permissions. You can use bucket policies, AWS Identity and Access Management (IAM) policies, access control lists (ACLs), and S3 Access Points to manage access.
 
-![How AWS S3 Works](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*0KjfelRYbTV2LoZhkD6isQ.png)
+![How S3 stores objects in buckets and controls access permissions](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*0KjfelRYbTV2LoZhkD6isQ.png)
 
 To fully understand S3 we need to focus on two main topics:
 
@@ -65,7 +65,7 @@ S3 Buckets
 
 To store your data in Amazon S3, you work with resources known as buckets and objects. A **bucket** is a container for objects. An **object** is a file and any metadata that describes that file.
 
-![A file with it’s metadata](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*MQUIEhyIFlB4uHOjBi-Jhg.png)
+![An object is a data file plus the metadata that describes it](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*MQUIEhyIFlB4uHOjBi-Jhg.png)
 
 To store an object in Amazon S3, you create a bucket and then upload the object to a bucket. When the object is in the bucket, you can open it, download it, and move it. When you no longer need an object or a bucket, you can clean up your resources.
 
@@ -128,7 +128,7 @@ Directory buckets organize data hierarchically into **directories** as opposed t
 
 You can create up to 100 directory buckets in each of your AWS accounts, with no limit on the number of objects that you can store in a bucket. Your bucket quota is applied to each Region in your AWS account. If your application requires increasing this limit, contact AWS Support.
 
-![General-Purpose Buckets VS Directory Buckets](https://miro.medium.com/v2/resize:fit:1400/format:webp/0*DQbI6vRSRaj458et)
+![Flat structure of a general-purpose bucket versus the hierarchical structure of a directory bucket](https://miro.medium.com/v2/resize:fit:1400/format:webp/0*DQbI6vRSRaj458et)
 
 **Directories**
 
@@ -181,7 +181,7 @@ If you reach the limit, you’ll get a `TooManyParts` error. Use the `CopyObject
 
 For parallel uploads without reading parts during upload, use Amazon S3 multipart upload.
 
-![Data Appending in Directory Buckets](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*NtIylAWLWvmdNBa-8lSQmA.png)
+![Appending data sequentially to an object in an S3 Express One Zone directory bucket](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*NtIylAWLWvmdNBa-8lSQmA.png)
 
 > Appending is supported only for objects in S3 Express One Zone directory buckets.
 
@@ -228,14 +228,14 @@ When you create tables within your table bucket, you organize them into logical 
 
 > You can use table bucket resource policies to limit access to specific namespaces.
 
-![S3 Table Buckets Structure](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*1Pxk8qkdT6RbyK78ODrkLQ.png)
+![Table bucket structure grouping tables by namespace](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*1Pxk8qkdT6RbyK78ODrkLQ.png)
 
 Comprehensive S3 Buckets Comparison
 -----------------------------------
 
 Given the complexity and variety of S3 buckets, it is essential to have a thorough comparison to understand their specific use cases and optimal usage scenarios. This summary provides an in-depth analysis of the key differences between the various S3 bucket types offered by AWS, enabling you to make informed decisions on when and how to utilize each bucket effectively.
 
-![captionless image](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*gKUqpBj7LqQG4-IKrksykA.png)![Comprehensive S3 Buckets Comparison](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*bmxIlSku5GEQFr7qRmQgIA.png)
+![Comparison table of S3 bucket type characteristics, part one](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*gKUqpBj7LqQG4-IKrksykA.png)![Comparison table of S3 bucket type characteristics, part two](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*bmxIlSku5GEQFr7qRmQgIA.png)
 
 Objects in S3
 -------------
@@ -244,7 +244,7 @@ To store your data in Amazon S3, you work with resources known as buckets and ob
 
 To store an object in Amazon S3, you create a bucket and then upload the object to a bucket. When the object is in the bucket, you can open it, download it, and copy it. When you no longer need an object or a bucket, you can clean up these resources.
 
-![How Objects Are Stored in S3 Buckets](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*ODj1rN_tk4BnbRf2jWx54w.png)
+![How objects are stored inside an S3 bucket](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*ODj1rN_tk4BnbRf2jWx54w.png)
 
 ### **Amazon S3 objects overview**
 
@@ -306,7 +306,7 @@ With S3 Metadata, you can easily find, store, and query metadata for your S3 obj
 
 Metadata tables are stored in S3 table buckets, which provide storage that’s optimized for tabular data. To easily query your metadata, you can integrate your table bucket with AWS Glue Data Catalog. After your table bucket is integrated with AWS Glue Data Catalog, you can directly query your metadata tables with query engines such as Amazon Athena, Amazon EMR, Amazon Redshift, Apache Spark, and Apache Trino. You can also query your metadata tables with any other application that supports the Apache Iceberg format. To create dashboards from your metadata tables, use Amazon QuickSight.
 
-![S3 Metadata Feature](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*Xl6ikFV4MTZhZ8G4GO0FCA.png)
+![S3 Metadata captures metadata into Iceberg tables for querying](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*Xl6ikFV4MTZhZ8G4GO0FCA.png)
 
 **Uploading objects**
 ---------------------
@@ -317,7 +317,7 @@ If you upload an object with a key name that already exists in a versioning-enab
 
 When you upload an object, the object is automatically encrypted using server-side encryption with Amazon S3 managed keys (SSE-S3) by default. When you download it, the object is decrypted.
 
-![Object Upload Flow in AWS S3](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*jFM43KUFispaC_egnt-BRg.png)
+![Object upload flow to S3 with default SSE-S3 encryption](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*jFM43KUFispaC_egnt-BRg.png)
 
 When you’re uploading an object, if you want to use a different type of default encryption, you can also specify server-side encryption with AWS Key Management Service (AWS KMS) keys (SSE-KMS) in your S3 `PUT` requests or set the default encryption configuration in the destination bucket to use SSE-KMS to encrypt your data. For more information about SSE-KMS
 
@@ -362,7 +362,7 @@ async function uploadFileIfNotExists() {
 
 Multipart upload allows you to upload a single object to Amazon S3 as a set of parts. Each part is a contiguous portion of the object’s data. You can upload these object parts independently, and in any order. For uploads, your updated AWS client automatically calculates a checksum of the object and sends it to Amazon S3 along with the size of the object as a part of the request. If transmission of any part fails, you can retransmit that part without affecting other parts. After all parts of your object are uploaded, Amazon S3 assembles them to create the object. It’s a best practice to use multipart upload for objects that are 100 MB or larger instead of uploading them in a single operation.
 
-![Multipart-upload process](https://miro.medium.com/v2/resize:fit:682/format:webp/0*inpogPsFOg_iSteO.png)
+![A large object split into multiple parts for independent upload](https://miro.medium.com/v2/resize:fit:682/format:webp/0*inpogPsFOg_iSteO.png)
 
 Using multipart upload provides the following advantages:
 
@@ -380,7 +380,7 @@ It is recommended to use Multi-part upload in the following scenario:
 
 Multipart upload is a **three-step process**: You initiate the upload, upload the object parts, and — after you’ve uploaded all the parts — complete the multipart upload. Upon receiving the complete multipart upload request, Amazon S3 constructs the object from the uploaded parts, and you can access the object just as you would any other object in your bucket.
 
-![Mutlipart-upload process with example](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*eyRqo66J9fRQP9yefUZu5A.png)
+![The three-step multipart upload process shown through a concrete example](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*eyRqo66J9fRQP9yefUZu5A.png)
 
 You can list all of your in-progress multipart uploads or get a list of the parts that you have uploaded for a specific multipart upload. Each of these operations is explained in this section.
 
@@ -396,7 +396,7 @@ When uploading a part, you must specify a part number in addition to the upload 
 
 When you upload a part, Amazon S3 returns the **checksum algorithm type with the checksum value for each part as a header in the response.** For each part upload, you must record the part number and the <Tooltip content="Entity tag — an identifier string (typically an MD5 hash) that S3 returns after upload, used to verify data integrity and as a precondition for conditional operations.">ETag</Tooltip> value. You must include these values in the subsequent request to complete the multipart upload. Each part will have its own ETag at the time of upload. However, once the multipart upload is complete and all parts are consolidated, all parts belong to one ETag as a checksum of checksums.
 
-![Multipart-upload flow](https://miro.medium.com/v2/resize:fit:1080/format:webp/1*lBdDkQAmiP6ESbI_OvUtTQ.png)
+![Each part returns its own ETag, combined into a checksum of checksums](https://miro.medium.com/v2/resize:fit:1080/format:webp/1*lBdDkQAmiP6ESbI_OvUtTQ.png)
 
 **Multipart upload completion**
 
@@ -410,7 +410,7 @@ When you provide a full object checksum during a multipart upload, the **AWS SDK
 
 After you initiate a multipart upload, you begin uploading parts. Amazon S3 stores these parts, and only creates the object after you upload all parts and send a request to complete the multipart upload. Upon receiving the complete multipart upload request, Amazon S3 assembles the parts and creates an object. If you don’t send the complete multipart upload request successfully, S3 does not assemble the parts and does not create any object. If you wish to not complete a multipart upload after uploading parts you should abort the multipart upload.
 
-![Abort Mutlipart upload](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*2IQVH_1DyX2Jl65pvxoevA.png)
+![Aborting a multipart upload to delete the partially uploaded parts](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*2IQVH_1DyX2Jl65pvxoevA.png)
 
 > You are billed for all storage associated with uploaded parts. It’s recommended to always either complete the multipart upload or stop the multipart upload to remove any uploaded parts.
 
@@ -420,7 +420,7 @@ In a distributed development environment, it is possible for your application to
 
 For example, you start a `CreateMultipartUpload` request for an object at 10:00 AM. Then, you submit a second `CreateMultipartUpload` request for the same object at 11:00 AM. Because the second request was submitted the most recently, the object uploaded by the 11:00 AM request becomes the current version, even if the first upload is completed after the second one.
 
-![Multpart-upload with Versions](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*X2inZpn7F8GT_NRYA9ZpZA.png)
+![Two concurrent multipart uploads, the later-started one becomes the current version](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*X2inZpn7F8GT_NRYA9ZpZA.png)
 
 For buckets that **don't have versioning enabled**, it's possible that any other request received between the time when the multipart upload is initiated and when it completes, the other request might take precedence.
 
@@ -445,13 +445,13 @@ To understand conditional writes, consider the following scenarios where two cli
 
 Conditional writes do not consider any in-progress multipart upload requests since those are not yet fully written objects. Consider the following example where Client 1 is uploading an object using multipart upload. During the multipart upload, Client 2 is able to successfully write the same object with the conditional write operation. Subsequently, when Client 1 tries to complete the multipart upload using a conditional write the upload fails.
 
-![captionless image](https://miro.medium.com/v2/resize:fit:1400/format:webp/0*tAIceiqWuL296TGq.png)
+![Conditional write ignores the in-progress multipart upload, causing Client 1 to fail at completion](https://miro.medium.com/v2/resize:fit:1400/format:webp/0*tAIceiqWuL296TGq.png)
 
 **Concurrent deletes during multipart uploads**
 
 If a delete request succeeds before a conditional write request can be completed, Amazon S3 returns an `409 Conflict` or `404 Not Found` response for the write operation. This is because the delete request that was initiated earlier takes precedence over the conditional write operation. In such cases, you must initiate a new multipart upload.
 
-![captionless image](https://miro.medium.com/v2/resize:fit:1400/format:webp/0*X6MahaKMgrlQ5DdB.png)
+![A concurrent delete takes precedence, so the conditional write gets a 409 or 404 error](https://miro.medium.com/v2/resize:fit:1400/format:webp/0*X6MahaKMgrlQ5DdB.png)
 
 Checking object integrity in Amazon S3
 --------------------------------------
@@ -460,7 +460,7 @@ Amazon S3 uses checksum values to verify the integrity of data that you **upload
 
 When you upload your data, Amazon S3 **uses the algorithm** that you’ve chosen to **compute a checksum on the server side** and validates it with the provided value before storing the object and storing the checksum as part of the object metadata. This validation works consistently across encryption modes, object sizes, and storage classes for both single part and multipart uploads. When you copy or batch copy your data, however, Amazon S3 calculates the checksum on the source object and moves it to the destination object.
 
-![S3 Checksum Flow](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*LTuy_b1llv0TkKa3Gs2C9Q.png)
+![S3 computes the checksum server-side and stores it with the object metadata](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*LTuy_b1llv0TkKa3Gs2C9Q.png)
 
 With Amazon S3, you can choose a checksum algorithm to validate your data during uploads. The specified checksum algorithm is then stored with your object and can be used to validate data integrity during downloads.
 
@@ -477,13 +477,13 @@ In Amazon S3, there are two types of supported checksums:
 
 *   **Full object checksums:** A full object checksum is calculated based on all of the content of a multipart upload, covering all data from the first byte of the first part to the last byte of the last part.
 
-![Full object checksums example](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*iqOOuLiieC5ACDTX0f3GVQ.png)
+![Full object checksum computed over the entire content from first to last part](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*iqOOuLiieC5ACDTX0f3GVQ.png)
 
 This means that you can provide the checksum algorithm for the `[MultipartUpload](https://docs.aws.amazon.com/AmazonS3/latest/API/API_MultipartUpload.html)` API, simplifying your integrity validation tooling because you no longer need to track part boundaries for uploaded objects. You can provide the checksum of the whole object in the `[CompleteMultipartUpload](https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html)` request, along with the object size.
 
 *   **Composite checksums:** A composite checksum is calculated based on the individual checksums of each part in a multipart upload. Instead of computing a checksum based on all of the data content, this approach aggregates the part-level checksums (from the first part to the last) to produce a single, combined checksum for the complete object.
 
-![Composite checksums example](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*xIokGg41ZbKOID4qEQJltg.png)
+![Composite checksum aggregating per-part checksums into a single value](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*xIokGg41ZbKOID4qEQJltg.png)
 
 For multipart upload part-level checksums (or composite checksums), Amazon S3 calculates the checksum for each individual part by using the specified checksum algorithm. You can use `[UploadPart](https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html)` to provide the checksum values for each part.
 
@@ -545,7 +545,7 @@ You can use presigned URLs to grant time-limited access to objects in Amazon S3 
 
 You can also use presigned URLs to allow someone to **upload a specific object** to your Amazon S3 bucket. This allows an upload without requiring another party to have AWS security credentials or permissions. If an object with the same key already exists in the bucket as specified in the presigned URL, Amazon S3 replaces the existing object with the uploaded object.
 
-![Presigned-url flow example](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*T6Srcyn2FJ6x_dFEhd-6Yw.png)
+![Using a presigned URL to grant time-limited access to an object](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*T6Srcyn2FJ6x_dFEhd-6Yw.png)
 
 > You can use the presigned URL multiple times, **up to the expiration date and time.**
 
@@ -587,7 +587,7 @@ You want to:
 2.  Allow the **Marketing Team** access to `marketing-data/` and allow uploads of campaign files.
 3.  Enable the **Engineering Team** to access `engineering-data/` but restrict it to internal usage within a private VPC.
 
-![S3 Access Point Architecture Example](https://miro.medium.com/v2/resize:fit:2000/format:webp/1*qmzr7ZsHPXxkTTrQrBhnLg.png)
+![Each team uses its own access point with a policy scoped to a prefix](https://miro.medium.com/v2/resize:fit:2000/format:webp/1*qmzr7ZsHPXxkTTrQrBhnLg.png)
 
 **Transforming objects with S3 Object Lambda**
 ----------------------------------------------
@@ -604,7 +604,7 @@ After you configure a Lambda function, you attach it to an S3 Object Lambda serv
 
 When you send a request to your Object Lambda Access Point, Amazon S3 automatically calls your Lambda function. Any data retrieved by using an S3 `GET`, `LIST`, or `HEAD` request through the Object Lambda Access Point returns a transformed result back to the application. All other requests are processed as normal, as illustrated in the following diagram.
 
-![S3 Lambda Object Example](https://miro.medium.com/v2/resize:fit:1400/format:webp/0*hENBs2OzTgbxw0hR.png)
+![S3 Object Lambda calls a Lambda function to transform data as it is returned](https://miro.medium.com/v2/resize:fit:1400/format:webp/0*hENBs2OzTgbxw0hR.png)
 
 S3 Batch Operations
 -------------------
@@ -613,7 +613,7 @@ You can use S3 Batch Operations to perform large-scale batch operations on Amazo
 
 Use S3 Batch Operations to copy objects and set object tags or access control lists (ACLs). You can also initiate object restores from S3 Glacier Flexible Retrieval or invoke an AWS Lambda function to perform custom actions using your objects. You can perform these operations on a custom list of objects, or you can use an Amazon S3 Inventory report to easily generate lists of objects. Amazon S3 Batch Operations use the same Amazon S3 API operations that you already use with Amazon S3.
 
-![S3 Batch Operations](https://miro.medium.com/v2/resize:fit:1400/format:webp/0*4CzIFfdk_Dv1gZwu.png)
+![S3 Batch Operations runs one operation across many objects from a manifest](https://miro.medium.com/v2/resize:fit:1400/format:webp/0*4CzIFfdk_Dv1gZwu.png)
 
 ### Terminology
 
@@ -643,7 +643,7 @@ You can use Amazon S3 Inventory to help manage your storage. For example, you ca
 
 > Amazon S3 Inventory does not use the `List` API operations to audit your objects and does not affect the request rate of your bucket.
 
-![S3 Inventory with S3 Batch Operations](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*Y_9X7hnzihfiJd7gpc3bmA.png)
+![S3 Inventory exports a CSV file as the input manifest for S3 Batch Operations](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*Y_9X7hnzihfiJd7gpc3bmA.png)
 
 S3 Inventory and S3 Batch operations play complementary rules with each other, while S3 inventory generates a CSV file depending on the objects you have in your buckets, your S3 Batch operation can use these CSV files to run specific jobs against them.
 
@@ -669,7 +669,7 @@ Data protection refers to protecting data while it’s in transit (as it travels
 
 Server-side encryption is the encryption of data at its destination by the application or service that receives it. Amazon S3 encrypts your data at the object level as it writes it to disks in AWS data centers and decrypts it for you when you access it. As long as you authenticate your request and you have access permissions, there is no difference in the way you access encrypted or unencrypted objects. For example, if you share your objects by using a presigned URL, that URL works the same way for both encrypted and unencrypted objects. Additionally, when you list objects in your bucket, the list API operations return a list of all objects, regardless of whether they are encrypted.
 
-![Data Encryption options in S3](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*iDGgoGbFUOwv3vC7pZyadg.png)
+![Server-side and client-side encryption options in S3](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*iDGgoGbFUOwv3vC7pZyadg.png)
 
 All Amazon S3 buckets have encryption configured by default, and all new objects that are uploaded to an S3 bucket are automatically encrypted at rest. Server-side encryption with Amazon S3 managed keys (SSE-S3) is the default encryption configuration for every bucket in Amazon S3. To use a different type of encryption, you can either specify the type of server-side encryption to use in your S3 `PUT` requests, or you can set the default encryption configuration in the destination bucket.
 
@@ -681,7 +681,7 @@ All new object uploads to Amazon S3 buckets are encrypted by default with server
 
 Server-side encryption protects data at rest. Amazon S3 encrypts each object with a unique key. As an additional safeguard, it encrypts the key itself with a key that it rotates regularly. Amazon S3 server-side encryption uses 256-bit Advanced Encryption Standard Galois/Counter Mode (AES-GCM) to encrypt all uploaded objects.
 
-![S3 SSE-S3 Encryption Flow](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*Ovxr9z7opYHoxiZ1OjLgMA.png)
+![SSE-S3 flow using a root key to encrypt a data key for each object](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*Ovxr9z7opYHoxiZ1OjLgMA.png)
 
 The encryption happens with the help of the AWS S3 generated “root/master key”, which is fully governed by AWS S3.
 
@@ -706,7 +706,7 @@ When you use server-side encryption with AWS KMS (SSE-KMS), you can use the defa
 
 If you want to use a **customer managed key** for SSE-KMS, create a symmetric encryption customer managed key before you configure SSE-KMS. Then, when you configure SSE-KMS for your bucket, specify the existing customer managed key.
 
-![S3 SSE-KMS Encryption Flow](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*B8GN6q3DTlm-XmQJZC37Rg.png)
+![SSE-KMS flow using a KMS key and envelope encryption instead of a root key](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*B8GN6q3DTlm-XmQJZC37Rg.png)
 
 In this method, AWS delegates the “root/master key” to AWS “KMS key” allowing to have a more flexible solution in terms of overcoming some of the shortcomings which were discussed before.
 
@@ -718,7 +718,7 @@ In this method, AWS delegates the “root/master key” to AWS “KMS key” all
 
 Amazon S3 Bucket Keys reduce the cost of Amazon S3 server-side encryption with AWS Key Management Service (AWS KMS) keys (SSE-KMS). Using a bucket-level key for SSE-KMS can reduce AWS KMS request costs by up to 99 percent by decreasing the request traffic from Amazon S3 to AWS KMS. With a few clicks in the AWS Management Console, and without any changes to your client applications, you can configure your bucket to use an S3 Bucket Key for SSE-KMS encryption on new objects.
 
-![captionless image](https://miro.medium.com/v2/resize:fit:1400/format:webp/0*cTE7K04OspO_CWKJ.png)
+![S3 Bucket Key reduces AWS KMS calls for objects using SSE-KMS](https://miro.medium.com/v2/resize:fit:1400/format:webp/0*cTE7K04OspO_CWKJ.png)
 
 Workloads that access millions or billions of objects encrypted with SSE-KMS can generate large volumes of requests to AWS KMS. When you use SSE-KMS to protect your data without an S3 Bucket Key, Amazon S3 uses an individual AWS KMS data key for every object. In this case, Amazon S3 makes a call to AWS KMS every time a request is made against a KMS-encrypted object.
 
@@ -736,7 +736,7 @@ Server-side encryption is about protecting data at rest. Server-side encryption 
 
 When you upload an object, Amazon S3 uses the encryption key that you provide to apply AES-256 encryption to your data. Amazon S3 then removes the encryption key from memory. When you retrieve an object, you must provide the same encryption key as part of your request. Amazon S3 first verifies that the encryption key that you provided matches, and then it decrypts the object before returning the object data to you.
 
-![S3 SSE-C Encryption Flow](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*7XP26b0CQpmr4V-4WBFeSw.png)
+![SSE-C flow using a client-provided encryption key to encrypt the object](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*7XP26b0CQpmr4V-4WBFeSw.png)
 
 *   The client application needs to provide the unencrypted object and the “encryption key” to S3.
 *   S3 then uses the “encryption key” to encrypt the object and discards the “encryption key”.
@@ -747,7 +747,7 @@ When you upload an object, Amazon S3 uses the encryption key that you provide to
 
 **Client-side encryption** is the act of encrypting your data locally to help ensure its security in transit and at rest. To encrypt your objects before you send them to Amazon S3, use the Amazon S3 Encryption Client. When your objects are encrypted in this manner, your objects aren’t exposed to any third party, including AWS. Amazon S3 receives your objects already encrypted; Amazon S3 does not play a role in encrypting or decrypting your objects. You can use both the Amazon S3 Encryption Client and server-side encryption to encrypt your data. When you send encrypted objects to Amazon S3, Amazon S3 doesn’t recognize the objects as being encrypted, it only detects typical objects.
 
-![S3 Client Side Encryption](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*fkl3MDIth-E_avTiyUfaaQ.png)
+![Client encrypts data locally before sending the encrypted object to S3](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*fkl3MDIth-E_avTiyUfaaQ.png)
 
 The Amazon S3 Encryption Client works as an intermediary between you and Amazon S3. After you instantiate the Amazon S3 Encryption Client, your objects are automatically encrypted and decrypted as part of your Amazon S3 `PutObject` and `GetObject` requests. Your objects are all encrypted with a unique data key. The Amazon S3 Encryption Client does not use or interact with bucket keys, even if you specify a KMS key as your wrapping key.
 
@@ -767,7 +767,7 @@ In addition to the resilience offered by the AWS global infrastructure, Amazon S
 
 You can use replication to enable automatic, asynchronous copying of objects across Amazon S3 buckets. Buckets that are configured for object replication can be owned by the same AWS account or by different accounts. You can replicate objects to a single destination bucket or to multiple destination buckets. The destination buckets can be in different AWS Regions or within the same Region as the source bucket.
 
-![Replication Rules in S3](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*9Fm6S5_-GntoFbGw_crg_w.png)
+![A replication rule automatically copies objects asynchronously to a destination bucket](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*9Fm6S5_-GntoFbGw_crg_w.png)
 
 There are two types of replication: **live replication** and **on-demand replication**.
 
@@ -827,7 +827,7 @@ Batch Replication replicates existing objects to different buckets as an on-dema
 
 Amazon S3 Multi-Region Access Points provides a global endpoint that applications can use to fulfill requests from S3 buckets that are located in multiple AWS Regions. You can use Multi-Region Access Points to build multi-Region applications with the same architecture that’s used in a single Region, and then run those applications anywhere in the world. Instead of sending requests over the congested public internet, Multi-Region Access Points provides built-in network resilience with acceleration of internet-based requests to Amazon S3. Application requests made to a Multi-Region Access Point global endpoint uses [AWS Global Accelerator](https://docs.aws.amazon.com/global-accelerator/latest/dg/) to automatically route over the AWS global network to the closest proximity S3 bucket with an active routing status.
 
-![S3 Multi-Region Access Point Example](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*CEUgCgJw_-LBzJcxgwXjCQ.png)
+![A Multi-Region Access Point routes requests to the nearest bucket over the AWS global network](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*CEUgCgJw_-LBzJcxgwXjCQ.png)
 
 If a Regional traffic disruption occurs, you can use Multi-Region Access Points failover controls to shift the S3 data request traffic between AWS Regions and redirect S3 traffic away from the disruptions within minutes. You can also test the application resiliency against a disruption to conduct application failover and perform disaster recovery simulations. If you need to connect and accelerate requests to S3 from outside of a VPC, you can simplify applications and network architecture with Amazon S3 Multi-Region Access Points. Your Multi-Region Access Points requests will be routed over the AWS global network and then back to S3 within the AWS Region, without having to traverse the public internet. As a result, you can build more highly available applications.
 
@@ -840,11 +840,11 @@ After you’ve set up your Multi-Region Access Point. you can then request or wr
 
 Versioning in Amazon S3 is a means of keeping multiple variants of an object in the same bucket. You can use the S3 Versioning feature to preserve, retrieve, and restore every version of every object stored in your buckets. With versioning you can recover more easily from both unintended user actions and application failures. After versioning is enabled for a bucket, if Amazon S3 receives multiple write requests for the same object simultaneously, it stores all of those objects.
 
-![captionless image](https://miro.medium.com/v2/resize:fit:544/format:webp/0*SVfMy3Xh-m9dl2JB.png)![S3 Versioning Explained](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*RddlCFZXlXuamlyDuGelmw.png)
+![A bucket without versioning keeps only one version of an object](https://miro.medium.com/v2/resize:fit:544/format:webp/0*SVfMy3Xh-m9dl2JB.png)![A versioning-enabled bucket keeps multiple versions each with its own version ID](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*RddlCFZXlXuamlyDuGelmw.png)
 
 Versioning-enabled buckets can help you recover objects from accidental deletion or overwrite. For example, if you delete an object, Amazon S3 inserts a delete marker instead of removing the object permanently. The delete marker becomes the current object version. If you overwrite an object, it results in a new object version in the bucket.
 
-![captionless image](https://miro.medium.com/v2/resize:fit:674/format:webp/0*ze7yHmP7UuifGOs1.png)![captionless image](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*TKI7DijwgAgEJXrVvQ9M5Q.png)
+![Deleting an object just inserts a delete marker instead of removing it permanently](https://miro.medium.com/v2/resize:fit:674/format:webp/0*ze7yHmP7UuifGOs1.png)![Overwriting an object creates a new version and keeps the older one](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*TKI7DijwgAgEJXrVvQ9M5Q.png)
 
 > By default, S3 Versioning is disabled on buckets, and you must explicitly enable it.
 
@@ -871,7 +871,7 @@ Object Lock provides two ways to manage object retention: **retention periods an
 *   **Retention period** — A retention period specifies a fixed period of time during which an object version remains locked. You can set a unique retention period for individual objects. Additionally, you can set a default retention period on an S3 bucket. You may also restrict the minimum and maximum allowable retention periods with the `s3:object-lock-remaining-retention-days` condition key in the bucket policy. This helps you establish a range of retention periods and by restricting retention periods that may be shorter or longer than this range.
 *   **Legal hold** — A legal hold provides the same protection as a retention period, but it has no expiration date. Instead, a legal hold remains in place until you explicitly remove it. Legal holds are independent from retention periods and are placed on individual object versions.
 
-![Locking objects with Object Lock](https://miro.medium.com/v2/resize:fit:1248/format:webp/0*Hnmtf0LMU62dGEvh.jpg)
+![Object Lock uses a WORM model with retention periods and legal holds](https://miro.medium.com/v2/resize:fit:1248/format:webp/0*Hnmtf0LMU62dGEvh.jpg)
 
 Object Lock works only in buckets that have S3 Versioning enabled. When you lock an object version, Amazon S3 stores the lock information in the metadata for that object version. Placing a retention period or a legal hold on an object protects only the version that’s specified in the request. Retention periods and legal holds don’t prevent new versions of the object from being created, or delete markers to be added on top of the object.
 
@@ -934,7 +934,7 @@ Along with AWS Backup, you can use S3 Versioning and S3 Replication to help reco
 
 Your applications can easily achieve thousands of transactions per second in request performance when uploading and retrieving storage from Amazon S3. Amazon S3 automatically scales to high request rates. For example, your application can achieve at least 3,500 PUT/COPY/POST/DELETE or 5,500 GET/HEAD requests per second **per partitioned Amazon S3 prefix**. There are no limits to the number of prefixes in a bucket. You can increase your read or write performance by using **parallelization**. For example, if you create 10 prefixes in an Amazon S3 bucket to parallelize reads, you could scale your read performance to 55,000 read requests per second. Similarly, you can scale write operations by writing to multiple prefixes. The scaling, in the case of both read and write operations, happens gradually and is not instantaneous. While Amazon S3 is scaling to your new higher request rate, you may see some 503 (Slow Down) errors. These errors will dissipate when the scaling is complete.
 
-![S3 prefix and scalability](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*nsHGUp3a4LS0tKfvBMV20Q.png)
+![Each prefix is partitioned to scale request rate in parallel](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*nsHGUp3a4LS0tKfvBMV20Q.png)
 
 Some data lake applications on Amazon S3 scan millions or billions of objects for queries that run over petabytes of data. These data lake applications achieve single-instance transfer rates that maximize the network interface use for their Amazon EC2 instance, which can be up to 100 Gb/s on a single instance. These applications then aggregate throughput across multiple instances to get multiple terabits per second.
 
@@ -953,13 +953,13 @@ Spreading requests across many connections is a common design pattern to horizon
 
 Using the `Range` HTTP header in a [GET Object](https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectGET.html) request, you can fetch a byte-range from an object, transferring only the specified portion. You can use concurrent connections to Amazon S3 to fetch different byte ranges from within the same object. This helps you achieve higher aggregate throughput versus a single whole-object request. Fetching smaller ranges of a large object also allows your application to improve retry times when requests are interrupted.
 
-![Byte-range fetches in S3 in parallel](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*s5BA--h_L8YB0pQbr_CBoA.png)
+![Fetching multiple byte-ranges from the same object in parallel to increase throughput](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*s5BA--h_L8YB0pQbr_CBoA.png)
 
 Typical sizes for byte-range requests are 8 MB or 16 MB. If objects are PUT using a multipart upload, it’s a good practice to GET them in the same part sizes (or at least aligned to part boundaries) for best performance. GET requests can directly address individual parts; for example, `GET ?partNumber=N.`
 
 The second use-case in which S3 Byte-Range Fetches could be used is to retrieve only partial data. For example, when you know the first XX bytes is the header of a file, in this case, it could be used.
 
-![Byte-range request for first xx bytes](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*37aC0Xur04qUgrGh8jU7nQ.png)
+![A byte-range request fetches only the file header instead of the whole object](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*37aC0Xur04qUgrGh8jU7nQ.png)
 
 ### Retry requests for latency-sensitive applications
 
@@ -973,11 +973,11 @@ Although S3 bucket names are globally unique, each bucket is stored in a Region 
 
 [Configuring fast, secure file transfers using Amazon S3 Transfer Acceleration](https://docs.aws.amazon.com/AmazonS3/latest/userguide/transfer-acceleration.html) manages fast, easy, and secure transfers of files over long geographic distances between the client and an S3 bucket. Transfer Acceleration takes advantage of the globally distributed edge locations in [Amazon CloudFront](https://docs.aws.amazon.com/cloudfront/index.html). As the data arrives at an edge location, it is routed to Amazon S3 over an optimized network path. Transfer Acceleration is ideal for transferring gigabytes to terabytes of data regularly across continents. It’s also useful for clients that upload to a centralized bucket from all over the world.
 
-![S3 Transfer Accelerator](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*mJTG_bWhmAX8cNVLRgtMfg.png)
+![Transfer Acceleration routes data through edge locations then to S3 over an optimized path](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*mJTG_bWhmAX8cNVLRgtMfg.png)
 
 You can use the [Amazon S3 Transfer Acceleration Speed comparison tool](https://s3-accelerate-speedtest.s3-accelerate.amazonaws.com/en/accelerate-speed-comparsion.html) to compare accelerated and non-accelerated upload speeds across Amazon S3 Regions. The Speed Comparison tool uses multipart uploads to transfer a file from your browser to various Amazon S3 Regions with and without using Amazon S3 Transfer Acceleration.
 
-![AWS S3 Edge Locations](https://miro.medium.com/v2/format:webp/1*lHrgv1gFEXqNhtnpCVXH9A.png)
+![CloudFront's network of edge locations spread across the globe](https://miro.medium.com/v2/format:webp/1*lHrgv1gFEXqNhtnpCVXH9A.png)
 
 ### Use the latest version of the AWS SDKs
 

@@ -86,7 +86,7 @@ The big picture: the on-premises agent reads data over NFS/SMB, encrypts it, and
 
 <ExcalidrawDiagram
   src="/aws-datasync-architecture.excalidraw"
-  alt="AWS DataSync architecture. On the left, an On-Premises group contains an NFS or SMB server connected to an AWS DataSync agent over NFS or SMB. The agent transfers data over an encrypted TLS connection to the AWS DataSync service inside an AWS Region. From there, DataSync writes to AWS Storage Resources: Amazon S3 across storage classes (S3 Standard, S3 Intelligent-Tiering, S3 Standard-IA, S3 One Zone-IA, S3 Glacier, S3 Glacier Deep Archive), Amazon EFS, and Amazon FSx. Arrows are bidirectional, showing DataSync can move data in either direction."
+  alt="DataSync agent on-premises reads NFS/SMB, transfers over TLS, then writes to S3, EFS, FSx"
 />
 
 Use cases: a one-time migration to the cloud, or periodic sync for backup/archive, cross-region replication, or consolidating data from many file servers into one place.
@@ -174,7 +174,7 @@ There are four types of gateway, organized by "what protocol your on-premises ap
 
 <ExcalidrawDiagram
   src="/aws-storage-gateway-architecture.excalidraw"
-  alt="AWS Storage Gateway overview — On-premises: User/group file shares connect to File Gateway via NFS/SMB, Application Server to Volume Gateway via iSCSI, Backup Application to Tape Gateway via iSCSI VTL (each gateway keeps a local cache). Traffic is encrypted in transit over Internet or Direct Connect to the central Storage Gateway, then to AWS Cloud: File Gateway maps to Amazon S3 (any class including Glacier), Volume Gateway maps to Amazon S3 backed by AWS EBS snapshots, Tape Gateway maps to Amazon S3 Tape Library archived to Glacier and Glacier Deep Archive"
+  alt="Four Storage Gateway types connect on-premises apps via NFS/SMB/iSCSI/VTL to S3, EBS snapshots, and Glacier"
 />
 
 ### 4.1. Amazon S3 File Gateway

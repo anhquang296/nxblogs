@@ -78,7 +78,7 @@ Let's zoom into each overhead step to understand why they're so expensive.
 
 Before sending any data, the client and database must establish a TCP connection through 3 steps:
 
-<ExcalidrawDiagram src="/connection-pool-tcp-handshake.excalidraw" alt="TCP 3-Way Handshake" />
+<ExcalidrawDiagram src="/connection-pool-tcp-handshake.excalidraw" alt="TCP 3-way handshake between client and database costs 1.5 RTT" />
 
 Cost: **1.5 <Tooltip content="Round-Trip Time — the time it takes a packet to travel from client to server and back. This is baseline network latency that cannot be optimized in code; it is bound by physical distance and link quality.">RTT</Tooltip>**. If the application runs in `ap-southeast-1` (Singapore) and the database is in `us-east-1` (Virginia) with ~200ms/RTT latency, you've already lost **300ms** just to establish the TCP connection. Even within the same region, cross-AZ latency of ~1-2ms/RTT adds up quickly when multiplied by thousands of requests.
 
@@ -133,7 +133,7 @@ When the request finishes and the application closes the connection, the databas
 - **Free memory** — `work_mem`, temp buffers, plan cache, catalog cache — all must be returned to the OS
 - **Close the TCP connection** — the 4-way FIN/ACK procedure:
 
-<ExcalidrawDiagram src="/connection-pool-tcp-close.excalidraw" alt="TCP 4-Way Connection Close" />
+<ExcalidrawDiagram src="/connection-pool-tcp-close.excalidraw" alt="Closing a TCP connection via the 4-way FIN/ACK procedure" />
 
 - The **ephemeral port** used by the connection isn't freed immediately — it enters a **TIME_WAIT state for 60 seconds** (on Linux) before the port becomes available again.
 
@@ -227,7 +227,7 @@ The idea behind a connection pool is very simple: **create connections once, reu
 
 Instead of each request opening its own connection, authenticating, then closing — the application maintains a group (**pool**) of fully established connections (TCP + TLS + Auth all completed). When a request needs to query the database, it **borrows** a connection from the pool, and when done, **returns it** — no closing, no creating new ones.
 
-<ExcalidrawDiagram src="/connection-pool-init-flow.excalidraw" alt="Connection Pool: Initialization & Usage" />
+<ExcalidrawDiagram src="/connection-pool-init-flow.excalidraw" alt="Request borrows an idle connection from the pool then returns it, creating none" />
 
 ### Mapping Problems to Solutions
 
@@ -350,7 +350,7 @@ A local pool works well when the application runs on **a single instance**. But 
 
 Each application instance maintains its own local pool. These pools **don't know about each other** — each pool manages connections independently.
 
-<ExcalidrawDiagram src="/connection-pool-local-problem.excalidraw" alt="The N Instances x Local Pool Problem" />
+<ExcalidrawDiagram src="/connection-pool-local-problem.excalidraw" alt="N instances each with a local pool, total connections exceed max connections" />
 
 The problem becomes more severe with:
 
@@ -364,7 +364,7 @@ Reduce the `max` pool size per instance? Sure, but that creates a bottleneck —
 
 **AWS RDS Proxy** sits between application instances and the database, acting as **a shared connection pool** for the entire fleet.
 
-<ExcalidrawDiagram src="/connection-pool-rds-proxy.excalidraw" alt="RDS Proxy: Centralized Connection Pool" />
+<ExcalidrawDiagram src="/connection-pool-rds-proxy.excalidraw" alt="RDS Proxy multiplexes many app connections into few database connections" />
 
 RDS Proxy works through **multiplexing**: it accepts hundreds of connections from applications, but only opens a small number of actual connections to the database. When an app connection needs to run a query, the Proxy assigns it to an available DB connection, runs the query, then returns the DB connection to the pool — similar to a local pool, but at the infrastructure level.
 

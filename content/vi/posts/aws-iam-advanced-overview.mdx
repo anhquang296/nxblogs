@@ -188,7 +188,7 @@ Use case kinh điển: **ủy quyền an toàn**. Bạn muốn cho một admin c
 
 <ExcalidrawDiagram
   src="/aws-iam-cross-account-s3-access.excalidraw"
-  alt="Hai cách để user ở Account A ghi dữ liệu vào S3 bucket ở Account B: Cách 1 — assume một Cross-Account IAM Role trong Account B (từ bỏ quyền gốc) rồi ghi vào S3; Cách 2 — ghi trực tiếp, được cấp phép bởi S3 Bucket Policy (giữ nguyên quyền gốc)"
+  alt="Hai cách user Account A ghi vào S3 bucket Account B: assume cross-account role hoặc qua bucket policy"
 />
 
 ### 4.1. Identity-based vs Resource-based policy
@@ -239,7 +239,7 @@ Với một request trong môi trường Organizations, AWS kiểm tra theo mộ
 
 <ExcalidrawDiagram
   src="/aws-iam-policy-evaluation-logic.excalidraw"
-  alt="Sơ đồ logic đánh giá policy của IAM: quyết định bắt đầu ở Deny, lần lượt đi qua sáu nhóm — Deny tường minh, Organizations SCP, resource-based policy, identity-based policy, permission boundary và session policy; mỗi nhóm phải cho phép, gặp explicit Deny là từ chối ngay, kết thúc bằng Allow hoặc Deny"
+  alt="Logic đánh giá policy của IAM lần lượt qua sáu nhóm, một explicit Deny là từ chối ngay"
 />
 
 Hình dung như qua nhiều cửa an ninh: mọi cửa phải để bạn qua (giao của các điều kiện), và bất kỳ cửa nào treo biển "cấm" (explicit Deny) là dừng cuộc chơi.
@@ -277,7 +277,7 @@ Lấy ví dụ cụ thể: bạn gán permission set FullAccess cho group Develo
 
 <ExcalidrawDiagram
   src="/aws-iam-identity-center.excalidraw"
-  alt="Sơ đồ IAM Identity Center: trong AWS Organization có management account, OU Development (Dev Account A, B) và OU Production (Prod Account A, B); IAM Identity Center đặt trong management account chứa group Developers (Bob, Alice) cùng hai permission set ReadOnlyAccess và FullAccess; group Developers được gán permission set FullAccess, qua đó được cấp một IAM role toàn quyền vào Dev Account B"
+  alt="Group Developers được gán permission set FullAccess, tạo IAM role toàn quyền vào Dev Account B"
 />
 
 > Nếu 1 permission set được gán cho group developers, thì cũng chỉ có 1 IAM role được tạo, và các developers sẽ cùng assume 1 IAM role.

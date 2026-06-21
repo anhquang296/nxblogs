@@ -217,7 +217,7 @@ Nói cách khác: phân phối tải giữa các node chỉ "đều" khi bạn c
 
 Khi một request đi qua ALB, có **2 quyết định độc lập**:
 
-<ExcalidrawDiagram src="/alb-two-decision-layers.excalidraw" alt="ALB: Hai Lớp Quyết Định" />
+<ExcalidrawDiagram src="/alb-two-decision-layers.excalidraw" alt="Hai lớp quyết định tách biệt: chọn node ở lớp DNS và chọn target ở target group" />
 
 Lớp 1 (chọn node) **AWS đã quyết** — bạn không config gì ngoài chọn region và AZs. Lớp 2 (chọn target) **bạn control được** qua target group settings, đây là phần section tiếp theo nói chi tiết.
 
@@ -237,7 +237,7 @@ Sau khi request đã đến một ALB node (qua cơ chế DNS ở section 6), no
 
 Targets được xếp thành một vòng tròn. Request đầu tiên đi đến target #1, request tiếp theo đến #2, rồi #3... Hết vòng thì quay lại #1.
 
-<ExcalidrawDiagram src="/alb-round-robin.excalidraw" alt="Round Robin: Xoay Vòng" />
+<ExcalidrawDiagram src="/alb-round-robin.excalidraw" alt="Round robin xoay vòng lần lượt qua từng target trong target group" />
 
 **Ưu điểm:**
 
@@ -258,7 +258,7 @@ Thuật toán này thông minh hơn: ALB **đếm số request đang in-flight**
 
 **Cách hoạt động:**
 
-<ExcalidrawDiagram src="/alb-lor.excalidraw" alt="Least Outstanding Requests (LOR)" />
+<ExcalidrawDiagram src="/alb-lor.excalidraw" alt="LOR gửi request tới target có ít in-flight request nhất" />
 
 ALB maintain một counter cho mỗi target: tăng khi gửi request, giảm khi nhận response.
 
@@ -294,7 +294,7 @@ Thay vì chọn theo thứ tự (Round Robin) hay theo counter (LOR), ALB chọn
 
 Khi phát hiện anomaly, ALB **tự động giảm weight** của target đó (gửi ít traffic hơn) **mà không cần wait health check fail**. Đây là một dạng **circuit breaker tự động** ở mức load balancer.
 
-<ExcalidrawDiagram src="/alb-weighted-random.excalidraw" alt="Weighted Random + Anomaly Mitigation" />
+<ExcalidrawDiagram src="/alb-weighted-random.excalidraw" alt="Weighted random tự giảm weight target có hành vi bất thường" />
 
 **Ưu điểm:**
 

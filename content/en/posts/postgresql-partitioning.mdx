@@ -12,7 +12,7 @@ There comes a point in the life of nearly every production system: an `events` (
 
 The "simplest" answer — bump up the disk, scale up the instance RAM — only buys time. The root cause is structural: **a single table is not the right shape to hold half a billion rows with a clear lifecycle**. This is where **partitioning** comes in — the technique of splitting one logical table into many smaller physical tables so PostgreSQL can manage them efficiently.
 
-<ExcalidrawDiagram src="/postgresql-partitioning-hero.excalidraw" alt="One logical table, many physical partitions" />
+<ExcalidrawDiagram src="/postgresql-partitioning-hero.excalidraw" alt="One logical table split into many physical partitions" />
 
 This article is a deep dive into how PostgreSQL partitioning works at the mechanism level, the different partitioning strategies, and two real-world use cases you will encounter when operating systems with large data volumes.
 
@@ -38,7 +38,7 @@ This article is about partitioning. Once you've partitioned a table to the limit
 
 ## 2. The Mechanism: How PostgreSQL Organizes a Partitioned Table
 
-<ExcalidrawDiagram src="/postgresql-partitioning-anatomy.excalidraw" alt="Anatomy of a partitioned table — parent metadata + child physical tables" />
+<ExcalidrawDiagram src="/postgresql-partitioning-anatomy.excalidraw" alt="Anatomy of a partitioned table: parent holds metadata, child is an independent physical table" />
 
 When you create a partitioned table, PostgreSQL actually creates two very different kinds of objects:
 
@@ -121,7 +121,7 @@ Safety pattern: whatever you choose, always pre-create **at least 2–3 months o
 
 PostgreSQL supports three partition strategies. Choosing the right one depends on **the nature of the data** and **how you query it**.
 
-<ExcalidrawDiagram src="/postgresql-partitioning-types.excalidraw" alt="Three partitioning strategies — RANGE, LIST, HASH side by side" />
+<ExcalidrawDiagram src="/postgresql-partitioning-types.excalidraw" alt="Three partitioning strategies side by side: RANGE, LIST, and HASH" />
 
 ### 3.1 RANGE
 
@@ -253,7 +253,7 @@ Advice: if you choose HASH, pick the number of partitions carefully upfront — 
 
 This is the "magic" most people are looking forward to when they hear about partitioning. <Tooltip content="The process where the query planner analyzes the WHERE clause and scans only the partitions that could contain matching rows, skipping the rest.">Partition pruning</Tooltip> is the process where the PostgreSQL **query planner** analyzes the `WHERE` clause of a query, compares it against partition bounds, and decides to scan only the partitions that could possibly contain matching rows — skipping the rest entirely.
 
-<ExcalidrawDiagram src="/postgresql-partition-pruning.excalidraw" alt="Partition pruning visualization with EXPLAIN output" />
+<ExcalidrawDiagram src="/postgresql-partition-pruning.excalidraw" alt="Partition pruning scans only partitions matching WHERE, skipping the rest" />
 
 ### A Concrete Example
 
@@ -320,7 +320,7 @@ This is the use case that accounts for **80%** of why people reach for partition
 
 > Your `application_logs` table writes 100GB per month. Retention policy is 12 months. After a year, the table reaches 1.2TB, with 200GB of indexes. Every month you need to delete the oldest logs to free disk. `DELETE FROM application_logs WHERE created_at < NOW() - INTERVAL '12 months'` takes 8 hours, produces ~100GB of **dead tuples** (see [Deep Dive on Table Bloat](/posts/table-bloat) for details), and then `VACUUM` takes another 4 hours to clean up. Throughout those 12 hours, write throughput drops 50% because I/O is saturated.
 
-<ExcalidrawDiagram src="/postgresql-partitioning-time-series-lifecycle.excalidraw" alt="Time-series partition lifecycle — hot, warm, archived" />
+<ExcalidrawDiagram src="/postgresql-partitioning-time-series-lifecycle.excalidraw" alt="Time-series partition lifecycle: hot, warm, then archived over time" />
 
 With monthly RANGE partitioning, the problem disappears:
 

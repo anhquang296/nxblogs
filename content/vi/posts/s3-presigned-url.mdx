@@ -111,7 +111,7 @@ Backend vẫn kiểm soát hoàn toàn:
 
 Nhưng backend **không chạm vào file** — công việc nặng (truyền tải dữ liệu) để S3 lo.
 
-<ExcalidrawDiagram src="/s3-presigned-url-architecture.excalidraw" alt="S3 Presigned URL Architecture" />
+<ExcalidrawDiagram src="/s3-presigned-url-architecture.excalidraw" alt="Backend chỉ ký URL, client upload và download trực tiếp với S3" />
 
 ---
 
@@ -176,7 +176,7 @@ PUT chỉ phù hợp khi source upload là server-side hoặc cần multipart up
 
 ### 5.2. Sequence diagram
 
-<ExcalidrawDiagram src="/s3-presigned-url-upload-flow.excalidraw" alt="Upload Flow via Presigned POST" />
+<ExcalidrawDiagram src="/s3-presigned-url-upload-flow.excalidraw" alt="Luồng upload file qua presigned POST từ client lên S3" />
 
 ### 5.3. Backend: Tạo presigned POST
 
@@ -367,7 +367,7 @@ Presigned GET URL phù hợp vì:
 
 ### 6.2. Sequence diagram
 
-<ExcalidrawDiagram src="/s3-presigned-url-download-flow.excalidraw" alt="Download Flow via Presigned GET" />
+<ExcalidrawDiagram src="/s3-presigned-url-download-flow.excalidraw" alt="Luồng download tài liệu private qua presigned GET URL" />
 
 ### 6.3. Backend: Ký presigned GET URL
 
@@ -502,7 +502,7 @@ S3 bucket policy cho OAC:
 
 ### 7.4. Sequence diagram
 
-<ExcalidrawDiagram src="/s3-presigned-url-cloudfront-cookies.excalidraw" alt="CloudFront Signed Cookies Flow" />
+<ExcalidrawDiagram src="/s3-presigned-url-cloudfront-cookies.excalidraw" alt="Luồng cấp CloudFront signed cookies để hiển thị ảnh qua CDN" />
 
 ### 7.5. Backend: Tạo Signed Cookies
 

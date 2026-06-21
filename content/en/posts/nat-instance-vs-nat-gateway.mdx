@@ -18,7 +18,7 @@ NAT Instance — sounds familiar but you've never set one up. It's also NAT, but
 
 <ExcalidrawDiagram
   src="/nat-instance-vs-nat-gateway-overview.excalidraw"
-  alt="NAT Instance vs NAT Gateway — Side-by-side architecture comparison showing packet flow from private subnet to internet"
+  alt="NAT Instance vs NAT Gateway architecture comparison, packet flowing from private subnet to the internet"
 />
 
 ---
@@ -84,7 +84,7 @@ This is a <Tooltip content="Multi-layer security — independent layers that lim
 
 <ExcalidrawDiagram
   src="/nat-instance-source-dest-check.excalidraw"
-  alt="Source/Destination Check — Packet with mismatched IPs gets dropped when check is enabled, forwarded when disabled"
+  alt="Source/Destination Check enabled drops packets with mismatched IPs, disabled allows forwarding"
 />
 
 But NAT Instance is different — its entire job **is** to forward packets on behalf of others. Look at the packet it receives from an EC2 in a private subnet:

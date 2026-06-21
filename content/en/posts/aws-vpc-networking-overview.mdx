@@ -65,7 +65,7 @@ To see how the pieces above — route table, BGP, route propagation, Security Gr
 
 <ExcalidrawDiagram
   src="/site-to-site-vpn-request-flow.excalidraw"
-  alt="The path of a request over a Site-to-Site VPN: the on-premises server (192.168.1.10) creates a request, the Customer Gateway encrypts it with IPsec, it crosses an encrypted tunnel over the public internet to the Virtual Private Gateway which decrypts it, the VPC route table forwards it into the subnet, and the Security Group (allowing 192.168.1.0/24) passes it to EC2 (10.0.1.20); a dashed return path flows back, showing both directions stay inside the tunnel with no Internet Gateway or public IP"
+  alt="Request flow from on-premises to EC2 over Site-to-Site VPN, both directions inside the encrypted tunnel"
 />
 
 A natural question: the route table can update itself via BGP, so why doesn't the Security Group open itself the same way? Because the Security Group solves a security problem, so it has to be a deliberate human decision. If a Security Group opened automatically for whatever ranges BGP advertised, then anyone who could advertise a network range into the tunnel could "open the door" into your instance — a serious vulnerability. So AWS keeps the two separate: routing can be automatic, but "who is allowed in" is something you must list yourself.
@@ -139,7 +139,7 @@ The "not transitive" rule above is the one most often missed — the diagram bel
 
 <ExcalidrawDiagram
   src="/aws-vpc-peering-not-transitive.excalidraw"
-  alt="VPC Peering is not transitive: VPC A is peered with VPC B and VPC B with VPC C, both connections active, but the path from A to C is blocked because peering is not transitive; to connect A and C you must create a separate, direct A–C peering connection"
+  alt="VPC Peering is not transitive, A peered with B and B peered with C but A cannot reach C"
 />
 
 A few pluses: peering works **cross-region** and **cross-account**; and you can reference the other VPC's Security Group directly in your rules (handy for declaring permissions) — this works across accounts but only within the same region.
@@ -158,7 +158,7 @@ The diagram below shows that hub-and-spoke shape: instead of wiring every pair o
 
 <ExcalidrawDiagram
   src="/transit-gateway-multi-account.excalidraw"
-  alt="Transit Gateway connecting many VPCs across accounts in a hub-and-spoke topology: inside the AWS Cloud, 'your account' holds VPC 1 and VPC 2, and a 'third-party account' holds VPC 3 and VPC 4, each VPC containing instances; all four VPCs attach to a single Transit Gateway at the center, and a route table attached to the Transit Gateway controls routing between the VPCs"
+  alt="Transit Gateway connects many VPCs across accounts in a hub-and-spoke topology"
 />
 
 The core difference from peering: TGW allows **transitive routing**. Everything attached to the hub can reach everything else through the hub, instead of having to be wired up pair by pair.

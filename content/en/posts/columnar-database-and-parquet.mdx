@@ -60,7 +60,7 @@ Take a tiny `orders` table, 3 rows, 4 columns:
 
 <ExcalidrawDiagram
   src="/columnar-database-row-vs-column.excalidraw"
-  alt="Same table laid out two ways — row-oriented stores each full row contiguously, column-oriented stores each column contiguously; SUM(amount) only needs the amount block in the column layout"
+  alt="The same table laid out by row and by column, SUM(amount) only needs to read the amount stripe"
 />
 
 **Row-oriented** lays data out row by row — all the columns of one row sit together, then the next row
@@ -96,7 +96,7 @@ Even before general-purpose compression, columnar uses **lightweight encodings**
 
 <ExcalidrawDiagram
   src="/columnar-database-encoding.excalidraw"
-  alt="Four lightweight column encodings — dictionary encoding maps values to small ids, run-length encoding stores repeated values as (value, count), delta encoding stores differences, bit-packing fits small integers into minimal bits"
+  alt="Four lightweight column encodings: dictionary, run-length, delta and bit-packing"
 />
 
 - **Dictionary encoding** — replace each value with a small integer pointing into a "dictionary" of distinct values. The `country` column has only ~200 distinct values, so instead of storing the string "US" a million times, you store the number `0` a million times. Great for low-cardinality columns (few distinct values).
@@ -161,7 +161,7 @@ Inside, a Parquet file has a tidy hierarchical structure. Understanding it is th
 
 <ExcalidrawDiagram
   src="/columnar-database-parquet-structure.excalidraw"
-  alt="Anatomy of a Parquet file — PAR1 magic numbers bracket the file; row groups hold one column chunk per column; each chunk holds dictionary and data pages; the footer stores schema and per-column-chunk min/max statistics and offsets"
+  alt="Parquet file structure: PAR1 magic, row group, column chunk, page and footer with min/max statistics"
 />
 
 From the outside in:
@@ -199,7 +199,7 @@ Bring this pattern to the cloud and you get an architecture many data teams use 
 
 <ExcalidrawDiagram
   src="/columnar-database-s3-athena.excalidraw"
-  alt="Querying Parquet on S3 with Athena — Parquet files partitioned by date live in S3, Glue Data Catalog holds table schema and partitions, serverless Athena scans only needed columns and partitions billed by bytes scanned, results flow to a BI dashboard"
+  alt="Partitioned Parquet on S3, Glue holds the schema, serverless Athena scans by bytes to a BI dashboard"
 />
 
 The pieces:

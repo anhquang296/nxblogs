@@ -18,7 +18,7 @@ This article dissects 3 core aspects: from the **Javascript engine** to the **ev
 
 <ExcalidrawDiagram
   src="/browser-vs-nodejs-architecture.excalidraw"
-  alt="Browser Runtime vs Node.js Runtime Architecture"
+  alt="Browser and Node.js runtime architectures placed side by side for comparison"
 />
 
 ---
@@ -35,7 +35,7 @@ The **runtime** is everything **surrounding** the engine: the APIs the engine ca
 
 Regardless of the engine — <Tooltip content="Google's Javascript engine, written in C++, powering both Chrome and Node.js">V8</Tooltip>, SpiderMonkey, or JavaScriptCore — they all go through the same pipeline:
 
-<ExcalidrawDiagram src="/browser-vs-nodejs-engine-pipeline.excalidraw" alt="Javascript Engine Compilation Pipeline" />
+<ExcalidrawDiagram src="/browser-vs-nodejs-engine-pipeline.excalidraw" alt="Javascript engine compilation pipeline from source code to machine code" />
 
 1. **Lexer/Tokenizer**: Breaks source code into tokens (keywords, variables, operators)
 2. **Parser**: Builds an <Tooltip content="Abstract Syntax Tree — a tree data structure describing the program's logic">AST</Tooltip>
@@ -81,7 +81,7 @@ Think of the event loop as **a single chef in a kitchen**. The chef can only cho
 
 ### 2.1 Browser Event Loop
 
-<ExcalidrawDiagram src="/browser-event-loop.excalidraw" alt="Browser Event Loop Architecture" />
+<ExcalidrawDiagram src="/browser-event-loop.excalidraw" alt="Browser event loop architecture through macrotask, microtask and render" />
 
 Each browser tab has its own event loop. Each iteration:
 
@@ -95,7 +95,7 @@ Each browser tab has its own event loop. Each iteration:
 
 ### 2.2 Node.js Event Loop (libuv)
 
-<ExcalidrawDiagram src="/nodejs-event-loop.excalidraw" alt="Node.js Event Loop Architecture (libuv)" />
+<ExcalidrawDiagram src="/nodejs-event-loop.excalidraw" alt="Node.js event loop with the six libuv phases running sequentially" />
 
 Node.js uses a C library called <Tooltip content="Cross-platform C library providing async I/O, event loop, and thread pool — the runtime backbone of Node.js">libuv</Tooltip> to manage the event loop. Instead of a simple loop, libuv divides it into **6 phases** running sequentially:
 

@@ -66,7 +66,7 @@ Aurora cung cấp 2 loại endpoint mặc định:
 - **Writer Endpoint**: luôn trỏ đến primary instance hiện tại. Dù primary thay đổi sau failover, endpoint DNS không đổi.
 - **Reader Endpoint**: load-balance tự động giữa tất cả read replicas. Application chỉ cần connect đến 1 DNS duy nhất.
 
-<ExcalidrawDiagram src="/aurora-cluster-endpoints.excalidraw" alt="Aurora Cluster Endpoints" />
+<ExcalidrawDiagram src="/aurora-cluster-endpoints.excalidraw" alt="Writer endpoint trỏ vào primary, reader endpoint load-balance giữa các replica" />
 
 ---
 
@@ -83,7 +83,7 @@ Bạn chỉ cần định nghĩa scaling policy (ví dụ: target CPU 60%, min 1
 2. Tự động đăng ký replicas mới vào **Reader Endpoint**
 3. Tự bớt replicas khi load giảm
 
-<ExcalidrawDiagram src="/aurora-auto-scale.excalidraw" alt="Aurora Replicas Auto Scaling" />
+<ExcalidrawDiagram src="/aurora-auto-scale.excalidraw" alt="Auto scaling thêm replica khi CPU cao, tất cả dùng chung shared storage" />
 
 Nhìn vào diagram: Client gửi write traffic qua **Writer Endpoint** đến primary instance. Read traffic đi qua **Reader Endpoint**, được phân phối đến các replicas. Khi CPU tăng cao, Aurora tự động mở rộng thêm replicas (phần "Endpoint Extended") — tất cả vẫn dùng chung **Shared Storage Volume**.
 
@@ -95,7 +95,7 @@ Trong thực tế, không phải mọi read query đều giống nhau. Một câ
 
 **Custom Endpoints** cho phép bạn gom một **nhóm con** các replicas lại thành một endpoint riêng, phục vụ cho workload cụ thể.
 
-<ExcalidrawDiagram src="/aurora-custom-endpoint.excalidraw" alt="Aurora Custom Endpoints" />
+<ExcalidrawDiagram src="/aurora-custom-endpoint.excalidraw" alt="Custom endpoint gom nhóm replica mạnh riêng cho heavy queries" />
 
 Diagram cho thấy: Writer Endpoint trỏ đến primary, Reader Endpoint trỏ đến các instance `db.r3.large` cho general reads, và **Custom Endpoint** trỏ đến các instance `db.r5.2xlarge` — dành riêng cho heavy queries như dashboard, reports.
 

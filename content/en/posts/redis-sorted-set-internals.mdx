@@ -27,7 +27,7 @@ If you've read the [Rate Limiting Patterns](/posts/rate-limiting-patterns) artic
 
 Redis **automatically maintains order** by score (ascending). If two members have the same score, they are sorted by <Tooltip content="String comparison character-by-character (or byte-by-byte) from left to right, like sorting words in a dictionary">lexicographic</Tooltip> order of the member name.
 
-<ExcalidrawDiagram src="/sorted-set-overview.excalidraw" alt="Sorted Set Overview" />
+<ExcalidrawDiagram src="/sorted-set-overview.excalidraw" alt="Sorted Set stores member-score pairs, auto-sorted by ascending score" />
 
 ### Key commands and their complexity
 
@@ -64,7 +64,7 @@ Think of a hash table like a **phone book**: you know the name of the person you
 
 In a Sorted Set, the hash table handles one very specific task: **mapping `member → score`**.
 
-<ExcalidrawDiagram src="/sorted-set-hash-table.excalidraw" alt="Hash Table in Sorted Set" />
+<ExcalidrawDiagram src="/sorted-set-hash-table.excalidraw" alt="Hash table maps member to score for O(1) lookup" />
 
 Thanks to the hash table, three operations become extremely fast:
 
@@ -109,13 +109,13 @@ Imagine a **subway system** with multiple lines:
 
 Want to reach station X? Start from the highest line, travel as fast as possible. When you've gone too far → drop down to a lower line, slow down. Repeat until you find the right station.
 
-![Skip List Multi-level Structure](/sorted-set-skiplist.svg)
+![Multi-level skip list, top levels skip many nodes like express trains](/sorted-set-skiplist.svg)
 
 Each node has a **random "height"**: when inserting a new node, Redis "flips a coin" — each time it lands tails (50% probability), it adds another level. Maximum 32 levels. The average result: each node has **~2 forward pointers**.
 
 ### 3.3. Example: finding score = 2100
 
-![Skip List Search Walkthrough](/sorted-set-skiplist-search.svg)
+![Finding score 2100 on a skip list, top to bottom in 5 steps](/sorted-set-skiplist-search.svg)
 
 Only 5 steps instead of sequentially scanning 4 nodes. With 1 million elements, a skip list needs on average ~20 steps (log2 1,000,000 ≈ 20) — compared to 1 million steps with sequential scanning.
 
@@ -146,7 +146,7 @@ Standard skip lists (from textbooks) don't support efficient rank queries. To fi
 
 Redis solves this by adding a **`span`** field to each forward pointer. `span` records the **number of nodes skipped** by that pointer. During search, accumulate `span` along the path → get the rank in O(log N).
 
-![Span field for ZRANK](/sorted-set-span.svg)
+![Span field records nodes skipped, accumulated to compute ZRANK in O(log N)](/sorted-set-span.svg)
 
 ### 3.6. Why did Redis choose skip list over Red-Black Tree?
 
@@ -166,7 +166,7 @@ Redis **doesn't always use** skiplist+hashtable for Sorted Set. When data is sma
 
 **Listpack** is a contiguous memory block, storing member-score pairs **sequentially side by side**:
 
-<ExcalidrawDiagram src="/sorted-set-listpack.excalidraw" alt="Listpack memory layout" />
+<ExcalidrawDiagram src="/sorted-set-listpack.excalidraw" alt="Listpack stores adjacent member-score pairs in a contiguous memory block" />
 
 Characteristics:
 - **No pointers**: all data sits contiguously in RAM → **CPU cache-friendly** — when the CPU loads one element, adjacent elements are already in the cache line.
@@ -203,7 +203,7 @@ Listpack saves **3-5x memory** compared to skiplist+hashtable. This is why Redis
 
 ### 4.4. Overview of both modes
 
-<ExcalidrawDiagram src="/sorted-set-encoding-decision.excalidraw" alt="Encoding decision flowchart" />
+<ExcalidrawDiagram src="/sorted-set-encoding-decision.excalidraw" alt="Flowchart choosing listpack or skiplist+hashtable encoding by two thresholds" />
 
 ---
 
@@ -211,7 +211,7 @@ Listpack saves **3-5x memory** compared to skiplist+hashtable. This is why Redis
 
 The power of Sorted Set comes from **combining two data structures that compensate for each other's weaknesses**:
 
-<ExcalidrawDiagram src="/sorted-set-dual-structure.excalidraw" alt="Dual structure routing table" />
+<ExcalidrawDiagram src="/sorted-set-dual-structure.excalidraw" alt="Hash table and skip list cooperate, each command routed to the right structure" />
 
 - **Hash table alone** gives O(1) lookup but doesn't know ordering → can't do range queries or rank.
 - **Skip list alone** gives O(log N) sorted operations but lookup has to be O(log N) instead of O(1).

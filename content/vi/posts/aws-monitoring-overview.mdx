@@ -86,7 +86,7 @@ Mặc định, muốn lấy metric ra khỏi CloudWatch bạn phải kéo (pull)
 
 <ExcalidrawDiagram
   src="/aws-monitoring-metric-streams.excalidraw"
-  alt="CloudWatch Metric Streams flow — CloudWatch Metrics streamed near-real-time through Kinesis Data Firehose to Amazon S3, Redshift, and OpenSearch; S3 queried by Athena"
+  alt="Metric Streams đẩy metric qua Kinesis Data Firehose tới S3, Redshift, OpenSearch"
 />
 
 Đích nhận phổ biến:
@@ -126,7 +126,7 @@ Một pattern kinh điển hay ra đề là gom log tập trung từ nhiều acc
 
 <ExcalidrawDiagram
   src="/aws-monitoring-centralized-logging.excalidraw"
-  alt="Centralized logging pattern — CloudWatch Logs in multiple accounts and regions, each with a Subscription Filter, converging into a central Kinesis Data Streams, then Firehose into an S3 data lake"
+  alt="Gom log đa account qua Subscription Filter về Kinesis Data Streams rồi đổ vào S3 data lake"
 />
 
 ### 2.4. CloudWatch Agent — cánh tay nối dài vào EC2
@@ -230,7 +230,7 @@ Muốn nhiều hơn thế, bạn tạo một **Trail**:
 
 <ExcalidrawDiagram
   src="/aws-monitoring-cloudtrail-events.excalidraw"
-  alt="CloudTrail event types — Management, Data, and Insights events flow into CloudTrail (90-day history), then to an S3 bucket for long-term retention, queried with Athena"
+  alt="Ba loại event Management, Data, Insights vào CloudTrail rồi lưu dài hạn xuống S3"
 />
 
 CloudTrail phân biệt ba loại sự kiện — đây là chỗ hay gài bẫy:
@@ -252,7 +252,7 @@ Mấu chốt là CloudTrail ghi lại **MỌI** lời gọi API, nên bất kỳ
 
 <ExcalidrawDiagram
   src="/aws-monitoring-cloudtrail-eventbridge.excalidraw"
-  alt="CloudTrail + EventBridge pattern — a user's DeleteTable call on DynamoDB and AuthorizeSecurityGroupIngress call on a Security Group are both logged by CloudTrail, which emits an event to EventBridge, which alerts via SNS"
+  alt="CloudTrail bắt API call nhạy cảm rồi đẩy event sang EventBridge để cảnh báo qua SNS"
 />
 
 **Use case:** điều tra "ai xoá bucket", "ai sửa security group", truy vết bảo mật, đáp ứng yêu cầu compliance/audit, lưu trữ lịch sử hoạt động dài hạn.

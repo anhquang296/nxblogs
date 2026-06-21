@@ -188,7 +188,7 @@ This is one of the most subtle spots, and it shows up very often on the SAA exam
 
 <ExcalidrawDiagram
   src="/aws-iam-cross-account-s3-access.excalidraw"
-  alt="Two ways a user in Account A can write to an S3 bucket in Account B: Method 1 — assume a cross-account IAM Role in Account B (giving up its own permissions) then write to S3; Method 2 — write directly, authorized by the S3 bucket policy (keeping its own permissions)"
+  alt="Two ways a user in Account A writes to an S3 bucket in Account B: assume a cross-account role or via the bucket policy"
 />
 
 ### 4.1. Identity-based vs resource-based policy
@@ -239,7 +239,7 @@ For a request in an Organizations environment, AWS checks in a fixed order — a
 
 <ExcalidrawDiagram
   src="/aws-iam-policy-evaluation-logic.excalidraw"
-  alt="IAM policy evaluation logic flowchart: the decision starts at Deny, then passes through six stages in order — explicit Deny, Organizations SCPs, resource-based policies, identity-based policies, permissions boundaries, and session policies; each stage must allow, an explicit Deny rejects immediately, ending in a final Allow or Deny"
+  alt="IAM policy evaluation passes through six stages in order, where a single explicit Deny rejects immediately"
 />
 
 Picture it as passing several security gates: every gate must let you through (the intersection of the conditions), and any gate showing a "blocked" sign (explicit Deny) ends the journey.
@@ -277,7 +277,7 @@ Here's a concrete example: you assign the FullAccess permission set to the Devel
 
 <ExcalidrawDiagram
   src="/aws-iam-identity-center.excalidraw"
-  alt="IAM Identity Center diagram: inside an AWS Organization there is a management account, an OU (Development) with Dev Accounts A and B, and an OU (Production) with Prod Accounts A and B; IAM Identity Center lives in the management account and holds a Developers group (Bob, Alice) plus ReadOnlyAccess and FullAccess permission sets; the Developers group is assigned the FullAccess permission set, which provisions a full-access IAM role into Dev Account B"
+  alt="Developers group is assigned the FullAccess permission set, provisioning a full-access IAM role into Dev Account B"
 />
 
 > If one permission set is assigned to the Developers group, only one IAM role is created, and all the developers assume that same role.

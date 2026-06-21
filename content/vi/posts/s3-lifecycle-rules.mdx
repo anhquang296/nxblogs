@@ -33,7 +33,7 @@ Các ràng buộc quan trọng:
 - Mỗi transition phải tuân thủ **minimum storage duration** của class đích (ví dụ: không thể transition sang Standard-IA trước 30 ngày)
 - Transitions xảy ra trong vòng **24 giờ** kể từ ngày chỉ định — không phải ngay lúc nửa đêm
 
-<ExcalidrawDiagram src="/s3-storage-class-transitions.excalidraw" alt="S3 Storage Class Transition Rules" />
+<ExcalidrawDiagram src="/s3-storage-class-transitions.excalidraw" alt="Object chỉ transition một chiều xuống các storage class rẻ hơn" />
 
 > Nếu bạn cần objects tự động di chuyển **hai chiều** (xuống khi không truy cập, lên lại khi được truy cập), hãy dùng <Tooltip content="Storage class tự động di chuyển objects giữa các tier dựa trên access pattern, không cần lifecycle rules">Intelligent-Tiering</Tooltip> thay vì lifecycle rules. Lifecycle rules phù hợp nhất khi access pattern có thể dự đoán và giảm dần theo thời gian.
 
@@ -54,7 +54,7 @@ Store owners truy cập dashboard chạy bằng **AWS Athena** để query proce
 - Dữ liệu từ **6–24 tháng trước** có thể chấp nhận latency cao hơn để tối ưu chi phí (so sánh monthly, phân tích year-over-year)
 - Dữ liệu **quá 2 năm** không còn queryable từ dashboard, nhưng vẫn giữ lại cho compliance và audit
 
-<ExcalidrawDiagram src="/s3-lifecycle-pipeline.excalidraw" alt="Shopify Analytics Pipeline — Data Flow & Lifecycle" />
+<ExcalidrawDiagram src="/s3-lifecycle-pipeline.excalidraw" alt="Pipeline analytics từ Kinesis qua Glue đến Athena với lifecycle theo từng loại dữ liệu" />
 
 Pipeline tạo ra 3 loại dữ liệu trên S3, mỗi loại có lifecycle khác nhau:
 

@@ -82,7 +82,7 @@ By default, getting metrics out of CloudWatch means pulling them via the API. **
 
 <ExcalidrawDiagram
   src="/aws-monitoring-metric-streams.excalidraw"
-  alt="CloudWatch Metric Streams flow — CloudWatch Metrics streamed near-real-time through Kinesis Data Firehose to Amazon S3, Redshift, and OpenSearch; S3 queried by Athena"
+  alt="Metric Streams push metrics through Kinesis Data Firehose to S3, Redshift, OpenSearch"
 />
 
 Common destinations:
@@ -122,7 +122,7 @@ A classic exam pattern is centralizing logs from many accounts/regions into a si
 
 <ExcalidrawDiagram
   src="/aws-monitoring-centralized-logging.excalidraw"
-  alt="Centralized logging pattern — CloudWatch Logs in multiple accounts and regions, each with a Subscription Filter, converging into a central Kinesis Data Streams, then Firehose into an S3 data lake"
+  alt="Centralize multi-account logs via Subscription Filter into Kinesis Data Streams then S3 data lake"
 />
 
 ### 2.4. CloudWatch Agent — the extended arm into EC2
@@ -226,7 +226,7 @@ For more than that, you create a **Trail**:
 
 <ExcalidrawDiagram
   src="/aws-monitoring-cloudtrail-events.excalidraw"
-  alt="CloudTrail event types — Management, Data, and Insights events flow into CloudTrail (90-day history), then to an S3 bucket for long-term retention, queried with Athena"
+  alt="Three event types Management, Data, Insights enter CloudTrail then stored long-term in S3"
 />
 
 CloudTrail distinguishes three types of events — this is a favorite trap:
@@ -248,7 +248,7 @@ The key point is that CloudTrail records **EVERY** API call, so any sensitive ac
 
 <ExcalidrawDiagram
   src="/aws-monitoring-cloudtrail-eventbridge.excalidraw"
-  alt="CloudTrail + EventBridge pattern — a user's DeleteTable call on DynamoDB and AuthorizeSecurityGroupIngress call on a Security Group are both logged by CloudTrail, which emits an event to EventBridge, which alerts via SNS"
+  alt="CloudTrail catches a sensitive API call then pushes an event to EventBridge to alert via SNS"
 />
 
 **Use case:** investigating "who deleted the bucket," "who modified the security group," security forensics, meeting compliance/audit requirements, storing long-term activity history.

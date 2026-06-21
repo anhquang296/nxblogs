@@ -32,7 +32,7 @@ Hãy hình dung bạn viết một lá thư, xé nó thành **4 mảnh**, rồi 
 
 Cấu hình này gọi là **4+2** (4 data + 2 parity), và đây là một trong những cấu hình phổ biến nhất trong thực tế.
 
-<ExcalidrawDiagram src="/erasure-coding-overview.excalidraw" alt="Erasure Coding Overview" />
+<ExcalidrawDiagram src="/erasure-coding-overview.excalidraw" alt="Cấu hình 4+2 chia dữ liệu thành 4 data shard và 2 parity shard" />
 
 So sánh nhanh với replication:
 
@@ -122,7 +122,7 @@ Bạn tính parity bằng cách cộng tất cả lại:
 
 Bây giờ bạn lưu 5 giá trị này (d1, d2, d3, d4, p) lên 5 server khác nhau.
 
-<ExcalidrawDiagram src="/erasure-coding-simple-parity.excalidraw" alt="Simple Parity" />
+<ExcalidrawDiagram src="/erasure-coding-simple-parity.excalidraw" alt="Parity bằng phép cộng 4 data shard, lưu trên 5 server" />
 
 **Khi d3 bị mất** (server chứa d3 chết), bạn khôi phục bằng phép trừ:
 
@@ -159,7 +159,7 @@ Reed-Solomon áp dụng tính chất này như sau:
 
 4. Khi mất bất kỳ m giá trị nào, vẫn còn **k giá trị** — đủ để **xác định duy nhất** đa thức bậc k-1 → khôi phục toàn bộ hệ số → khôi phục dữ liệu gốc.
 
-<ExcalidrawDiagram src="/erasure-coding-reed-solomon.excalidraw" alt="Reed-Solomon Polynomial" />
+<ExcalidrawDiagram src="/erasure-coding-reed-solomon.excalidraw" alt="Reed-Solomon coi data shard là hệ số đa thức, evaluate tại k+m điểm" />
 
 Đây chính là sức mạnh của Reed-Solomon: nó **đảm bảo về mặt toán học** rằng bất kỳ k trong k+m phần đều đủ để khôi phục, không phụ thuộc vào tổ hợp cụ thể nào bị mất.
 
@@ -181,7 +181,7 @@ Ma trận encoding có cấu trúc đặc biệt:
 - **k hàng đầu** là <Tooltip content="Identity matrix — ma trận có 1 trên đường chéo, 0 ở phần còn lại.">ma trận đơn vị</Tooltip>. Điều này đảm bảo k phần tử đầu của output chính là dữ liệu gốc (không bị biến đổi).
 - **m hàng cuối** là các hệ số tính parity, thường được xây dựng từ <Tooltip content="Vandermonde matrix — ma trận mà mỗi hàng là luỹ thừa của một giá trị khác nhau.">ma trận Vandermonde</Tooltip>.
 
-<ExcalidrawDiagram src="/erasure-coding-encoding-matrix.excalidraw" alt="Encoding Matrix" />
+<ExcalidrawDiagram src="/erasure-coding-encoding-matrix.excalidraw" alt="Encoding matrix với ma trận đơn vị ở trên và hệ số parity ở dưới" />
 
 Ví dụ với cấu hình 4+2:
 
@@ -229,7 +229,7 @@ Khi có shard bị mất (disk chết, server sập), quá trình khôi phục d
 
 Kết quả: khôi phục được **d2** (và toàn bộ dữ liệu gốc).
 
-<ExcalidrawDiagram src="/erasure-coding-decoding.excalidraw" alt="Decoding Process" />
+<ExcalidrawDiagram src="/erasure-coding-decoding.excalidraw" alt="Decoding bằng cách đảo ngược submatrix từ k shard còn sống" />
 
 Về mặt tính toán: đảo ngược ma trận k×k có complexity **O(k³)**, nhưng k trong thực tế thường nhỏ (4-20), nên chi phí này chấp nhận được.
 
@@ -257,7 +257,7 @@ Các hệ thống storage lớn sử dụng erasure coding với nhiều cấu h
 | Độ phức tạp triển khai | Đơn giản | Phức tạp |
 | Phù hợp nhất cho | Hot data, cần latency thấp | Cold/warm data, cần tối ưu chi phí |
 
-<ExcalidrawDiagram src="/erasure-coding-replication-vs-ec.excalidraw" alt="Replication vs Erasure Coding" />
+<ExcalidrawDiagram src="/erasure-coding-replication-vs-ec.excalidraw" alt="So sánh storage overhead giữa replication và erasure coding" />
 
 Tóm lại: replication thắng ở **tốc độ và đơn giản**, erasure coding thắng ở **chi phí và durability**. Đây là lý do hầu hết hệ thống thực tế dùng **cả hai**: replication cho hot data (dữ liệu truy cập thường xuyên), erasure coding cho cold/warm data (dữ liệu ít truy cập).
 

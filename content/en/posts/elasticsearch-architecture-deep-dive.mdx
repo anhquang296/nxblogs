@@ -24,7 +24,7 @@ This post drills into those questions. We'll peel back Elasticsearch from the to
 
 <ExcalidrawDiagram
   src="/elasticsearch-cluster-overview.excalidraw"
-  alt="Elasticsearch Cluster Architecture — Master/Data/Ingest/Coordinating Nodes, Index, Primary and Replica Shards"
+  alt="Cluster overview with master, data, ingest, coordinating nodes plus primary and replica shards"
 />
 
 > This post focuses **100% on distributed architecture**. Topics like Lucene segment internals, the inverted index, query DSL, scoring (TF-IDF, BM25), and aggregations are covered in later posts in the series.
@@ -196,7 +196,7 @@ With `3 primary + 1 replica` and 3 data nodes, the cluster distributes them foll
 
 <ExcalidrawDiagram
   src="/elasticsearch-shard-replica-distribution.excalidraw"
-  alt="Shard and Replica Distribution — 3 primaries + 3 replicas across 3 data nodes, with primary and replica never on the same node"
+  alt="3 primaries and 3 replicas across 3 data nodes, primary and replica never on the same node"
 />
 
 This rule is **the foundation of high availability**. When Node 1 dies, P0 (the primary of shard 0) dies with it. But R0 still exists on Node 2. The master detects that Node 1 is gone, **promotes R0 to the new primary**, and then picks the remaining Node 3 to host a new replica of shard 0. The cluster keeps working, and users never notice the incident.
@@ -220,7 +220,7 @@ By default `_routing = _id`. So `hash(_id) % number_of_shards` picks the shard. 
 
 <ExcalidrawDiagram
   src="/elasticsearch-document-routing.excalidraw"
-  alt="Document Routing — _id hash mod number of shards determines which shard receives the document"
+  alt="The _id hash modulo the shard count decides which shard a document lands on"
 />
 
 #### Why `number_of_primary_shards` is IMMUTABLE after index creation
@@ -291,7 +291,7 @@ The allocation decision **isn't random** — it's the result of a chain of **dec
 
 <ExcalidrawDiagram
   src="/elasticsearch-shard-allocation-deciders.excalidraw"
-  alt="Allocation Deciders — a pipeline of decision filters: SameShard, DiskThreshold, Awareness, Filter, ShardsLimit"
+  alt="Allocation decider pipeline runs in sequence, a single NO blocks a shard's placement"
 />
 
 ### 3.2. The Important Allocation Deciders
@@ -477,7 +477,7 @@ Allocation is the necessary condition — without it, the shard doesn't exist. R
 
 <ExcalidrawDiagram
   src="/elasticsearch-rebalancing.excalidraw"
-  alt="Shard Rebalancing — before a new node joins (3 nodes, 12 shards) and after rebalance (4 nodes, 12 shards evenly distributed)"
+  alt="A new node joining makes the cluster rebalance 12 shards evenly across 4 nodes instead of 3"
 />
 
 ### 4.3. The Cluster Balances via a "Weight Function"
@@ -697,7 +697,7 @@ A typical master election in a healthy cluster completes in **under a second**. 
 
 <ExcalidrawDiagram
   src="/elasticsearch-master-election.excalidraw"
-  alt="Master Election with a 5-node voting configuration — quorum = 3, one node is elected as master"
+  alt="Master election on a 5-node voting configuration, reaching quorum 3 to elect a new master"
 />
 
 ### 5.6. Cluster State Publication — 2-Phase Commit
@@ -731,7 +731,7 @@ Suddenly the network between the zones goes down. Without **quorum protection**:
 
 <ExcalidrawDiagram
   src="/elasticsearch-split-brain-prevention.excalidraw"
-  alt="Split-Brain Prevention — partition A has 3 nodes (the majority, with quorum) and can elect a master; partition B has only 2 nodes (the minority), can't reach quorum, and can't elect a master"
+  alt="Only a partition with quorum can elect a master, the minority half is blocked to avoid split-brain"
 />
 
 **Quorum-based voting** solves this:

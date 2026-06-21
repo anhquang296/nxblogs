@@ -47,7 +47,7 @@ Characteristics:
 
 ### Asynchronous — "Go ahead, I'll catch up on my own"
 
-<ExcalidrawDiagram src="/rds-async-replication.excalidraw" alt="Asynchronous Replication" />
+<ExcalidrawDiagram src="/rds-async-replication.excalidraw" alt="Asynchronous replication: the primary returns OK immediately, without waiting for the replica to confirm" />
 
 Characteristics:
 
@@ -81,7 +81,7 @@ When you enable Multi-AZ, AWS creates:
 - **1 Primary instance** in AZ-A — serves all read/write traffic.
 - **1 Standby instance** in AZ-B — a <Tooltip content="primary waits for the standby to confirm the write before returning OK to the client">synchronous replication</Tooltip> copy of the primary.
 
-<ExcalidrawDiagram src="/rds-multi-az-sync.excalidraw" alt="Multi-AZ Synchronous Replication" />
+<ExcalidrawDiagram src="/rds-multi-az-sync.excalidraw" alt="Multi-AZ with a primary in AZ-A replicating synchronously to a standby in AZ-B" />
 
 The "special" point that's often misunderstood:
 
@@ -97,7 +97,7 @@ The "special" point that's often misunderstood:
 
 This is a point that's **very often overlooked** when discussing Multi-AZ. Because replication is **synchronous**, every `INSERT/UPDATE/DELETE` statement needs an extra round-trip to another AZ before the primary returns "OK" to the app.
 
-<ExcalidrawDiagram src="/rds-write-latency.excalidraw" alt="Write Latency: Single AZ vs Multi-AZ" />
+<ExcalidrawDiagram src="/rds-write-latency.excalidraw" alt="Write latency of Single-AZ versus Multi-AZ across the synchronous round-trip to the standby" />
 
 Specifically:
 

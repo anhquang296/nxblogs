@@ -52,7 +52,7 @@ Cache Miss (hot key)
               -> All services depending on DB fail
 ```
 
-<ExcalidrawDiagram src="/cache-stampede-anatomy.excalidraw" alt="Cache Stampede Anatomy" />
+<ExcalidrawDiagram src="/cache-stampede-anatomy.excalidraw" alt="The domino effect from a cache miss to a cascading database failure" />
 
 ---
 
@@ -64,7 +64,7 @@ This is the **strongest and most common** solution — especially effective for 
 
 When multiple requests ask for the same key that is currently missing, instead of all of them querying the DB, the system **allows only ONE request** to go through. The remaining requests **wait** until the first one completes, then share the result.
 
-<ExcalidrawDiagram src="/cache-stampede-coalescing.excalidraw" alt="Request Coalescing Flow" />
+<ExcalidrawDiagram src="/cache-stampede-coalescing.excalidraw" alt="Only one request hits the database, the rest wait and share the result" />
 
 ### Implementation with Node.js + TypeScript
 
@@ -276,7 +276,7 @@ Where:
 - `beta` (beta): Adjustment factor, default = 1. Increasing beta -> refreshes earlier
 - `random()`: Random number (0, 1]
 
-<ExcalidrawDiagram src="/cache-stampede-xfetch.excalidraw" alt="XFetch Probability Curve" />
+<ExcalidrawDiagram src="/cache-stampede-xfetch.excalidraw" alt="Early refresh probability rises as expiry approaches" />
 
 ### Implementation
 

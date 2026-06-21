@@ -53,7 +53,7 @@ Whichever type you use, the logical architecture revolves around three pieces: t
 
 <ExcalidrawDiagram
   src="/aws-elastic-load-balancer-anatomy.excalidraw"
-  alt="Anatomy of a load balancer: a client request enters the Load Balancer through a Listener (port 443/HTTPS); the Listener holds Listener Rules that decide routing — if the path is /api go to Target Group A (containers), if the host is img go to Target Group B (Lambda), otherwise the default goes to Target Group C (EC2 instances); each Target Group has a health check. Note: ALB terminates the connection and adds X-Forwarded-For/Proto/Port headers so the backend still sees the original client; this skeleton applies to every ELB type, only the listener intelligence differs"
+  alt="Anatomy of a load balancer: listener, listener rule, target group and health check"
 />
 
 ### 2.1. Listener and Rule
@@ -210,7 +210,7 @@ When reading an SAA question, follow the decision tree: start from the clearest 
 
 <ExcalidrawDiagram
   src="/aws-elastic-load-balancer-decision-tree.excalidraw"
-  alt="Decision tree for choosing a load balancer for the SAA exam: if it is HTTP/HTTPS and you need routing by path/host/header, WAF, or Cognito, choose ALB (Layer 7); if not, ask whether you need to insert a fleet of third-party firewall/IDS appliances to inspect traffic inline — if yes, choose GWLB (GENEVE 6081, transparent); if not, ask whether you need TCP/UDP, a static IP, extreme performance, or PrivateLink — if yes, choose NLB (Layer 4); if none apply and it is only a legacy/EC2-Classic system, only then CLB, and you should migrate"
+  alt="Decision tree for choosing between ALB, GWLB, NLB and CLB for the SAA exam"
 />
 
 The table below collects the **keywords** that often appear in questions and the load balancer type they point to:

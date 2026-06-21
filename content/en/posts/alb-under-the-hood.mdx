@@ -217,7 +217,7 @@ In other words: load distribution between nodes is only "even" when you have **t
 
 When a request passes through ALB, there are **2 independent decisions**:
 
-<ExcalidrawDiagram src="/alb-two-decision-layers.excalidraw" alt="ALB: Two Decision Layers" />
+<ExcalidrawDiagram src="/alb-two-decision-layers.excalidraw" alt="Two separate decision layers: node selection at the DNS layer and target selection at the target group" />
 
 Layer 1 (choosing a node) is **decided by AWS** — you can't configure anything beyond choosing the region and AZs. Layer 2 (choosing a target) is **under your control** via target group settings, which is what the next section covers in detail.
 
@@ -237,7 +237,7 @@ This is the **default** algorithm for ALB and the easiest to understand.
 
 Targets are arranged in a circle. The first request goes to target #1, the next to #2, then #3... After completing the circle, it loops back to #1.
 
-<ExcalidrawDiagram src="/alb-round-robin.excalidraw" alt="Round Robin" />
+<ExcalidrawDiagram src="/alb-round-robin.excalidraw" alt="Round robin rotates through each target in the target group in turn" />
 
 **Advantages:**
 
@@ -258,7 +258,7 @@ This algorithm is smarter: ALB **counts the number of in-flight requests** (sent
 
 **How it works:**
 
-<ExcalidrawDiagram src="/alb-lor.excalidraw" alt="Least Outstanding Requests (LOR)" />
+<ExcalidrawDiagram src="/alb-lor.excalidraw" alt="LOR sends each request to the target with the fewest in-flight requests" />
 
 ALB maintains a counter for each target: incremented when a request is sent, decremented when a response is received.
 
@@ -294,7 +294,7 @@ This is the truly interesting part. ALB continuously **monitors targets** and de
 
 When an anomaly is detected, ALB **automatically reduces the target's weight** (sends less traffic) **without waiting for the health check to fail**. This is a form of **automatic circuit breaker** at the load balancer level.
 
-<ExcalidrawDiagram src="/alb-weighted-random.excalidraw" alt="Weighted Random + Anomaly Mitigation" />
+<ExcalidrawDiagram src="/alb-weighted-random.excalidraw" alt="Weighted random auto-reduces the weight of a target behaving abnormally" />
 
 **Advantages:**
 

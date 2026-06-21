@@ -18,7 +18,7 @@ This post will explain what NACL is, how it differs from Security Groups, and a 
 
 <ExcalidrawDiagram
   src="/nacl-overview.excalidraw"
-  alt="Network ACL vs Security Group — Two layers of network defense: NACL at subnet level (stateless, allow + deny) and Security Group at instance level (stateful, allow only)"
+  alt="Two layers of defense, stateless NACL at subnet level and stateful Security Group at instance level"
 />
 
 ---
@@ -115,7 +115,7 @@ This is the part that many AWS beginners overlook, but it is critical when confi
 
 <ExcalidrawDiagram
   src="/nacl-ephemeral-ports.excalidraw"
-  alt="Ephemeral Ports — Client sends request from ephemeral port 50105 to server port 443, server responds back to port 50105"
+  alt="Client sends request from ephemeral port 50105 to server port 443, server responds to port 50105"
 />
 
 When two devices communicate over a network, they need to use **ports**. For example, when you access an HTTPS website, your browser connects to **port 443** (a defined port) on the web server. But the browser also needs a port on the client side to **receive the response** — this port is randomly chosen by the operating system from a temporary range called <Tooltip content="Short-lived ports assigned by the OS to the client side of a connection to receive responses">Ephemeral Ports</Tooltip>.

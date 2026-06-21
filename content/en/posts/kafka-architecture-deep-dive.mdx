@@ -20,7 +20,7 @@ This post will dive deep into Kafka's internal architecture — from how data is
 
 <ExcalidrawDiagram
   src="/kafka-architecture-overview.excalidraw"
-  alt="Kafka Architecture Overview — Producers, Brokers, Partitions, Consumer Groups, KRaft"
+  alt="Kafka architecture overview from producer through broker to consumer group"
 />
 
 ---
@@ -54,7 +54,7 @@ Kafka takes the completely opposite approach: the **consumer decides**. The Kafk
 
 Before diving into each component, let's look at the big picture of how data flows through Kafka:
 
-<ExcalidrawDiagram src="/kafka-data-flow-overview.excalidraw" alt="Kafka Data Flow Overview" />
+<ExcalidrawDiagram src="/kafka-data-flow-overview.excalidraw" alt="Data flow in Kafka through topic, partition and consumer group" />
 
 Four core concepts to understand:
 
@@ -145,7 +145,7 @@ Each segment consists of three files:
 | `.index`     | Maps **offset to byte position** in the `.log` file | Sparse index — doesn't store every offset, only saves an entry every N offsets. When looking for offset X, Kafka binary searches the `.index` to find the nearest entry, then scans forward in the `.log`. |
 | `.timeindex` | Maps **timestamp to offset**                        | Allows consumers to find messages by time instead of offset. For example: "read from 2:00 PM today" translates to finding the corresponding offset, then reading from there.                               |
 
-<ExcalidrawDiagram src="/kafka-broker-storage.excalidraw" alt="Kafka Broker Storage Structure" />
+<ExcalidrawDiagram src="/kafka-broker-storage.excalidraw" alt="Broker storage structure with segments and log, index, timeindex files" />
 
 This design provides two major benefits:
 
@@ -205,7 +205,7 @@ In the original architecture, Kafka used <Tooltip content="An external distribut
 
 The problem was that ZooKeeper is a **completely separate system** that you had to deploy, monitor, and maintain alongside the Kafka cluster. A ZooKeeper ensemble typically requires 3-5 dedicated nodes, with a completely different architecture and operational model from Kafka. Operations teams had to understand two systems instead of one. Additionally, ZooKeeper became a **bottleneck** as clusters grew — metadata updates had to go through ZooKeeper, and ZooKeeper wasn't designed for the metadata volume of clusters with thousands of partitions.
 
-<ExcalidrawDiagram src="/kafka-zookeeper-vs-kraft.excalidraw" alt="ZooKeeper vs KRaft Architecture" />
+<ExcalidrawDiagram src="/kafka-zookeeper-vs-kraft.excalidraw" alt="ZooKeeper vs KRaft architecture for cluster metadata management" />
 
 Starting with version 3.3+, Kafka introduced <Tooltip content="Kafka Raft">KRaft</Tooltip> — a consensus protocol integrated directly into Kafka, completely eliminating the dependency on ZooKeeper:
 
@@ -266,7 +266,7 @@ For example: partition 0 contains `order_created`, `order_updated`, and `order_c
 
 The "1 partition — 1 consumer" rule only applies **within the same group**. Across different groups, the same event can be processed by multiple places.
 
-<ExcalidrawDiagram src="/kafka-partition-consumer-groups.excalidraw" alt="Kafka Partition and Consumer Groups" />
+<ExcalidrawDiagram src="/kafka-partition-consumer-groups.excalidraw" alt="Multiple consumer groups reading the same partition independently with their own offsets" />
 
 For example with the `order_created` event:
 
@@ -322,7 +322,7 @@ A follower is removed from the ISR when it **falls too far behind** the leader (
 
 ISR matters because it determines the **level of data safety** through the producer's `acks` flag:
 
-<ExcalidrawDiagram src="/kafka-replication.excalidraw" alt="Kafka Replication and ISR" />
+<ExcalidrawDiagram src="/kafka-replication.excalidraw" alt="Replication between leader and follower replicas and the role of ISR under acks" />
 
 | `acks` | Behavior                                                            | Data durability                                            | Latency |
 | ------ | ------------------------------------------------------------------- | ---------------------------------------------------------- | ------- |
@@ -416,7 +416,7 @@ Traditional databases have to random seek to the right row, read the index, jump
 
 When a consumer requests data, Kafka needs to read from disk and send it over the network. In the traditional approach, data goes through **4 copies** and **2 context switches** (switching between kernel mode and user mode)
 
-<ExcalidrawDiagram src="/kafka-zero-copy.excalidraw" alt="Traditional vs Zero-copy Data Transfer" />
+<ExcalidrawDiagram src="/kafka-zero-copy.excalidraw" alt="Traditional data transfer compared with zero-copy via sendfile" />
 
 Kafka uses the **`sendfile()` system call** (on Linux) to completely bypass the user space copy
 

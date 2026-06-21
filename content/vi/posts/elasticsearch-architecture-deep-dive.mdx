@@ -24,7 +24,7 @@ Bài viết này sẽ đi sâu vào những câu hỏi đó. Chúng ta sẽ bóc
 
 <ExcalidrawDiagram
   src="/elasticsearch-cluster-overview.excalidraw"
-  alt="Elasticsearch Cluster Architecture — Master/Data/Ingest/Coordinating Nodes, Index, Primary và Replica Shards"
+  alt="Tổng quan cluster với master, data, ingest, coordinating node cùng primary và replica shard"
 />
 
 > Bài viết này tập trung **100% vào kiến trúc phân tán**. Các chủ đề như Lucene segment internals, inverted index, query DSL, scoring (TF-IDF, BM25), aggregations sẽ là chủ đề của các bài tiếp theo trong series.
@@ -196,7 +196,7 @@ Với `3 primary + 1 replica` và 3 data node, cluster sẽ phân bố theo nguy
 
 <ExcalidrawDiagram
   src="/elasticsearch-shard-replica-distribution.excalidraw"
-  alt="Shard và Replica Distribution — 3 primary + 3 replica trên 3 data nodes, primary và replica không bao giờ cùng node"
+  alt="3 primary và 3 replica trải trên 3 data node, primary và replica không bao giờ cùng node"
 />
 
 Nguyên tắc này là **cơ sở của high availability**. Khi Node 1 chết, P0 (primary của shard 0) cũng chết theo. Nhưng R0 vẫn còn trên Node 2. Master phát hiện Node 1 mất, **promote R0 thành primary mới**, rồi tìm node còn lại (Node 3) để tạo replica mới của shard 0. Cluster vẫn hoạt động bình thường, người dùng không cảm nhận được sự cố.
@@ -220,7 +220,7 @@ Mặc định `_routing = _id`. Tức là `hash(_id) % number_of_shards` quyết
 
 <ExcalidrawDiagram
   src="/elasticsearch-document-routing.excalidraw"
-  alt="Document Routing — _id hash mod number of shards quyết định shard nào nhận document"
+  alt="Hash của _id chia lấy dư số shard quyết định document vào shard nào"
 />
 
 #### Vì sao `number_of_primary_shards` IMMUTABLE sau khi tạo index?
@@ -291,7 +291,7 @@ Quyết định allocation **không phải random** — nó là kết quả củ
 
 <ExcalidrawDiagram
   src="/elasticsearch-shard-allocation-deciders.excalidraw"
-  alt="Allocation Deciders — pipeline of decision filters: SameShard, DiskThreshold, Awareness, Filter, ShardsLimit"
+  alt="Pipeline allocation decider chạy tuần tự, chỉ một NO là chặn placement của shard"
 />
 
 ### 3.2. Các Allocation Deciders quan trọng
@@ -477,7 +477,7 @@ Allocation là điều kiện cần — không có allocation thì shard không 
 
 <ExcalidrawDiagram
   src="/elasticsearch-rebalancing.excalidraw"
-  alt="Shard Rebalancing — trước khi node mới join (3 nodes, 12 shards) và sau khi rebalance (4 nodes, 12 shards đều)"
+  alt="Node mới join khiến cluster rebalance 12 shard đều ra 4 node thay vì 3"
 />
 
 ### 4.3. Cluster cân bằng bằng "Weight Function"
@@ -697,7 +697,7 @@ Một master election điển hình ở cluster healthy hoàn thành trong **dư
 
 <ExcalidrawDiagram
   src="/elasticsearch-master-election.excalidraw"
-  alt="Master Election với Voting Configuration 5 nodes — quorum = 3, một node được elected làm master"
+  alt="Master election trên voting configuration 5 node, đạt quorum 3 để elect master mới"
 />
 
 ### 5.6. Cluster State Publication — 2-Phase Commit
@@ -731,7 +731,7 @@ Hình dung cluster 5 nodes ở 2 zone:
 
 <ExcalidrawDiagram
   src="/elasticsearch-split-brain-prevention.excalidraw"
-  alt="Split-Brain Prevention — partition A có 3 nodes (majority, có quorum) elect master được; partition B chỉ 2 nodes (minority), không đủ quorum, không elect được master"
+  alt="Partition đủ quorum mới elect được master, nửa thiểu số bị chặn để tránh split-brain"
 />
 
 **Quorum-based voting** giải quyết:

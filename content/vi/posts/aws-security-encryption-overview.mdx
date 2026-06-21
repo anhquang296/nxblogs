@@ -309,7 +309,7 @@ Cách ghi nhớ một dòng: WAF = rule chi tiết trên resource; Firewall Mana
 
 AWS có hẳn whitepaper về kháng DDoS, trong đó gom các khuyến nghị thành những best practice được đánh số (BP1, BP2, ...) và xếp chúng lên một kiến trúc tham chiếu. Tư tưởng xuyên suốt: chặn tấn công càng gần biên càng tốt, trước khi nó kịp chạm tới hạ tầng cốt lõi trong VPC.
 
-![AWS DDoS Resiliency reference architecture — Users and Internet flow through edge services (Global Accelerator BP1, Route 53 BP3, WAF BP2, CloudFront BP1) into a Region (BP8) with a VPC (BP5), public subnet (WAF BP2, Elastic Load Balancing BP6, API Gateway BP4) and private subnet (Auto Scaling group BP7, Transit Gateway), plus a corporate data center connected via DX/VPN](/aws-security-encryption-ddos-best-practices.png)
+![Kiến trúc tham chiếu chống DDoS của AWS, hấp thụ tấn công ở edge trước khi vào VPC](/aws-security-encryption-ddos-best-practices.png)
 
 Đọc kiến trúc trên theo lớp: lưu lượng người dùng đi vào qua các edge service (Global Accelerator, Route 53, WAF, CloudFront) — đây là nơi hấp thụ phần lớn tấn công — rồi mới tới VPC chứa ELB, API Gateway và tầng compute (Auto Scaling group) trong các subnet. Vài nguyên tắc cốt lõi hay được hỏi:
 

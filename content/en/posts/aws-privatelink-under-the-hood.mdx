@@ -18,7 +18,7 @@ This article takes PrivateLink apart to see the inside: what the endpoint you cr
 
 <ExcalidrawDiagram
   src="/aws-privatelink-overview.excalidraw"
-  alt="AWS PrivateLink end-to-end — Consumer VPC with endpoint ENIs and private DNS, the AWS Hyperplane fabric doing SNAT/DNAT, and the Provider VPC with an NLB-fronted endpoint service"
+  alt="PrivateLink overview: consumer VPC, the Hyperplane layer and the NLB-fronted endpoint service at the provider"
 />
 
 ---
@@ -35,7 +35,7 @@ VPC Peering connects two VPCs so they route to each other over private IPs. It s
 
 <ExcalidrawDiagram
   src="/aws-privatelink-vs-peering.excalidraw"
-  alt="Comparison — VPC Peering full mesh requiring n-squared links versus PrivateLink service hub where many consumers connect one-way to a single endpoint service"
+  alt="Comparing the n-squared VPC Peering mesh with PrivateLink's one-way hub model"
 />
 
 And if you expose the service over the internet (behind a public load balancer), traffic really does go out to the internet, dragging along the whole attack surface: you have to deal with a public IP, WAF, DDoS, and the customer has to trust that your firewall is configured correctly.
@@ -174,7 +174,7 @@ You never see it, you never pay for it directly, but it sits beneath the NLB, NA
 
 <ExcalidrawDiagram
   src="/aws-privatelink-hyperplane.excalidraw"
-  alt="AWS Hyperplane internals — a fleet of EC2-based packet forwarders per AZ, shuffle sharding mapping each endpoint to an overlapping subset of nodes, a distributed flow-state table, and SNAT/DNAT"
+  alt="Inside Hyperplane: a node fleet per AZ, shuffle sharding, distributed flow-state and SNAT/DNAT"
 />
 
 ### 5.1. Distributed Flow State

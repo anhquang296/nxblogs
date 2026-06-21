@@ -86,7 +86,7 @@ Toàn cảnh kiến trúc: agent ở on-premises đọc dữ liệu qua NFS/SMB,
 
 <ExcalidrawDiagram
   src="/aws-datasync-architecture.excalidraw"
-  alt="AWS DataSync architecture. On the left, an On-Premises group contains an NFS or SMB server connected to an AWS DataSync agent over NFS or SMB. The agent transfers data over an encrypted TLS connection to the AWS DataSync service inside an AWS Region. From there, DataSync writes to AWS Storage Resources: Amazon S3 across storage classes (S3 Standard, S3 Intelligent-Tiering, S3 Standard-IA, S3 One Zone-IA, S3 Glacier, S3 Glacier Deep Archive), Amazon EFS, and Amazon FSx. Arrows are bidirectional, showing DataSync can move data in either direction."
+  alt="DataSync agent ở on-premises đọc NFS/SMB, truyền qua TLS rồi ghi xuống S3, EFS, FSx"
 />
 
 Use case: di chuyển dữ liệu một lần (one-time migration) lên cloud, hoặc đồng bộ định kỳ cho mục đích backup/archive, replication giữa các region, hoặc dồn dữ liệu từ nhiều file server về một chỗ.
@@ -174,7 +174,7 @@ Có bốn loại gateway, phân theo "ứng dụng on-premises của bạn đang
 
 <ExcalidrawDiagram
   src="/aws-storage-gateway-architecture.excalidraw"
-  alt="AWS Storage Gateway overview — On-premises: User/group file shares connect to File Gateway via NFS/SMB, Application Server to Volume Gateway via iSCSI, Backup Application to Tape Gateway via iSCSI VTL (each gateway keeps a local cache). Traffic is encrypted in transit over Internet or Direct Connect to the central Storage Gateway, then to AWS Cloud: File Gateway maps to Amazon S3 (any class including Glacier), Volume Gateway maps to Amazon S3 backed by AWS EBS snapshots, Tape Gateway maps to Amazon S3 Tape Library archived to Glacier and Glacier Deep Archive"
+  alt="Bốn loại Storage Gateway nối app on-premises qua NFS/SMB/iSCSI/VTL lên S3, EBS snapshot và Glacier"
 />
 
 ### 4.1. Amazon S3 File Gateway
