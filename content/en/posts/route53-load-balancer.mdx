@@ -130,7 +130,7 @@ Failover routing operates on an **Active-Passive** model: you designate a Primar
 
 With a health check interval of 30 seconds and a threshold of 3 failures, Route 53 detects failures within approximately **60-90 seconds**. Combined with a low TTL (60s), most clients will switch to the backup endpoint within **2-3 minutes**.
 
-> **When to use?** Disaster Recovery, active-passive setup between regions.
+> Note that this is a strategy for the active-passive pattern: traffic is only handled by the primary, and is only redirected to the secondary when the primary fails.
 
 ### 2.5 Geolocation & Geoproximity — "Vietnamese users see Vietnamese servers"
 
