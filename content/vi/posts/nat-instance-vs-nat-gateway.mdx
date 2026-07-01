@@ -23,9 +23,9 @@ NAT Instance — nghe quen thuộc nhưng bạn chưa bao giờ setup. Nó cũng
 
 ---
 
-## 1. NAT là gì? (Recap nhanh)
+## 1. NAT là gì?
 
-Trong VPC, resource ở private subnet chỉ có private IP. Internet không biết cách route đến private IP (thuộc dải RFC 1918 — dải địa chỉ IP dành riêng cho mạng nội bộ), nên các resource này **không thể giao tiếp trực tiếp với internet**.
+Trong VPC, resource ở private subnet chỉ có private IP. Internet không biết cách route đến private IP (thuộc dải RFC 1918 — dải địa chỉ IP dành riêng cho mạng nội bộ), nên các resource này không thể giao tiếp trực tiếp với internet.
 
 NAT giải quyết vấn đề này bằng cách đặt một "đại diện" ở **public subnet**: khi EC2 trong private subnet muốn gọi ra internet, packet được gửi đến NAT, NAT thay source IP bằng IP public của mình rồi forward ra internet. Response quay về NAT, NAT tra bảng mapping rồi chuyển về đúng EC2 ban đầu.
 
@@ -40,9 +40,9 @@ Bài viết này tập trung vào NAT Instance — cách nó hoạt động bên
 
 ## 2. NAT Instance — Cách hoạt động
 
-### 2.1. Bản chất: Một EC2 đóng vai NAT
+### 2.1. Một EC2 instance đóng vai NAT
 
-NAT Instance thực chất là một **EC2 instance** chạy AMI có cấu hình sẵn IP forwarding và iptables. Khi packet đến, thay vì xử lý ở tầng application, OS của EC2 này sẽ **thay đổi source IP** rồi **forward packet** ra interface khác — đúng như một router NAT truyền thống.
+NAT Instance thực chất là một **EC2 instance** chạy AMI có cấu hình sẵn IP forwarding và iptables. Khi packet đến, thay vì xử lý ở tầng application, OS của EC2 này sẽ thay đổi source IP rồi forward packet ra interface khác — đúng như một router NAT truyền thống.
 
 Để hoạt động, NAT Instance cần đáp ứng 4 điều kiện:
 
@@ -51,9 +51,9 @@ NAT Instance thực chất là một **EC2 instance** chạy AMI có cấu hình
 3. **Disable Source/Destination Check** — chi tiết ở phần tiếp theo
 4. **Cấu hình route table** — private subnet phải có route `0.0.0.0/0 → eni-xxx` trỏ đến ENI của NAT Instance
 
-AWS từng cung cấp **pre-configured Amazon Linux AMI** cho NAT Instance, nhưng AMI này đã hết standard support từ **31/12/2020**.
+AWS từng cung cấp pre-configured Amazon Linux AMI cho NAT Instance, nhưng AMI này đã hết standard support từ 31/12/2020.
 
-Hiện tại nếu muốn dùng NAT Instance, bạn có 2 lựa chọn: tìm **alternative AMI trên AWS Marketplace** (nhiều community AMI đã cấu hình sẵn NAT, ví dụ fck-nat — một open-source alternative được tối ưu chi phí), hoặc tự cấu hình từ AMI Linux thông thường — enable IP forwarding trong kernel (`net.ipv4.ip_forward = 1`) và thiết lập iptables NAT rules.
+Hiện tại nếu muốn dùng NAT Instance, bạn có 2 lựa chọn: tìm alternative AMI trên AWS Marketplace, hoặc tự cấu hình từ AMI Linux thông thường — enable IP forwarding trong kernel (`net.ipv4.ip_forward = 1`) và thiết lập iptables NAT rules.
 
 ### 2.2. Source/Destination Check — Tại sao phải tắt?
 
@@ -61,26 +61,19 @@ Hiện tại nếu muốn dùng NAT Instance, bạn có 2 lựa chọn: tìm **a
 
 #### Source/Destination Check là gì?
 
-Mặc định, AWS bật **Source/Destination Check** trên mọi EC2 instance. Tính năng này kiểm tra: packet đến hoặc đi từ instance này có source IP hoặc destination IP trùng với IP của chính instance đó không? Nếu không — packet bị **drop** ngay lập tức.
+Mặc định, AWS bật **Source/Destination Check** trên mọi EC2 instance. Tính năng này kiểm tra: packet đến hoặc đi từ instance này có source IP hoặc destination IP trùng với IP của chính instance đó không? Nếu không — packet bị drop ngay lập tức.
 
 #### Tại sao AWS bật mặc định?
 
 Đây là một cơ chế bảo mật nhiều lớp, hoạt động độc lập với Security Group và NACL — nghĩa là ngay cả khi SG hoặc NACL bị cấu hình sai, lớp bảo vệ này vẫn ngăn chặn được các hành vi nguy hiểm:
 
-**1. Chống IP Spoofing** — IP Spoofing là kỹ thuật giả mạo source IP trong gói tin để đánh lừa hệ thống đích. Kẻ tấn công có thể dùng kỹ thuật này trong **DDoS reflection attack** (giả IP nạn nhân để server trả response về nạn nhân), hoặc bypass firewall bằng cách giả IP trusted. Source/Dest Check đảm bảo gói tin gửi đi **phải có source IP đúng là của instance**, ngăn mọi hình thức giả mạo.
+**1. Chống IP Spoofing** — IP Spoofing là kỹ thuật giả mạo source IP trong gói tin để đánh lừa hệ thống đích. Kẻ tấn công có thể dùng kỹ thuật này trong DDoS reflection attack (giả IP nạn nhân để server trả response về nạn nhân), hoặc bypass firewall bằng cách giả IP trusted. Source/Dest Check đảm bảo gói tin gửi đi phải có source IP đúng là của instance, ngăn mọi hình thức giả mạo.
 
-**2. Ngăn Traffic Forwarding trái phép** — Nếu không có cơ chế này, một EC2 bị xâm nhập có thể trở thành **proxy** để forward traffic độc hại đến các instance khác trong VPC, hoặc thực hiện lateral movement. Bằng cách drop mọi gói tin không thuộc về instance, AWS chặn hành vi này ở tầng hạ tầng.
+**2. Ngăn Traffic Forwarding trái phép** — Nếu không có cơ chế này, một EC2 bị xâm nhập có thể trở thành proxy để forward traffic độc hại đến các instance khác trong VPC, hoặc thực hiện lateral movement. Bằng cách drop mọi gói tin không thuộc về instance, AWS chặn hành vi này ở tầng hạ tầng.
 
 **3. Đảm bảo routing nhất quán** — Trong môi trường cloud nhiều tenant, AWS cần đảm bảo traffic đi đúng theo route table đã định nghĩa. Nếu cho phép instance tự ý forward traffic, một instance có thể "tự biến thành router" và phá vỡ topology mạng, khiến việc troubleshoot và audit network trở nên cực kỳ phức tạp.
 
-**4. Secure by default** — AWS áp dụng triết lý **Least Privilege**: mặc định cấm những hành vi nguy hiểm, ai cần thì phải chủ động bật. Hầu hết workload (web server, app server, database) **không cần** forward traffic, nên việc bật Source/Dest Check làm mặc định là hợp lý.
-
-| Mục đích | Bảo vệ chống lại |
-| --- | --- |
-| Chống IP Spoofing | Tấn công giả mạo IP, DDoS reflection |
-| Chặn forwarding trái phép | Instance bị hack làm proxy, lateral movement |
-| Đảm bảo routing nhất quán | Traffic đi sai đường, khó audit |
-| Secure by default | Vô tình tạo lỗ hổng do cấu hình sai |
+**4. Secure by default** — AWS áp dụng triết lý Least Privilege: mặc định cấm những hành vi nguy hiểm, ai cần thì phải chủ động bật. Hầu hết workload (web server, app server, database) không cần forward traffic, nên việc bật Source/Dest Check làm mặc định là hợp lý.
 
 #### Tại sao NAT Instance phải tắt?
 
@@ -100,7 +93,7 @@ NAT Instance có IP `10.0.1.30`. Cả source lẫn destination đều **không p
 
 Tương tự khi NAT Instance forward packet ra ngoài, source IP ban đầu (`10.0.2.20`) không phải IP của NAT Instance → check fail → packet bị drop lần nữa.
 
-Vì vậy, **bạn phải disable Source/Destination Check** trên NAT Instance. Không có bước này, NAT Instance hoàn toàn vô dụng — nó không thể forward được bất kỳ packet nào. Ngoài NAT Instance, các use case khác cần disable cơ chế này bao gồm: VPN instance, software firewall, hoặc bất kỳ instance nào đóng vai trò router.
+Vì vậy, bạn phải disable Source/Destination Check trên NAT Instance. Không có bước này, NAT Instance hoàn toàn vô dụng — nó không thể forward được bất kỳ packet nào. Ngoài NAT Instance, các use case khác cần disable cơ chế này bao gồm: VPN instance, software firewall, hoặc bất kỳ instance nào đóng vai trò router.
 
 > Với NAT Gateway, bạn không cần lo điều này — AWS tự xử lý vì đây là managed service, không chạy trên EC2 instance thông thường.
 
@@ -136,14 +129,14 @@ Hãy trace một packet từ EC2 trong private subnet ra internet qua NAT Instan
 | 5   | **Route Table** (private) | `3.5.6.7` | `10.0.2.20`             | Match `10.0.0.0/16 → local`          |
 | 6   | **EC2**             | `3.5.6.7`  | `10.0.2.20`                  | Nhận response                        |
 
-Giống NAT Gateway, có **2 lần NAT** trên đường đi:
+Giống NAT Gateway, có 2 lần NAT trên đường đi:
 
 - **NAT Instance** (hop 3): many-to-1 — nhiều EC2 share cùng IP private của NAT Instance, phân biệt nhau bằng source port
 - **IGW** (hop 5): 1-to-1 — EIP mapping cố định
 
 ### 2.4. Security Group cho NAT Instance
 
-Vì NAT Instance là EC2, bạn có thể (và phải) gắn Security Group. Đây vừa là **ưu điểm** (kiểm soát chi tiết traffic) vừa là **trách nhiệm** (cấu hình sai = mất kết nối).
+Vì NAT Instance là EC2, bạn có thể (và phải) gắn Security Group. Đây vừa là ưu điểm vừa là trách nhiệm.
 
 Security Group tối thiểu cho NAT Instance:
 
@@ -162,11 +155,11 @@ Security Group tối thiểu cho NAT Instance:
 | HTTP  | 80   | `0.0.0.0/0`  | Forward traffic HTTP ra internet    |
 | HTTPS | 443  | `0.0.0.0/0`  | Forward traffic HTTPS ra internet   |
 
-> So sánh: NAT Gateway **không hỗ trợ Security Group** — bạn chỉ có thể kiểm soát traffic qua NACL. Với NAT Instance, bạn có cả hai lớp bảo vệ: Security Group (stateful, ở tầng instance) + NACL (stateless, ở tầng subnet).
+> So sánh: NAT Gateway không hỗ trợ Security Group — bạn chỉ có thể kiểm soát traffic qua NACL. Với NAT Instance, bạn có cả hai lớp bảo vệ: Security Group (stateful, ở tầng instance) + NACL (stateless, ở tầng subnet).
 
 ### 2.5. Port Forwarding — Khả năng NAT Gateway không có
 
-Packet flow ở phần 2.3 mô tả **SNAT** (Source NAT) — thay đổi source IP để resource trong private subnet gọi được ra internet. Đây là chiều **outbound**. Port forwarding là chiều ngược lại: **DNAT** (Destination NAT) cho traffic **inbound** — khi một packet từ internet đi vào, NAT Instance thay đổi destination của packet để chuyển nó đến đúng một instance trong private subnet.
+Packet flow ở phần 2.3 mô tả **SNAT** (Source NAT) — thay đổi source IP để resource trong private subnet gọi được ra internet. Đây là chiều outbound. Port forwarding là chiều ngược lại: **DNAT** (Destination NAT) cho traffic inbound — khi một packet từ internet đi vào, NAT Instance thay đổi destination của packet để chuyển nó đến đúng một instance trong private subnet.
 
 Vì NAT Instance là một EC2 với quyền kiểm soát iptables đầy đủ, bạn chỉ cần thêm một DNAT rule ở chuỗi `PREROUTING` là có port forwarding. NAT Gateway thì không: nó là managed service chỉ làm SNAT cho outbound, không có bất kỳ tùy chọn nào để cấu hình rule inbound.
 
@@ -183,23 +176,25 @@ Nhờ vậy, một instance không có public IP vẫn có thể được truy c
 
 ---
 
-## 3. Zonal NAT Gateway — Managed Service (Recap)
+## 3. Zonal NAT Gateway — Managed Service
 
-NAT Gateway là lựa chọn mà AWS **khuyến nghị mặc định**. Thay vì tự quản lý EC2, bạn chỉ cần:
+NAT Gateway là lựa chọn mà AWS khuyến nghị mặc định. Thay vì tự quản lý EC2, bạn chỉ cần:
 
 1. Tạo NAT Gateway trong public subnet
 2. Gắn Elastic IP
 3. Cấu hình route table: `0.0.0.0/0 → nat-xxx`
 
-AWS lo toàn bộ phần còn lại: patching, monitoring, scaling, high availability trong AZ. Bandwidth tự scale từ **5 Gbps lên đến 100 Gbps** — bạn không cần chọn instance type hay lo bottleneck.
+AWS lo toàn bộ phần còn lại: patching, monitoring, scaling, high availability trong AZ. Bandwidth tự scale từ 5 Gbps lên đến 100 Gbps — bạn không cần chọn instance type hay lo bottleneck.
 
-**Lưu ý**: EC2 trong **cùng subnet** với NAT Gateway không thể sử dụng nó — chỉ EC2 từ **subnet khác** mới có thể route traffic qua NAT Gateway. Đây là lý do NAT Gateway luôn đặt ở public subnet, còn EC2 cần NAT thì nằm ở private subnet.
+**Lưu ý**: EC2 trong cùng subnet với NAT Gateway không thể sử dụng nó — chỉ EC2 từ subnet khác mới có thể route traffic qua NAT Gateway. Đây không phải giới hạn kỹ thuật của NAT Gateway, mà là hệ quả từ cách route table hoạt động.
+
+Route table gắn với subnet, và trong một route table, mỗi destination CIDR (dải IP đích) chỉ được có đúng một route — không thể tồn tại hai entry `0.0.0.0/0` cùng lúc. NAT Gateway nằm ở public subnet, nên route table của subnet đó bắt buộc phải có `0.0.0.0/0 → igw-xxx` để chính NAT Gateway ra được internet. Muốn một EC2 trong cùng subnet đó đi qua NAT Gateway, bạn phải đổi entry đó thành `0.0.0.0/0 → nat-xxx` — nhưng làm vậy sẽ ghi đè mất route ra IGW, khiến ngay cả NAT Gateway cũng không còn đường ra internet, và traffic vòng ngược về chính nó. Hai route này overlap và loại trừ lẫn nhau.
+
+Vì vậy cách giải quyết là tách subnet: NAT Gateway đặt ở public subnet (route table trỏ `0.0.0.0/0 → igw-xxx`), còn EC2 cần NAT nằm ở private subnet với route table riêng trỏ `0.0.0.0/0 → nat-xxx`. Mỗi subnet có route table độc lập nên hai route không còn xung đột.
 
 > Chi tiết về cách NAT Gateway hoạt động (PAT, double NAT, connection tracking) đã được giải thích trong bài [AWS VPC: Hiểu VPC qua lăng kính của một Packet — Flow 3: EC2 → Stripe](/vi/posts/vpc-overview#flow-3-ec2--stripe--ra-internet-qua-nat-gateway).
 
-**Lưu ý quan trọng về High Availability**: NAT Gateway có HA tự động **trong một AZ**. Nếu AZ đó down, NAT Gateway cũng down. Để có HA trên toàn region, bạn cần deploy **một NAT Gateway ở mỗi AZ** và cấu hình route table tương ứng cho private subnet trong AZ đó. Bạn không cần lo về cross-AZ failover — vì khi một AZ down, các EC2 trong AZ đó cũng down theo, nên chúng không cần NAT nữa.
-
-> Phần trên mô tả **Zonal NAT Gateway** — loại truyền thống hoạt động trong 1 AZ. Từ cuối 2025, AWS đã ra mắt **Regional NAT Gateway** với nhiều cải tiến — chi tiết ở phần tiếp theo.
+**Lưu ý quan trọng về High Availability**: NAT Gateway có HA tự động trong một AZ. Nếu AZ đó down, NAT Gateway cũng down. Để có HA trên toàn region, bạn cần deploy một NAT Gateway ở mỗi AZ và cấu hình route table tương ứng cho private subnet trong AZ đó. Bạn không cần lo về cross-AZ failover — vì khi một AZ down, các EC2 trong AZ đó cũng down theo, nên chúng không cần NAT nữa.
 
 ---
 
@@ -213,7 +208,7 @@ Tháng 11/2025, AWS công bố **regional availability mode** cho NAT Gateway. V
 
 **1. Không cần Public Subnet**
 
-Theo truyền thống, NAT Gateway yêu cầu public subnet (subnet có route trực tiếp ra internet qua IGW) để truy cập internet. Khách hàng quan tâm bảo mật phải đảm bảo không ai tạo tài nguyên khác trong public subnet đó. Với Regional NAT Gateway, VPC **không cần public subnet** — đây là cải thiện bảo mật rất lớn vì VPC giờ có thể hoàn toàn private mà vẫn có internet egress.
+Theo truyền thống, NAT Gateway yêu cầu public subnet (subnet có route trực tiếp ra internet qua IGW) để truy cập internet. Khách hàng quan tâm bảo mật phải đảm bảo không ai tạo tài nguyên khác trong public subnet đó. Với Regional NAT Gateway, VPC không cần public subnet — đây là cải thiện bảo mật rất lớn vì VPC giờ có thể hoàn toàn private mà vẫn có internet egress.
 
 **2. Tự động mở rộng theo AZ**
 
@@ -221,7 +216,7 @@ Regional NAT Gateway hoạt động ở cấp VPC. Khi bạn mở rộng workloa
 
 **3. Routing đơn giản hơn**
 
-Với Zonal NAT Gateway, bạn phải tạo **route table riêng cho từng AZ** — mỗi route table trỏ đến NAT Gateway của AZ đó. Với Regional NAT Gateway, chỉ cần **1 route table duy nhất** với entry `0.0.0.0/0 → rnat-xxx`, dùng chung cho mọi private subnet ở mọi AZ.
+Với Zonal NAT Gateway, bạn phải tạo route table riêng cho từng AZ — mỗi route table trỏ đến NAT Gateway của AZ đó. Với Regional NAT Gateway, chỉ cần 1 route table duy nhất với entry `0.0.0.0/0 → rnat-xxx`, dùng chung cho mọi private subnet ở mọi AZ.
 
 **4. Hai chế độ vận hành**
 
@@ -232,13 +227,13 @@ Regional NAT Gateway hoạt động ở 2 chế độ:
 
 ### 4.2. Giới hạn
 
-**1. Không hỗ trợ Private NAT**: Regional NAT Gateway yêu cầu **Internet Gateway** (IGW) trong VPC — tức là chỉ hỗ trợ **public NAT** (traffic ra internet). Nếu bạn cần **private NAT** (traffic nội bộ giữa VPC hoặc đến on-premise), vẫn phải dùng Zonal Private NAT Gateway.
+**1. Không hỗ trợ Private NAT**: Regional NAT Gateway yêu cầu Internet Gateway (IGW) trong VPC — tức là chỉ hỗ trợ public NAT (traffic ra internet). Nếu bạn cần private NAT (traffic nội bộ giữa VPC hoặc đến on-premise), vẫn phải dùng Zonal Private NAT Gateway.
 
 **2. Chi phí không giảm đáng kể**: Regional NAT Gateway đơn giản hóa vận hành, nhưng chi phí tương đương với việc deploy multi-AZ Zonal NAT Gateway. Nếu mục tiêu là giảm chi phí, nên cân nhắc chuyển sang **IPv6** thay vì dùng NAT.
 
 ### 4.3. Khuyến nghị từ AWS
 
-AWS đề xuất chuyển sang Regional NAT Gateway cho **tất cả các use case** ngoại trừ những trường hợp yêu cầu **private connectivity** — tính năng mà Regional NAT Gateway chưa hỗ trợ.
+AWS đề xuất chuyển sang Regional NAT Gateway cho tất cả các use case ngoại trừ những trường hợp yêu cầu private connectivity — tính năng mà Regional NAT Gateway chưa hỗ trợ.
 
 ---
 
@@ -266,24 +261,24 @@ AWS đề xuất chuyển sang Regional NAT Gateway cho **tất cả các use ca
 
 ### Dùng Regional NAT Gateway khi:
 
-- **Môi trường production** cần HA multi-AZ mà không muốn quản lý nhiều NAT Gateway
-- Muốn **đơn giản hóa routing** — chỉ cần 1 route table dùng chung cho mọi AZ
-- Muốn tăng cường **bảo mật** — VPC không cần public subnet
+- Môi trường production cần HA multi-AZ mà không muốn quản lý nhiều NAT Gateway
+- Muốn đơn giản hóa routing — chỉ cần 1 route table dùng chung cho mọi AZ
+- Muốn tăng cường bảo mật — VPC không cần public subnet
 - Khi thêm AZ mới, không muốn phải tạo thêm NAT Gateway và sửa route table
-- Đây là **lựa chọn mới được AWS khuyến nghị** thay thế Zonal NAT Gateway cho hầu hết use case
+- Đây là lựa chọn mới được AWS khuyến nghị thay thế Zonal NAT Gateway cho hầu hết use case
 
 ### Dùng Zonal NAT Gateway khi:
 
-- Cần **private NAT** (traffic nội bộ giữa VPC hoặc đến on-premise) — Regional NAT Gateway chưa hỗ trợ
+- Cần private NAT (traffic nội bộ giữa VPC hoặc đến on-premise) — Regional NAT Gateway chưa hỗ trợ
 - Đã có hạ tầng multi-AZ NAT Gateway ổn định và chưa cần migrate
 
 ### Dùng NAT Instance khi:
 
-- Muốn **tiết kiệm chi phí** cho môi trường dev/test — một `t3.micro` chỉ tốn ~$7–8/tháng so với ~$32/tháng cho NAT Gateway (chưa tính data processing)
-- Cần **port forwarding** — ví dụ forward port 3306 từ internet đến RDS trong private subnet (NAT Gateway không hỗ trợ)
+- Muốn tiết kiệm chi phí cho môi trường dev/test — một `t3.micro` chỉ tốn ~$7–8/tháng so với ~$32/tháng cho NAT Gateway (chưa tính data processing)
+- Cần port forwarding — ví dụ forward port 3306 từ internet đến RDS trong private subnet (NAT Gateway không hỗ trợ)
 - Muốn dùng luôn làm bastion host
-- Cần kiểm soát traffic chi tiết qua **Security Group** thay vì chỉ dùng NACL
-- Lưu lượng truy cập internet **thấp và không đột biến**
+- Cần kiểm soát traffic chi tiết qua Security Group thay vì chỉ dùng NACL
+- Lưu lượng truy cập internet thấp và không đột biến
 
 > **Tip cho SAA exam**: Regional NAT Gateway là topic mới và sẽ xuất hiện trong đề thi. Nhớ các keyword chính: **Source/Destination Check** (phải tắt cho NAT Instance), **Security Group** (chỉ NAT Instance hỗ trợ), **Regional NAT Gateway** (HA multi-AZ tự động, không cần public subnet, 1 route table dùng chung), và **Private NAT** (chỉ Zonal NAT Gateway hỗ trợ, Regional chưa có).
 
@@ -295,9 +290,9 @@ Quay lại câu hỏi ban đầu: đồng nghiệp gợi ý dùng NAT Instance c
 
 Những điểm cốt lõi:
 
-- **NAT Instance** là EC2 tự quản lý, phải disable **Source/Destination Check** vì nó forward packet không thuộc về mình — cả source lẫn destination IP đều không phải IP của nó
+- **NAT Instance** là EC2 tự quản lý, phải disable Source/Destination Check vì nó forward packet không thuộc về mình — cả source lẫn destination IP đều không phải IP của nó
 - **Zonal NAT Gateway** là managed service hoạt động trong 1 AZ — AWS lo HA, scaling, patching — nhưng cần deploy ở mỗi AZ để có HA toàn region
-- **Regional NAT Gateway** là bước tiến mới (2025) — HA multi-AZ tự động, **không cần public subnet**, chỉ cần **1 route table** dùng chung cho mọi AZ
-- NAT Instance cho phép gắn **Security Group**, dùng làm **bastion host**, và hỗ trợ **port forwarding** — những thứ NAT Gateway không làm được
-- **Regional NAT Gateway** là lựa chọn mới mà AWS khuyến nghị cho hầu hết use case; NAT Instance phù hợp cho **dev/test** hoặc khi cần tính năng đặc biệt
-- Regional NAT Gateway **chưa hỗ trợ private NAT** — nếu cần private connectivity, vẫn phải dùng Zonal NAT Gateway
+- **Regional NAT Gateway** là bước tiến mới (2025) — HA multi-AZ tự động, không cần public subnet, chỉ cần 1 route table dùng chung cho mọi AZ
+- NAT Instance cho phép gắn Security Group, dùng làm bastion host, và hỗ trợ port forwarding — những thứ NAT Gateway không làm được
+- **Regional NAT Gateway** là lựa chọn mới mà AWS khuyến nghị cho hầu hết use case; NAT Instance phù hợp cho dev/test hoặc khi cần tính năng đặc biệt
+- Regional NAT Gateway chưa hỗ trợ private NAT — nếu cần private connectivity, vẫn phải dùng Zonal NAT Gateway
