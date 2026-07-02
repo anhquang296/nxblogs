@@ -60,7 +60,21 @@ SSE-KMS still lets S3 do the encrypting, but the key lives in AWS KMS — AWS's 
 
 Every time you upload an object, S3 calls the KMS API `GenerateDataKey`; every time you download, S3 calls `Decrypt`. These calls count against the KMS quota per region (a few thousand requests per second by default). For very high-traffic buckets, you can hit **throttling** (KMS rejecting excess requests once the quota is exceeded).
 
-The fix: enable **S3 Bucket Keys** — S3 creates a bucket-level key and uses it to generate data keys locally for each object instead of calling KMS every time, cutting KMS calls by roughly 99% (reducing both cost and the risk of throttling).
+To solve the throttling problem when using SSE-KMS, **S3 Bucket Keys** were introduced — S3 creates a key for the bucket (called a bucket key), and the bucket uses that bucket key to generate a data key for each object instead of calling KMS every time, cutting KMS calls by roughly 99% (reducing both cost and the risk of throttling).
+
+A bucket key is **not a master key.** It is really just an intermediate key layer inserted into the chain, turning envelope encryption from two tiers into three. The master key stays safe inside the KMS service.
+
+The three-tier key chain works like this. When you enable Bucket Keys, S3 calls KMS once to generate a bucket key; KMS returns the bucket key in two forms at once: a plaintext copy for S3 to use immediately, and a copy encrypted with the KMS key to store. S3 caches the plaintext copy in memory for a short time, and during that window every per-object data key is generated and encrypted locally with the bucket key, without touching KMS. The wrapping chain is therefore: the KMS key wraps the bucket key, the bucket key wraps the data key, and only the data key actually encrypts the object.
+
+In each object's metadata, S3 stores both layers: the data key encrypted with the bucket key, and the bucket key encrypted with the KMS key. When reading an object, S3 needs just one `Decrypt` call to KMS to open the bucket key and then caches it, after which it opens the data key and decrypts the object entirely locally. Other objects sharing that bucket key make no KMS call at all — this is exactly why the number of KMS calls drops so sharply.
+
+Three reasons a bucket key is not a root key:
+
+- **Control still rests entirely with the KMS key.** If you disable the KMS key or revoke permissions on it, the bucket key can no longer decrypt and all the data becomes inaccessible. Every key policy, grant, and audit trail revolves around the KMS key, not the bucket key.
+- **A very short lifespan.** S3 rotates bucket keys continuously; a bucket doesn't have a single bucket key but many, generated over time and per request context. It behaves more like a temporary cache key than a long-lived identity key.
+- **A tightly scoped reach.** Each bucket key is bound to exactly one bucket and one source KMS key, and can't be used across other buckets.
+
+The trade-off here is that the blast radius (the extent of damage if a key is exposed) of a bucket key is slightly wider than a data key's: if one bucket key is exposed, all objects within the time window it served are affected, rather than just one object. AWS accepts this trade-off because a bucket key is short-lived and exists in plaintext only in S3's memory; in threat-model terms, if an attacker can pull a plaintext key from inside S3, the old two-tier model would already have fallen too.
 
 The details of how KMS generates keys, envelope encryption, and the key types live in the [AWS Security & Encryption](/en/posts/aws-security-encryption-overview) post — this article focuses only on how S3 puts them to use.
 
