@@ -55,8 +55,6 @@ Before talking about services, you need the fundamentals: data can be attacked a
 
 **Client-side encryption** is the opposite: the client encrypts the data before sending it, and the server **never** sees the raw data — it only stores the ciphertext. The client manages the key (possibly with KMS via envelope encryption, see section 3.2). Use it when you don't trust even the storage side, or when you need end-to-end encrypted data.
 
-A common exam gotcha: SSE-C (Server-Side Encryption with Customer-provided keys) has the word "customer" in it but is still **server-side** — you supply the key with each request, AWS uses it to encrypt and then immediately forgets it (the key is never stored). It differs from client-side in that the encryption happens on the AWS server, not on your machine.
-
 ---
 
 ## 3. AWS KMS — the heart of encryption on AWS
@@ -115,14 +113,14 @@ So why separate the master key from the data key at all? It's a deliberate desig
 
 A subtle and frequently asked point: why does old data still decrypt after a key is rotated?
 
-When KMS rotates a key, it generates new cryptographic material (a new backing key) but keeps all the old backing keys around. Most importantly: the key ID and ARN **do not change**. Every ciphertext (or every encrypted data key) carries metadata recording which backing key version encrypted it. On decryption, KMS reads that metadata and automatically picks the matching backing key:
+When KMS rotates a key, it generates a new backing key but keeps all the old backing keys around. Most importantly: the Key ID and ARN **do not change** — same shell, new contents. Every ciphertext (or every encrypted data key) carries metadata recording which backing key version encrypted it. On decryption, KMS reads that metadata and automatically picks the matching backing key:
 
-- **Old** data: KMS reuses the old backing key (still retained) to decrypt it.
+- **Old** data: KMS reuses the old backing key to decrypt it.
 - **New** data: encrypted with the new backing key.
 
-The key consequence: rotation does NOT re-encrypt old data. Old data stays under the old material until you actively re-encrypt it (for example with the `ReEncrypt` API). And because your application only references the key by its unchanged key ID, the whole process is **transparent** — you don't change any code or configuration.
+Key rotation does not re-encrypt old data. Old data stays encrypted under the old material until you actively re-encrypt it (for example with the `ReEncrypt` API). And because your application only references the key by its unchanged Key ID, the whole process is **transparent** — you don't change any code or configuration.
 
-Combined with envelope encryption from section 3.2, this mechanism is also **very cheap**: when you rotate the KMS key, only new data keys get wrapped with the new backing key; old encrypted data keys still decrypt thanks to the old backing keys — and the actual large data blocks are never touched. That's why you can enable rotation across petabytes of data with no re-encryption cost.
+Combined with envelope encryption from section 3.2, this mechanism is also **very cheap**: when you perform key rotation, only new data keys get wrapped with the new backing key; old encrypted data keys still decrypt thanks to the old backing keys — and the actual large data blocks are never touched. That's why you can enable rotation across petabytes of data with no re-encryption cost.
 
 Two more properties the exam likes to ask about:
 
@@ -131,9 +129,13 @@ Two more properties the exam likes to ask about:
 
 ### 3.4. Multi-Region Keys
 
-By default a KMS key is locked inside a single region. **Multi-Region Keys** break that: a set of identical KMS keys placed in multiple regions, sharing the same key ID and the same key material (replicated by AWS). There is one primary key and one or more replica keys.
+By default a KMS key is locked inside a single region.
 
-The core benefit: you can encrypt data in region A and decrypt it in region B without a cross-region call or re-encryption — because the keys on both sides are the same. Note that these keys are managed independently (each has its own key policy) even though they share the same key material.
+**Multi-Region Keys** break that: a set of identical KMS keys that AWS replicates across multiple regions, sharing the same Key ID and backing key. There is one primary key and one or more replica keys.
+
+Thanks to this, you can encrypt data in region A and decrypt it in region B without a cross-region call or re-encryption — because the keys on both sides are the same.
+
+> Note that these keys are managed independently (each has its own key policy) even though they share the same backing key.
 
 Typical use cases:
 
@@ -142,11 +144,15 @@ Typical use cases:
 - Active-active multi-region architectures
 - Disaster recovery
 
-AWS's caveat: this is **not** a default choice — most data should stay in a single region; use Multi-Region Keys only when you genuinely have a multi-region need, because each key in each region is billed separately.
+> Multi-Region Keys are **not** a default choice — most data should stay in a single region; use Multi-Region Keys only when you genuinely have a multi-region need, because each key in each region is billed separately.
 
 ### 3.5. S3 Replication with encrypted data
 
-When you enable **S3 Replication** (copying objects to another bucket), replicating encrypted objects has a few easy-to-forget rules:
+S3 Replication is an asynchronous, automatic, one-way copy mechanism from a source bucket to one or more destination buckets, driven by object changes tracked through S3 Versioning rather than periodic scanning.
+
+Whenever an object is created or modified, S3 produces a new version, and that version becomes a "unit of work" in an internal replication queue. S3 uses an IAM role you specify in the replication rule to read objects from the source and write them to the destination on your behalf — meaning the permission to replicate is separate from the uploader's permissions, and for cross-account replication the destination bucket policy must allow that role to write.
+
+When you enable S3 Replication, replicating encrypted objects has a few easy-to-forget rules:
 
 - Unencrypted objects and SSE-S3 objects are replicated **by default**.
 - **SSE-C** objects (customer-provided keys): supported.
@@ -154,14 +160,46 @@ When you enable **S3 Replication** (copying objects to another bucket), replicat
 
 ### 3.6. Sharing an encrypted AMI with another account
 
-A common real-world scenario: you have an **AMI** (a machine image for launching EC2) with volumes encrypted by a KMS CMK, and you want to share it with another account. The process:
+To understand sharing an AMI across accounts, you first need to know what an **AMI** (Amazon Machine Image — the template for launching an EC2 instance) actually is.
 
-1. Modify the AMI's launch permission to add the target account.
-2. Share the KMS CMK used for encryption with the target account (via the key policy).
-3. The target account needs IAM permissions: `DescribeKey`, `ReEncrypt*`, `CreateGrant`, `Decrypt` on that key.
-4. When launching from the shared AMI, the target account can (optionally) re-encrypt the volumes with its own CMK.
+An AMI has three parts: metadata (name, CPU architecture, and so on), launch permission (who is allowed to use this AMI to launch an instance), and BlockDeviceMappings (which EBS volumes the AMI references).
 
-The gotcha: you cannot share an AMI encrypted with the default AWS Managed Key — you must use a **Customer Managed Key** in order to share the key.
+When you build an AMI from an instance via `create-image`, AWS does two things: it takes a **snapshot** of each EBS volume attached to the instance, then writes an AMI record pointing at those snapshots. Launching reverses this — AWS restores brand-new volumes, fully independent of the originals, from those snapshots.
+
+An AMI's storage cost is really the cost of storing its snapshots; the other parts are negligible. And because the snapshots are what sit behind it, deleting an AMI does **not** delete its snapshots — deleting an AMI often leaves the snapshots behind, still accruing charges.
+
+Because an AMI is a region-scoped resource, "sharing an AMI" comes in two flavors that differ sharply in cost and lifecycle:
+
+- **Grant launch permission** — add the target's account ID, organization ID, or OU ID to the AMI's launch permission (`modify-image-attribute --launch-permission`). The AMI stays in the source account, the source keeps paying for storage, and if the source deletes the AMI the target can no longer launch from it. This is "let them use it," not "let them own it."
+- **Copy to the target account** — the target runs `copy-image` to produce a brand-new AMI it owns and whose lifecycle it fully controls. This requires the source to grant **two** things: launch permission on the AMI, **and** `createVolumePermission` on each snapshot behind it. The snapshot grant is the most-forgotten step — without it the target can see the AMI but the copy will fail.
+
+Since a copy is really a read of the snapshots, the first step is to find the snapshots behind the AMI:
+
+```bash
+aws ec2 describe-images --image-ids ami-0abc123 \
+  --query 'Images[0].BlockDeviceMappings[*].Ebs.SnapshotId'
+```
+
+Then grant read access on each snapshot to the target account — the step people most often miss:
+
+```bash
+aws ec2 modify-snapshot-attribute --snapshot-id snap-0aaa111 \
+  --attribute createVolumePermission --operation-type add \
+  --user-ids 222233334444
+```
+
+When the AMI is encrypted, a few key constraints kick in. You **cannot** share a snapshot encrypted with the default AWS-managed key (`aws/ebs`) — the source must first copy its own AMI to a **Customer Managed Key** and share that version instead. You also need to add a statement to the CMK's key policy allowing the target account the `kms:DescribeKey`, `kms:Decrypt`, and `kms:CreateGrant` actions on the key. Without the KMS permissions, even a shared snapshot cannot be decrypted for the copy.
+
+Finally, when copying, the target should re-encrypt with its own key right there to cut any future dependency on the source's key:
+
+```bash
+aws ec2 copy-image \
+  --source-region us-east-1 --source-image-id ami-0abc123 \
+  --region us-east-1 --name "app-base-v1.2" \
+  --encrypted --kms-key-id <target-account-CMK>
+```
+
+This ties back to the region-scope property from section 3.3: because a KMS key cannot leave its region, sharing an encrypted AMI across regions is likewise a `copy-image` that re-encrypts with the destination region's key.
 
 ---
 

@@ -25,12 +25,12 @@ Bạn vừa đưa một hệ thống lưu trữ hồ sơ y tế và chứng từ
 
 Thay vì học 13 tính năng rời rạc, hãy gắn mỗi tính năng với **câu hỏi bảo mật** mà nó trả lời. Tất cả gom lại thành bốn lớp:
 
-| Câu hỏi compliance hỏi               | Lớp phòng thủ           | Tính năng S3                                                       |
-| ------------------------------------ | ----------------------- | ----------------------------------------------------------------- |
-| "Dữ liệu có mã hóa không? Ai giữ khóa?" | **Encryption**          | SSE-S3, SSE-KMS, SSE-C, DSSE-KMS, Client-Side, TLS in-transit      |
-| "Có chống sửa/xóa được không?"          | **Integrity & Retention** | Versioning, S3 Object Lock, Glacier Vault Lock, MFA Delete         |
-| "Ai được làm gì, cấp quyền ra sao?"     | **Access Control**      | Bucket Policy/IAM, Pre-signed URLs, Access Points, CORS, Object Lambda |
-| "Ai đã truy cập cái gì, lúc nào?"       | **Observability**       | S3 Server Access Logs, CloudTrail                                  |
+| Câu hỏi compliance hỏi                  | Lớp phòng thủ             | Tính năng S3                                                           |
+| --------------------------------------- | ------------------------- | ---------------------------------------------------------------------- |
+| "Dữ liệu có mã hóa không? Ai giữ khóa?" | **Encryption**            | SSE-S3, SSE-KMS, SSE-C, DSSE-KMS, Client-Side, TLS in-transit          |
+| "Có chống sửa/xóa được không?"          | **Integrity & Retention** | Versioning, S3 Object Lock, Glacier Vault Lock, MFA Delete             |
+| "Ai được làm gì, cấp quyền ra sao?"     | **Access Control**        | Bucket Policy/IAM, Pre-signed URLs, Access Points, CORS, Object Lambda |
+| "Ai đã truy cập cái gì, lúc nào?"       | **Observability**         | S3 Server Access Logs, CloudTrail                                      |
 
 Hai ý xuyên suốt cần ghim trước khi đi vào chi tiết:
 
@@ -45,36 +45,25 @@ Hai ý xuyên suốt cần ghim trước khi đi vào chi tiết:
 
 ### 2.1. SSE-S3 — để AWS lo hết
 
-SSE-S3 là kiểu mã hóa mặc định và đơn giản nhất. S3 mã hóa object bằng thuật toán AES-256, dùng khóa do chính AWS tạo, quản lý và xoay vòng. Bạn không thấy khóa, không quản lý khóa, không trả thêm tiền.
+SSE-S3 là kiểu mã hóa mặc định và đơn giản nhất, được AWS quản lý hoàn toàn. Cách hoạt động cũng giống với SSE-KMS, chỉ khác ở chỗ master key lúc này được S3 quản lý, không đụng tới KMS nên cũng gặp không các vấn đề về throttling.
 
-Mỗi object được mã hóa bằng một khóa riêng, không dùng chung một khóa cho cả bucket. Bản thân khóa đó lại được mã hóa thêm một lần nữa bằng một root key do AWS quản lý và xoay vòng định kỳ. Cơ chế lồng khóa này gọi là **envelope encryption** — dùng một khóa để mã hóa dữ liệu, rồi dùng một khóa khác để mã hóa chính khóa đó, giúp việc xoay vòng root key không phải mã hóa lại toàn bộ dữ liệu.
+Mỗi object được encrypt với 1 data key khác nhau -- sinh ra từ master key.
 
-Enable SSE-S3 thông qua header `x-amz-server-side-encryption: AES256`.
+Enable thông qua header `x-amz-server-side-encryption: AES256`.
 
 ### 2.2. SSE-KMS — kiểm soát và audit khóa
 
-SSE-KMS vẫn để S3 mã hóa, nhưng khóa nằm trong AWS KMS — dịch vụ quản lý khóa của AWS. Khác biệt lớn so với SSE-S3 nằm ở hai chữ: **kiểm soát và audit.** Bạn tự tạo khóa, đặt policy ai được dùng khóa, bật xoay vòng khóa, và quan trọng nhất: mọi lần khóa được dùng để mã hóa/giải mã đều được ghi lại trong CloudTrail.
+SSE-KMS vẫn để S3 mã hóa, nhưng khóa nằm trong AWS KMS — dịch vụ quản lý khóa của AWS. Khác biệt lớn so với SSE-S3 nằm ở hai chữ: **kiểm soát**.
 
-- **Vấn đề nó giải quyết:** "tôi cần biết chính xác ai giải mã dữ liệu, lúc nào, và muốn tự kiểm soát vòng đời khóa."
-- **Use case:** dữ liệu nhạy cảm, yêu cầu tách quyền (người quản trị bucket khác người quản trị khóa), cần dấu vết audit.
+Bạn tự tạo khóa, đặt policy ai được dùng khóa, bật xoay vòng khóa, và quan trọng nhất là mỗi lần truy cập khoá đều được lưu lại trong CloudTrail.
 
 Mỗi lần upload object, S3 gọi KMS API `GenerateDataKey`, mỗi lần download, S3 gọi `Decrypt`. Các lời gọi này tính vào quota KMS theo region (mặc định vài nghìn request/giây). Với bucket lưu lượng cực cao, bạn có thể bị **throttling** (KMS từ chối bớt request khi vượt quota).
 
-Để giải quyết vấn đề throttling khi sử dụng SSE-KMS, **S3 Bucket Keys** ra đời — S3 tạo một khóa cho bucket (gọi là bucket key), bucket sẽ dùng bucket key để sinh data key cho từng object thay vì gọi KMS mỗi lần, giảm số lời gọi KMS tới khoảng 99% (giảm cả chi phí lẫn nguy cơ throttling).
+Để giải quyết vấn đề throttling khi sử dụng SSE-KMS, **S3 Bucket Keys** ra đời — S3 nhờ KMS tạo một khóa cho bucket -- gọi là bucket key, bucket sẽ dùng bucket key để sinh data key cho từng object thay vì gọi KMS mỗi lần, giảm số lời gọi KMS tới khoảng 99% (giảm cả chi phí lẫn nguy cơ throttling).
 
 Bucket key **không phải master key.** Bản chất nó chỉ là một tầng khóa trung gian được chèn thêm vào, biến envelope encryption từ hai cấp thành ba cấp. Master key vẫn an toàn trong KMS service.
 
-Khi bật Bucket Keys, S3 gọi KMS một lần để sinh ra bucket key; KMS trả về bucket key ở hai dạng cùng lúc: bản rõ để S3 dùng ngay, và bản đã được mã hóa bằng KMS key để lưu lại. S3 giữ bản rõ trong bộ nhớ đệm một khoảng thời gian ngắn, và trong khung thời gian đó, khóa dữ liệu cho từng object được sinh và mã hóa cục bộ bằng bucket key, không cần đụng tới KMS nữa. Chuỗi bọc khóa vì thế là: KMS key bọc bucket key, bucket key bọc data key, và data key mới thực sự mã hóa object.
-
-Trong metadata của mỗi object, S3 lưu cả hai lớp: data key đã mã hóa bằng bucket key, và bucket key đã mã hóa bằng KMS key. Khi đọc object, S3 chỉ cần một lượt gọi `Decrypt` lên KMS để mở bucket key rồi cache lại, sau đó tự mở data key và giải mã object hoàn toàn cục bộ. Các object khác dùng chung bucket key đó không phải gọi KMS lần nào — đây chính là lý do số lời gọi KMS giảm mạnh.
-
-Ba lý do khiến bucket key không phải là khóa gốc:
-
-- **Quyền kiểm soát vẫn nằm trọn ở KMS key.** Nếu bạn disable KMS key hoặc thu hồi quyền trên nó, bucket key không còn giải mã được và toàn bộ dữ liệu trở nên không truy cập được. Mọi key policy, grant và dấu vết audit đều xoay quanh KMS key, không phải bucket key.
-- **Vòng đời rất ngắn.** S3 xoay bucket key liên tục; một bucket không chỉ có duy nhất một bucket key mà nhiều khóa được sinh ra theo thời gian và theo ngữ cảnh request. Nó giống một khóa cache tạm thời hơn là một khóa định danh lâu dài.
-- **Phạm vi bị bó hẹp.** Mỗi bucket key chỉ gắn với đúng một bucket và một KMS key nguồn, không thể dùng chéo sang bucket khác.
-
-Đánh đổi ở đây là bán kính ảnh hưởng (blast radius — phạm vi thiệt hại nếu một khóa bị lộ) của bucket key rộng hơn data key một chút: nếu một bucket key bị lộ, các object nằm trong khung thời gian nó phục vụ đều bị ảnh hưởng, thay vì chỉ một object. AWS chấp nhận đánh đổi này vì bucket key sống ngắn và chỉ tồn tại ở dạng bản rõ trong bộ nhớ của S3; xét về mô hình đe dọa, nếu kẻ tấn công lấy được khóa bản rõ từ bên trong S3 thì mô hình hai cấp cũ cũng đã thất thủ rồi.
+Nhược điểm của S3 Bucket Keys chính là bán kính ảnh hưởng (blast radius — phạm vi thiệt hại nếu một khóa bị lộ) của bucket key rộng hơn data key một chút: nếu một bucket key bị lộ, các object nằm trong khung thời gian nó phục vụ đều bị ảnh hưởng, thay vì chỉ một object.
 
 Chi tiết về cách KMS sinh khóa, envelope encryption và các loại khóa nằm trong bài [AWS Security & Encryption](/vi/posts/aws-security-encryption-overview) — bài này chỉ tập trung vào cách S3 vận dụng chúng.
 
@@ -158,7 +147,6 @@ Có ba khái niệm cần tách bạch:
 Trong khi Object Lock bảo vệ object trong S3, **Glacier Vault Lock** bảo vệ dữ liệu trong kho lưu trữ lạnh Amazon S3 Glacier. Nó cũng theo mô hình WORM, nhưng điểm đặc trưng là một **lock policy** (chính sách khóa): một khi đã khóa, chính sách đó trở thành bất biến — không ai sửa hay xóa được nữa, mãi mãi.
 
 - **Vấn đề nó giải quyết:** chứng minh với kiểm toán viên rằng dữ liệu lưu trữ dài hạn tuyệt đối không thể bị thay đổi.
-
 
 > Object Lock dành cho object trong S3 (cần enable versioning). Vault Lock dành cho Glacier vault, nhấn mạnh ở chính sách khóa vĩnh viễn.
 
@@ -254,10 +242,7 @@ Cụ thể: bucket chỉ giữ đúng một statement uỷ quyền (delegate) ch
       "Effect": "Allow",
       "Principal": "*",
       "Action": "*",
-      "Resource": [
-        "arn:aws:s3:::company-data-lake",
-        "arn:aws:s3:::company-data-lake/*"
-      ],
+      "Resource": ["arn:aws:s3:::company-data-lake", "arn:aws:s3:::company-data-lake/*"],
       "Condition": {
         "StringEquals": { "s3:DataAccessPointAccount": "111122223333" }
       }
@@ -313,18 +298,18 @@ Cách hoạt động: trước request thật, trình duyệt gửi một reques
 
 Những cặp dễ nhầm — ghim lại cho chắc trước khi vào phòng thi:
 
-| Tình huống / cặp dễ nhầm                          | Chốt nhanh                                                                                          |
-| ------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| SSE-KMS vs SSE-C                                   | KMS: khóa trong AWS, có audit CloudTrail. SSE-C: bạn gửi khóa mỗi request, **bắt buộc HTTPS**, AWS không lưu khóa |
-| Cần mã hóa 2 lớp cho compliance                    | **DSSE-KMS** — không phải SSE-KMS thường                                                            |
-| Lưu lượng KMS quá cao bị throttling                | Bật **S3 Bucket Keys** → giảm ~99% lời gọi KMS                                                      |
-| Governance vs Compliance (Object Lock)            | Governance: có quyền đặc biệt thì bypass được. Compliance: **không ai**, kể cả root                 |
-| Object Lock vs Glacier Vault Lock                 | Object Lock: object trong S3 (cần Versioning). Vault Lock: vault Glacier, **lock policy bất biến**  |
-| Retention Period vs Legal Hold                    | Period: có thời hạn, gia hạn được. Legal Hold: vô thời hạn, độc lập, bật/tắt bằng quyền             |
-| MFA Delete                                         | Chỉ **root** bật được; cần Versioning; bảo vệ "xóa version vĩnh viễn" + "tắt versioning"; chỉ qua CLI |
-| Default Encryption vs ép buộc mã hóa              | Default: SSE-S3 tự động từ 2023. Ép buộc: **bucket policy** Deny PutObject thiếu header (đánh giá trước) |
-| Nhiều team/prefix một bucket                       | **S3 Access Points** — mỗi team một AP với policy + DNS riêng                                        |
-| Biến đổi dữ liệu lúc đọc (redact, resize, đổi định dạng) | **S3 Object Lambda** — 1 bucket + Access Point + Object Lambda Access Point                     |
-| Website/trình duyệt gọi bucket khác               | **CORS**, cấu hình trên bucket đích                                                                 |
-| "Ai đã truy cập gì"                                | **S3 Access Logs** → ghi sang bucket KHÁC (đừng trỏ về chính nó)                                    |
-| Cho phép tải/đẩy file tạm thời, bucket vẫn private | **Pre-signed URL**                                                                                  |
+| Tình huống / cặp dễ nhầm                                 | Chốt nhanh                                                                                                        |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| SSE-KMS vs SSE-C                                         | KMS: khóa trong AWS, có audit CloudTrail. SSE-C: bạn gửi khóa mỗi request, **bắt buộc HTTPS**, AWS không lưu khóa |
+| Cần mã hóa 2 lớp cho compliance                          | **DSSE-KMS** — không phải SSE-KMS thường                                                                          |
+| Lưu lượng KMS quá cao bị throttling                      | Bật **S3 Bucket Keys** → giảm ~99% lời gọi KMS                                                                    |
+| Governance vs Compliance (Object Lock)                   | Governance: có quyền đặc biệt thì bypass được. Compliance: **không ai**, kể cả root                               |
+| Object Lock vs Glacier Vault Lock                        | Object Lock: object trong S3 (cần Versioning). Vault Lock: vault Glacier, **lock policy bất biến**                |
+| Retention Period vs Legal Hold                           | Period: có thời hạn, gia hạn được. Legal Hold: vô thời hạn, độc lập, bật/tắt bằng quyền                           |
+| MFA Delete                                               | Chỉ **root** bật được; cần Versioning; bảo vệ "xóa version vĩnh viễn" + "tắt versioning"; chỉ qua CLI             |
+| Default Encryption vs ép buộc mã hóa                     | Default: SSE-S3 tự động từ 2023. Ép buộc: **bucket policy** Deny PutObject thiếu header (đánh giá trước)          |
+| Nhiều team/prefix một bucket                             | **S3 Access Points** — mỗi team một AP với policy + DNS riêng                                                     |
+| Biến đổi dữ liệu lúc đọc (redact, resize, đổi định dạng) | **S3 Object Lambda** — 1 bucket + Access Point + Object Lambda Access Point                                       |
+| Website/trình duyệt gọi bucket khác                      | **CORS**, cấu hình trên bucket đích                                                                               |
+| "Ai đã truy cập gì"                                      | **S3 Access Logs** → ghi sang bucket KHÁC (đừng trỏ về chính nó)                                                  |
+| Cho phép tải/đẩy file tạm thời, bucket vẫn private       | **Pre-signed URL**                                                                                                |

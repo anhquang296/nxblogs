@@ -55,8 +55,6 @@ Trước khi nói về service, phải nắm nền tảng: dữ liệu có thể
 
 **Client-side encryption (mã hóa phía client)** thì ngược lại: client tự mã hóa trước khi gửi đi, và server **không bao giờ** thấy dữ liệu thô — nó chỉ lưu mớ ciphertext. Client tự quản lý khóa (có thể nhờ KMS qua kỹ thuật envelope encryption ở mục 3.2). Dùng khi bạn không tin tưởng cả phía lưu trữ, hoặc cần đảm bảo dữ liệu mã hóa đầu-cuối.
 
-Một điểm hay gây nhầm cho phòng thi: SSE-C (Server-Side Encryption with Customer-provided keys) nghe có chữ "customer" nhưng vẫn là **server-side** — bạn cung cấp khóa qua mỗi request, AWS dùng khóa đó mã hóa rồi quên ngay (không lưu khóa). Nó khác client-side ở chỗ việc mã hóa diễn ra trên server AWS, không phải trên máy bạn.
-
 ---
 
 ## 3. AWS KMS — trái tim của mã hóa trên AWS
@@ -115,14 +113,14 @@ Vậy vì sao lại cần tách biệt master key và data key? Đây là một 
 
 Điểm tinh tế và rất hay được hỏi: tại sao xoay khóa mà dữ liệu cũ vẫn giải mã được?
 
-Khi KMS xoay một khóa, nó sinh ra cryptographic material mới (một backing key mới) nhưng vẫn giữ lại toàn bộ các backing key cũ. Quan trọng nhất: key ID và ARN **không hề đổi**. Mỗi ciphertext (hoặc mỗi encrypted data key) mang theo metadata ghi rõ nó được mã hóa bằng phiên bản backing key nào. Khi giải mã, KMS đọc metadata đó và tự chọn đúng backing key tương ứng:
+Khi KMS xoay một khóa, nó sinh ra một backing key mới nhưng vẫn giữ lại toàn bộ các backing key cũ. Quan trọng nhất: Key ID và ARN **không hề đổi**, vỏ cũ nhưng ruột mới. Mỗi ciphertext (hoặc mỗi encrypted data key) mang theo metadata ghi rõ nó được mã hóa bằng phiên bản backing key nào. Khi giải mã, KMS đọc metadata đó và tự chọn đúng backing key tương ứng:
 
-- Dữ liệu **cũ**: KMS dùng lại backing key cũ (vẫn còn lưu) để giải mã.
+- Dữ liệu **cũ**: KMS dùng lại backing key cũ để giải mã.
 - Dữ liệu **mới**: mã hóa bằng backing key mới.
 
-Hệ quả then chốt: xoay khóa KHÔNG mã hóa lại dữ liệu cũ. Dữ liệu cũ vẫn nằm dưới material cũ cho tới khi bạn chủ động re-encrypt (ví dụ gọi API `ReEncrypt`). Và vì ứng dụng chỉ tham chiếu khóa qua key ID không đổi, toàn bộ quá trình này **trong suốt** — bạn không cần sửa code hay cấu hình gì.
+Key rotation không mã hóa lại dữ liệu cũ. Dữ liệu cũ vẫn được mã hoá bằng material cũ cho tới khi bạn chủ động re-encrypt (ví dụ gọi API `ReEncrypt`). Và vì ứng dụng chỉ tham chiếu khóa qua Key ID không đổi, toàn bộ quá trình này **trong suốt** — bạn không cần sửa code hay cấu hình gì.
 
-Kết hợp với envelope encryption ở mục 3.2, cơ chế này còn **rất rẻ**: khi xoay KMS key, chỉ các data key mới mới được bọc bằng backing key mới; các encrypted data key cũ vẫn giải mã được nhờ backing key cũ — và khối dữ liệu lớn thật sự hoàn toàn không bị đụng tới. Đây là lý do bạn có thể bật rotation cho hàng petabyte dữ liệu mà không tốn chi phí mã hóa lại.
+Kết hợp với envelope encryption ở mục 3.2, cơ chế này còn **rất rẻ**: khi thực hiện key rotation, chỉ các data key mới mới được bọc bằng backing key mới; các encrypted data key cũ vẫn giải mã được nhờ backing key cũ — và khối dữ liệu lớn thật sự hoàn toàn không bị đụng tới. Đây là lý do bạn có thể bật rotation cho hàng petabyte dữ liệu mà không tốn chi phí mã hóa lại.
 
 Hai đặc tính nữa hay bị hỏi:
 
@@ -131,9 +129,13 @@ Hai đặc tính nữa hay bị hỏi:
 
 ### 3.4. Multi-Region Keys
 
-Mặc định khóa KMS bị khóa chặt trong một region. **Multi-Region Keys** phá vỡ điều đó: một bộ khóa KMS giống hệt nhau đặt ở nhiều region, có cùng key ID và cùng key material (được AWS sao chép). Gồm một primary key và các replica key.
+Mặc định khóa KMS bị khóa chặt trong một region.
 
-Lợi ích cốt lõi: bạn mã hóa dữ liệu ở region A và giải mã ở region B mà không cần gọi cross-region hay re-encrypt — vì khóa hai bên là một. Lưu ý các khóa này được quản lý độc lập (mỗi cái có key policy riêng) dù chia sẻ cùng key material.
+**Multi-region keys** phá vỡ điều đó: một bộ khóa KMS giống hệt nhau được AWS sao chép và đặt ở nhiều region - có cùng Key ID và backing key. Gồm một primary key và các replica key.
+
+Nhờ đó, bạn mã hóa dữ liệu ở region A và giải mã ở region B mà không cần gọi cross-region hay re-encrypt — vì khóa hai bên là một.
+
+> Lưu ý các khóa này được quản lý độc lập (mỗi cái có key policy riêng) dù chia sẻ cùng backing key.
 
 Use case điển hình:
 
@@ -142,11 +144,15 @@ Use case điển hình:
 - Kiến trúc active-active đa region
 - Disaster recovery
 
-Cảnh báo của AWS: đây **không** phải lựa chọn mặc định — đa phần dữ liệu nên ở một region; chỉ dùng Multi-Region Keys khi thật sự có nhu cầu đa region, vì mỗi khóa ở mỗi region đều bị tính tiền riêng.
+> Multi-region keys **không** phải lựa chọn mặc định — đa phần dữ liệu nên ở một region; chỉ dùng Multi-Region Keys khi thật sự có nhu cầu đa region, vì mỗi khóa ở mỗi region đều bị tính tiền riêng.
 
 ### 3.5. S3 Replication với dữ liệu đã mã hóa
 
-Khi bật **S3 Replication** (sao chép object sang bucket khác), việc replicate object đã mã hóa có vài quy tắc dễ quên:
+S3 Replication là 1 cơ chế sao chép bất đồng bộ, tự động và 1 chiều từ bucket nguồn sang 1 hoặc nhiều bucket đích, hoạt động dựa trên sự thay đổi object của S3 Versioning chứ không phải quét định kỳ.
+
+Mỗi khi có object được tạo mới hoặc thay đổi, S3 sinh ra 1 version mới, version đó trở thành một "đơn vị công việc" trong hàng đợi replication nội bộ. S3 dùng một IAM role mà bạn chỉ định trong replication rule để thay mặt bạn đọc object từ nguồn và ghi sang đích — nghĩa là quyền replicate tách bạch khỏi quyền của người upload, và với cross-account replication thì bucket policy bên đích phải cho phép role đó ghi vào.
+
+Khi bật S3 Replication, việc replicate object đã mã hóa có vài quy tắc dễ quên:
 
 - Object không mã hóa và object SSE-S3 được replicate **mặc định**.
 - Object **SSE-C** (khóa do khách cung cấp): được hỗ trợ.
@@ -154,14 +160,46 @@ Khi bật **S3 Replication** (sao chép object sang bucket khác), việc replic
 
 ### 3.6. Chia sẻ AMI đã mã hóa qua account khác
 
-Một tình huống thực tế hay xuất hiện: bạn có một **AMI** (ảnh máy chủ để launch EC2) với volume mã hóa bằng KMS CMK, và muốn chia sẻ cho account khác. Quy trình:
+Muốn hiểu việc chia sẻ AMI giữa các account, trước hết phải biết một **AMI** (Amazon Machine Image — bản mẫu để khởi tạo EC2 instance) thực chất gồm những gì?
 
-1. Sửa launch permission của AMI để thêm account đích.
-2. Chia sẻ KMS CMK đã dùng để mã hóa cho account đích (qua key policy).
-3. Account đích cần IAM permission: `DescribeKey`, `ReEncrypt*`, `CreateGrant`, `Decrypt` trên khóa đó.
-4. Khi launch từ AMI được chia sẻ, account đích có thể (tùy chọn) re-encrypt volume bằng CMK của riêng họ.
+Một AMI có ba thành phần: metadata (tên, kiến trúc CPU...), launch permission (ai được phép dùng AMI này để launch instance), và BlockDeviceMappings (AMI tham chiếu tới những EBS volume nào).
 
-Điểm bẫy: không thể chia sẻ AMI được mã hóa bằng AWS Managed Key mặc định — bạn bắt buộc phải dùng **Customer Managed Key** thì mới chia sẻ được khóa.
+Khi bạn tạo AMI từ một instance qua `create-image`, AWS làm hai việc: chụp một **snapshot** cho từng EBS volume đang gắn vào instance, rồi ghi một bản ghi AMI trỏ tới các snapshot đó. Lúc launch thì ngược lại — AWS khôi phục các volume mới, hoàn toàn độc lập với volume gốc, từ những snapshot này.
+
+Chi phí lưu trữ AMI thực chất là chi phí lưu trữ snapshot, các thành phần còn lại không đáng kể. Và vì snapshot là thứ đứng sau, xóa AMI **không** đồng nghĩa với xóa snapshot — nhiều khi xóa AMI nhưng snapshot vẫn còn đó thì vẫn bị tính tiền.
+
+Vì AMI là tài nguyên theo region, "chia sẻ AMI" có hai cách với ý nghĩa rất khác nhau về chi phí và vòng đời:
+
+- **Cấp launch permission** — thêm account ID, organization ID hoặc OU ID của bên đích vào launch permission của AMI (`modify-image-attribute --launch-permission`). AMI vẫn nằm ở account nguồn, account nguồn vẫn trả phí lưu trữ, và nếu account nguồn xóa AMI thì bên đích không launch được nữa. Đây là kiểu "cho dùng nhờ", không phải "cho sở hữu".
+- **Copy sang account đích** — bên đích chạy `copy-image` để tạo ra một AMI mới thuộc sở hữu của chính mình và tự làm chủ vòng đời. Cách này cần account nguồn cấp **hai** quyền: launch permission trên AMI, **và** `createVolumePermission` trên từng snapshot đứng sau AMI. Quyền trên snapshot là bước hay bị quên nhất — thiếu nó, bên đích thấy AMI nhưng lệnh copy sẽ fail.
+
+Vì copy bản chất là đọc snapshot, bước đầu tiên là tìm ra các snapshot đứng sau AMI:
+
+```bash
+aws ec2 describe-images --image-ids ami-0abc123 \
+  --query 'Images[0].BlockDeviceMappings[*].Ebs.SnapshotId'
+```
+
+Rồi cấp quyền đọc trên từng snapshot cho account đích — chính bước hay bị bỏ sót:
+
+```bash
+aws ec2 modify-snapshot-attribute --snapshot-id snap-0aaa111 \
+  --attribute createVolumePermission --operation-type add \
+  --user-ids 222233334444
+```
+
+Khi AMI được mã hóa, có thêm vài ràng buộc về khóa. Bạn **không** thể chia sẻ một snapshot mã hóa bằng khóa AWS-managed mặc định (`aws/ebs`) — trước tiên account nguồn phải tự copy AMI của mình sang một **Customer Managed Key** rồi mới chia sẻ phiên bản đó. Ngoài ra phải thêm statement vào key policy của CMK cho phép account đích các quyền `kms:DescribeKey`, `kms:Decrypt`, `kms:CreateGrant` trên khóa. Thiếu quyền KMS thì dù đã share snapshot, bên đích vẫn không giải mã được để copy.
+
+Cuối cùng, khi copy, bên đích nên re-encrypt bằng khóa của chính mình ngay trong bước đó để cắt hẳn phụ thuộc vào khóa của account nguồn về sau:
+
+```bash
+aws ec2 copy-image \
+  --source-region us-east-1 --source-image-id ami-0abc123 \
+  --region us-east-1 --name "app-base-v1.2" \
+  --encrypted --kms-key-id <CMK-của-account-đích>
+```
+
+Điểm này nối lại với tính chất region-scope ở mục 3.3: vì khóa KMS không rời được region của nó, chia sẻ AMI mã hóa qua region khác cũng là một lần `copy-image` re-encrypt bằng khóa của region đích.
 
 ---
 

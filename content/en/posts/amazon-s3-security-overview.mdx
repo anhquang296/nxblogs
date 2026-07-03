@@ -45,36 +45,25 @@ This is the densest part of Section 14, and the one most likely to appear on the
 
 ### 2.1. SSE-S3 — let AWS handle everything
 
-SSE-S3 is the default and simplest form of encryption. S3 encrypts the object with the AES-256 algorithm, using a key that AWS creates, manages, and rotates. You don't see the key, don't manage the key, and don't pay extra.
+SSE-S3 is the default and simplest form of encryption, fully managed by AWS. It works the same way as SSE-KMS, the only difference being that the master key is now managed by S3 rather than KMS — so it never touches KMS and therefore never runs into throttling problems.
 
-Each object is encrypted with its own unique key, not one shared key across the whole bucket. That key is itself encrypted with a root key that AWS manages and rotates periodically. This nested-key mechanism is called **envelope encryption** — use one key to encrypt the data, then use another key to encrypt that key, so rotating the root key doesn't require re-encrypting all the data.
+Each object is encrypted with a different data key, derived from the master key.
 
-Enable SSE-S3 via the header `x-amz-server-side-encryption: AES256`.
+Enable it via the header `x-amz-server-side-encryption: AES256`.
 
 ### 2.2. SSE-KMS — key control and audit
 
-SSE-KMS still lets S3 do the encrypting, but the key lives in AWS KMS — AWS's key management service. The big difference from SSE-S3 comes down to two words: **control and audit.** You create the key yourself, set a policy for who can use it, enable key rotation, and most importantly: every time the key is used to encrypt/decrypt, it's logged in CloudTrail.
+SSE-KMS still lets S3 do the encrypting, but the key lives in AWS KMS — AWS's key management service. The big difference from SSE-S3 comes down to one word: **control.**
 
-- **The problem it solves:** "I need to know exactly who decrypts the data, when, and I want to control the key's lifecycle myself."
-- **Use case:** sensitive data, separation-of-duties requirements (the bucket admin is not the key admin), the need for an audit trail.
+You create the key yourself, set a policy for who can use it, enable key rotation, and most importantly, every access to the key is recorded in CloudTrail.
 
 Every time you upload an object, S3 calls the KMS API `GenerateDataKey`; every time you download, S3 calls `Decrypt`. These calls count against the KMS quota per region (a few thousand requests per second by default). For very high-traffic buckets, you can hit **throttling** (KMS rejecting excess requests once the quota is exceeded).
 
-To solve the throttling problem when using SSE-KMS, **S3 Bucket Keys** were introduced — S3 creates a key for the bucket (called a bucket key), and the bucket uses that bucket key to generate a data key for each object instead of calling KMS every time, cutting KMS calls by roughly 99% (reducing both cost and the risk of throttling).
+To solve the throttling problem when using SSE-KMS, **S3 Bucket Keys** were introduced — S3 asks KMS to create a key for the bucket (called a bucket key), and the bucket uses that bucket key to generate a data key for each object instead of calling KMS every time, cutting KMS calls by roughly 99% (reducing both cost and the risk of throttling).
 
 A bucket key is **not a master key.** It is really just an intermediate key layer inserted into the chain, turning envelope encryption from two tiers into three. The master key stays safe inside the KMS service.
 
-The three-tier key chain works like this. When you enable Bucket Keys, S3 calls KMS once to generate a bucket key; KMS returns the bucket key in two forms at once: a plaintext copy for S3 to use immediately, and a copy encrypted with the KMS key to store. S3 caches the plaintext copy in memory for a short time, and during that window every per-object data key is generated and encrypted locally with the bucket key, without touching KMS. The wrapping chain is therefore: the KMS key wraps the bucket key, the bucket key wraps the data key, and only the data key actually encrypts the object.
-
-In each object's metadata, S3 stores both layers: the data key encrypted with the bucket key, and the bucket key encrypted with the KMS key. When reading an object, S3 needs just one `Decrypt` call to KMS to open the bucket key and then caches it, after which it opens the data key and decrypts the object entirely locally. Other objects sharing that bucket key make no KMS call at all — this is exactly why the number of KMS calls drops so sharply.
-
-Three reasons a bucket key is not a root key:
-
-- **Control still rests entirely with the KMS key.** If you disable the KMS key or revoke permissions on it, the bucket key can no longer decrypt and all the data becomes inaccessible. Every key policy, grant, and audit trail revolves around the KMS key, not the bucket key.
-- **A very short lifespan.** S3 rotates bucket keys continuously; a bucket doesn't have a single bucket key but many, generated over time and per request context. It behaves more like a temporary cache key than a long-lived identity key.
-- **A tightly scoped reach.** Each bucket key is bound to exactly one bucket and one source KMS key, and can't be used across other buckets.
-
-The trade-off here is that the blast radius (the extent of damage if a key is exposed) of a bucket key is slightly wider than a data key's: if one bucket key is exposed, all objects within the time window it served are affected, rather than just one object. AWS accepts this trade-off because a bucket key is short-lived and exists in plaintext only in S3's memory; in threat-model terms, if an attacker can pull a plaintext key from inside S3, the old two-tier model would already have fallen too.
+The downside of S3 Bucket Keys is that the blast radius (the extent of damage if a key is exposed) of a bucket key is slightly wider than a data key's: if one bucket key is exposed, all objects within the time window it served are affected, rather than just one object.
 
 The details of how KMS generates keys, envelope encryption, and the key types live in the [AWS Security & Encryption](/en/posts/aws-security-encryption-overview) post — this article focuses only on how S3 puts them to use.
 
@@ -158,7 +147,6 @@ There are three concepts to keep distinct:
 While Object Lock protects objects in S3, **Glacier Vault Lock** protects data in the Amazon S3 Glacier cold-storage archive. It also follows the WORM model, but its defining feature is a **lock policy**: once locked, that policy becomes immutable — no one can ever modify or delete it again.
 
 - **The problem it solves:** proving to an auditor that long-term archived data absolutely cannot be altered.
-
 
 > Object Lock is for objects in S3 (requires versioning enabled). Vault Lock is for a Glacier vault, with the emphasis on a permanently locked policy.
 
@@ -254,10 +242,7 @@ Concretely: the bucket keeps a single statement that delegates control to every 
       "Effect": "Allow",
       "Principal": "*",
       "Action": "*",
-      "Resource": [
-        "arn:aws:s3:::company-data-lake",
-        "arn:aws:s3:::company-data-lake/*"
-      ],
+      "Resource": ["arn:aws:s3:::company-data-lake", "arn:aws:s3:::company-data-lake/*"],
       "Condition": {
         "StringEquals": { "s3:DataAccessPointAccount": "111122223333" }
       }
