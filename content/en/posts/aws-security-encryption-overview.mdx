@@ -53,7 +53,7 @@ Before talking about services, you need the fundamentals: data can be attacked a
 
 **Server-side encryption at rest** protects data sitting on disk. The server receives the raw data, encrypts it itself before writing to disk, and decrypts it before returning it to the client. The key is managed by the server — on AWS that's usually KMS. This is the mechanism behind SSE-S3, SSE-KMS, EBS volume encryption, and RDS encryption. The crucial point: the server **does** see the raw data at processing time.
 
-**Client-side encryption** is the opposite: the client encrypts the data before sending it, and the server **never** sees the raw data — it only stores the ciphertext. The client manages the key (possibly with KMS via envelope encryption, see section 3.2). Use it when you don't trust even the storage side, or when you need end-to-end encrypted data.
+**Client-side encryption** is the opposite: the client encrypts the data before sending it, and the server **never** sees the raw data — it only stores the ciphertext. The client manages the key (possibly with KMS via envelope encryption). Use it when you don't trust even the storage side, or when you need end-to-end encrypted data.
 
 ---
 
@@ -69,15 +69,6 @@ KMS has two key types by algorithm:
 
 - **Symmetric:** a single key (AES-256) used for both encryption and decryption. The key **never leaves KMS in plaintext** — you must call the KMS API to use it. This is the default type, used by most AWS services.
 - **Asymmetric:** a public/private key pair (RSA or ECC). The public key can be downloaded to encrypt or verify signatures outside AWS; the private key stays in KMS. Use it when the caller cannot call the KMS API (for example, encrypting from outside AWS), or for sign/verify operations.
-
-More important for the exam is the classification by who owns and pays for the key:
-
-| Key type | Who manages it | Rotation | Cost |
-| --- | --- | --- | --- |
-| **AWS Owned Keys** | AWS, shared across accounts, invisible to you | AWS handles it | Free |
-| **AWS Managed Keys** | AWS on your behalf, named `aws/<service>` | Automatic, yearly | Free |
-| **Customer Managed Keys (CMK)** | You create & manage them | Optional (see 3.3) | $1/month + usage |
-| **CMK with imported material (BYOK)** | You, using your own key material | Must rotate manually | $1/month + usage |
 
 **Key Policies** are an easy trap. Every KMS key has a resource-based policy attached directly to it, and no one can access the key unless the policy allows it — **not even the root account**. There are two flavors:
 
@@ -109,27 +100,24 @@ So why separate the master key from the data key at all? It's a deliberate desig
 
 - **AWS Managed Keys:** rotate automatically once a year, with no intervention from you.
 - **Customer Managed Keys:** automatic rotation is optional. Since April 2024, AWS lets you configure a flexible period from 90 days to 2560 days (default 365 days) and even rotate on demand at any time.
-- **Imported keys (BYOK):** **cannot** rotate automatically; you must do it manually.
+- **Imported keys:** cannot rotate automatically; you must do it manually.
 
 A subtle and frequently asked point: why does old data still decrypt after a key is rotated?
 
 When KMS rotates a key, it generates a new backing key but keeps all the old backing keys around. Most importantly: the Key ID and ARN **do not change** — same shell, new contents. Every ciphertext (or every encrypted data key) carries metadata recording which backing key version encrypted it. On decryption, KMS reads that metadata and automatically picks the matching backing key:
 
-- **Old** data: KMS reuses the old backing key to decrypt it.
+- **Old** data: decrypted with the old backing key.
 - **New** data: encrypted with the new backing key.
 
-Key rotation does not re-encrypt old data. Old data stays encrypted under the old material until you actively re-encrypt it (for example with the `ReEncrypt` API). And because your application only references the key by its unchanged Key ID, the whole process is **transparent** — you don't change any code or configuration.
+Key rotation does not re-encrypt old data. Old data stays encrypted under the old backing key until you actively re-encrypt it (for example with the `ReEncrypt` API). And because your application only references the key by its unchanged Key ID, the whole process is **transparent** — you don't change any code or configuration.
 
-Combined with envelope encryption from section 3.2, this mechanism is also **very cheap**: when you perform key rotation, only new data keys get wrapped with the new backing key; old encrypted data keys still decrypt thanks to the old backing keys — and the actual large data blocks are never touched. That's why you can enable rotation across petabytes of data with no re-encryption cost.
+A KMS key is a regional resource — a key cannot leave its region (the exception is Multi-Region Keys). When you copy an encrypted snapshot to another region, you must re-encrypt it with a key in the destination region.
 
-Two more properties the exam likes to ask about:
-
-- **A KMS key is tied to a single region** — a key cannot leave its region (the exception is Multi-Region Keys in section 3.4). When you copy an encrypted snapshot to another region, you must re-encrypt it with a key in the destination region.
-- **Throttling:** KMS has a per-second request limit. When exceeded, the API returns `ThrottlingException` — handle it with exponential backoff (retry with growing delays) or request a quota increase. This is the classic cause of failures in S3 replication or bulk encryption batch jobs.
+KMS has a per-second request limit. When exceeded, the API returns `ThrottlingException` — handle it with exponential backoff (retry with growing delays) or request a quota increase. This is the classic cause of failures in S3 replication or bulk encryption batch jobs.
 
 ### 3.4. Multi-Region Keys
 
-By default a KMS key is locked inside a single region.
+By default a KMS key is limited to a single region.
 
 **Multi-Region Keys** break that: a set of identical KMS keys that AWS replicates across multiple regions, sharing the same Key ID and backing key. There is one primary key and one or more replica keys.
 
@@ -137,14 +125,7 @@ Thanks to this, you can encrypt data in region A and decrypt it in region B with
 
 > Note that these keys are managed independently (each has its own key policy) even though they share the same backing key.
 
-Typical use cases:
-
-- DynamoDB Global Tables with client-side encryption
-- Aurora Global Database
-- Active-active multi-region architectures
-- Disaster recovery
-
-> Multi-Region Keys are **not** a default choice — most data should stay in a single region; use Multi-Region Keys only when you genuinely have a multi-region need, because each key in each region is billed separately.
+> Multi-Region Keys are **not** a default choice — most data should stay in a single region. Use Multi-Region Keys only when you genuinely have a multi-region need, because each key in each region is billed separately.
 
 ### 3.5. S3 Replication with encrypted data
 
@@ -402,44 +383,3 @@ Memory hook: see "CVE," "software vulnerability," "scan container images," "vuln
 Use case: complying with privacy regulations (GDPR, PCI-DSS, etc.), answering the question "which buckets is my customers' PII scattered across?".
 
 Memory hook: see "PII," "sensitive data," "S3," "privacy" → Macie.
-
-### 8.4. Three services, three different questions
-
-| Service | The question it answers | What it analyzes |
-| --- | --- | --- |
-| **GuardDuty** | "Is someone attacking my account?" | CloudTrail, VPC Flow Logs, DNS logs |
-| **Inspector** | "Do my workloads have vulnerabilities?" | EC2, ECR images, Lambda (CVE) |
-| **Macie** | "Do I have exposed sensitive data (PII)?" | Data in S3 |
-
----
-
-## 9. Quick comparison & picking the right service
-
-A roundup of the pairs/trios people mix up — this is where you score points in the exam:
-
-- **KMS vs CloudHSM:** default to KMS (AWS-managed, deeply integrated). Need a single-tenant hardware HSM, full control over the keys, FIPS 140-2 Level 3 → **CloudHSM**.
-- **Parameter Store vs Secrets Manager:** need automatic rotation or RDS/database credentials → **Secrets Manager**. Just need to store simple config/secrets cheaply → **Parameter Store**.
-- **GuardDuty vs Inspector vs Macie:** detect attacks/anomalous behavior → **GuardDuty**; find vulnerabilities (CVE) on EC2/ECR/Lambda → **Inspector**; find PII in S3 → **Macie**.
-- **WAF vs Shield vs Firewall Manager:** filter Layer 7 web exploits (SQLi/XSS) on a resource → **WAF**; defend against DDoS → **Shield** (Advanced for premium); manage rules across many accounts in an Organization → **Firewall Manager**.
-- **ACM for CloudFront:** the certificate must be in **us-east-1**; and ACM **cannot** be attached directly to EC2.
-- **Encryption at rest:** server-side (AWS encrypts, SSE-S3/SSE-KMS) vs client-side (you encrypt before sending); SSE-C is still **server-side** even though you supply the key.
-
----
-
-## Conclusion: four questions, one family of services
-
-Back to the review with the security team. Now you have the map to answer each question:
-
-1. "Data encrypted, who holds the keys?" → **KMS** for most cases (envelope encryption for large data, multi-region keys for multi-region apps); **CloudHSM** when you need a dedicated hardware HSM.
-2. "Where do secrets live, do they rotate?" → **Secrets Manager** when you need auto-rotation/DB credentials; **Parameter Store** for simple, free config. For TLS certificates, **ACM**.
-3. "Block web exploits and DDoS?" → **WAF** at Layer 7, **Shield** for DDoS, **Firewall Manager** for org-wide management.
-4. "How do I know I'm attacked / leaking?" → **GuardDuty** (threats), **Inspector** (vulnerabilities), **Macie** (PII in S3).
-
-What to carry into the exam room:
-
-- **KMS is the center:** remember the 4 KB limit → envelope encryption (`GenerateDataKey`), the three kinds of key ownership, key policies that block even root, and that keys are tied to a region.
-- **KMS vs CloudHSM:** only pick CloudHSM when the question stresses a single-tenant HSM / full key control / AWS may not touch the keys.
-- **Secrets Manager = rotation + RDS integration;** Parameter Store = cheap, simple, no built-in rotation.
-- **ACM:** free certs + auto-renewal, but CloudFront needs the cert in **us-east-1** and it **cannot** be used directly on EC2.
-- **WAF (L7) ≠ Shield (DDoS) ≠ Firewall Manager (multi-account management).** WAF cannot attach to an NLB.
-- **GuardDuty (threats) ≠ Inspector (vulnerabilities/CVE) ≠ Macie (PII in S3)** — this detective trio is all but guaranteed to show up on the exam.

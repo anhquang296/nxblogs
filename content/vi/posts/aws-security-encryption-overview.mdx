@@ -53,7 +53,7 @@ Trước khi nói về service, phải nắm nền tảng: dữ liệu có thể
 
 **Server-side encryption at rest (mã hóa phía server khi lưu)** bảo vệ dữ liệu nằm yên trên đĩa. Server nhận dữ liệu thô, tự mã hóa rồi mới ghi xuống đĩa, và tự giải mã trước khi trả về cho client. Khóa do server quản lý — trên AWS thường là KMS. Đây là cơ chế đằng sau SSE-S3, SSE-KMS, mã hóa EBS volume, mã hóa RDS. Điểm mấu chốt: server **có** thấy dữ liệu thô tại thời điểm xử lý.
 
-**Client-side encryption (mã hóa phía client)** thì ngược lại: client tự mã hóa trước khi gửi đi, và server **không bao giờ** thấy dữ liệu thô — nó chỉ lưu mớ ciphertext. Client tự quản lý khóa (có thể nhờ KMS qua kỹ thuật envelope encryption ở mục 3.2). Dùng khi bạn không tin tưởng cả phía lưu trữ, hoặc cần đảm bảo dữ liệu mã hóa đầu-cuối.
+**Client-side encryption (mã hóa phía client)** thì ngược lại: client tự mã hóa trước khi gửi đi, và server **không bao giờ** thấy dữ liệu thô — nó chỉ lưu mớ ciphertext. Client tự quản lý khóa (có thể nhờ KMS qua kỹ thuật envelope encryption). Dùng khi bạn không tin tưởng cả phía lưu trữ, hoặc cần đảm bảo dữ liệu mã hóa đầu-cuối.
 
 ---
 
@@ -69,15 +69,6 @@ KMS có hai loại khóa xét theo thuật toán:
 
 - **Symmetric (đối xứng):** một khóa duy nhất (AES-256) dùng cho cả mã hóa lẫn giải mã. Khóa không bao giờ rời KMS ở dạng thô — bạn phải gọi API KMS để dùng nó. Đây là loại mặc định, được hầu hết dịch vụ AWS dùng.
 - **Asymmetric (bất đối xứng):** cặp khóa public/private (RSA hoặc ECC). Public key tải về được để mã hóa hoặc xác minh chữ ký bên ngoài AWS; private key ở lại trong KMS. Dùng khi bên gọi không thể gọi API KMS (ví dụ mã hóa từ ngoài AWS), hoặc cho nghiệp vụ ký/xác minh (sign/verify).
-
-Quan trọng hơn cho phòng thi là phân loại theo ai sở hữu và trả tiền:
-
-| Loại khóa                       | Ai quản lý                                    | Xoay vòng              | Chi phí                 |
-| ------------------------------- | --------------------------------------------- | ---------------------- | ----------------------- |
-| **AWS Owned Keys**              | AWS, dùng chung nhiều account, bạn không thấy | AWS lo                 | Miễn phí                |
-| **AWS Managed Keys**            | AWS thay mặt bạn, tên `aws/<service>`         | Tự động mỗi năm        | Miễn phí                |
-| **Customer Managed Keys (CMK)** | Bạn tự tạo & quản lý                          | Tùy chọn (xem 3.3)     | $1/tháng + phí dùng     |
-| **CMK với khóa import (BYOK)**  | Bạn, dùng khóa tự mang vào                    | Phải xoay thủ công     | $1/tháng + phí dùng     |
 
 **Key Policies** là điểm dễ sập bẫy. Mỗi KMS key có một resource-based policy gắn trực tiếp lên khóa, và không ai truy cập được khóa nếu policy không cho phép — **kể cả root account**. Có hai kiểu:
 
@@ -109,27 +100,24 @@ Vậy vì sao lại cần tách biệt master key và data key? Đây là một 
 
 - **AWS Managed Keys:** tự động xoay mỗi năm một lần, bạn không can thiệp.
 - **Customer Managed Keys:** xoay tự động là tùy chọn. Từ tháng 4/2024, AWS cho phép cấu hình chu kỳ linh hoạt từ 90 ngày đến 2560 ngày (mặc định 365 ngày) và còn xoay theo yêu cầu (on-demand) bất cứ lúc nào.
-- **Khóa import (BYOK):** **không** xoay tự động được, phải làm thủ công.
+- **Khóa import:** không xoay tự động được, phải làm thủ công.
 
 Điểm tinh tế và rất hay được hỏi: tại sao xoay khóa mà dữ liệu cũ vẫn giải mã được?
 
 Khi KMS xoay một khóa, nó sinh ra một backing key mới nhưng vẫn giữ lại toàn bộ các backing key cũ. Quan trọng nhất: Key ID và ARN **không hề đổi**, vỏ cũ nhưng ruột mới. Mỗi ciphertext (hoặc mỗi encrypted data key) mang theo metadata ghi rõ nó được mã hóa bằng phiên bản backing key nào. Khi giải mã, KMS đọc metadata đó và tự chọn đúng backing key tương ứng:
 
-- Dữ liệu **cũ**: KMS dùng lại backing key cũ để giải mã.
+- Dữ liệu **cũ**: dùng lại backing key cũ để giải mã.
 - Dữ liệu **mới**: mã hóa bằng backing key mới.
 
-Key rotation không mã hóa lại dữ liệu cũ. Dữ liệu cũ vẫn được mã hoá bằng material cũ cho tới khi bạn chủ động re-encrypt (ví dụ gọi API `ReEncrypt`). Và vì ứng dụng chỉ tham chiếu khóa qua Key ID không đổi, toàn bộ quá trình này **trong suốt** — bạn không cần sửa code hay cấu hình gì.
+Key rotation không mã hóa lại dữ liệu cũ. Dữ liệu cũ vẫn được mã hoá bằng backing key cũ cho tới khi bạn chủ động re-encrypt (ví dụ gọi API `ReEncrypt`). Và vì ứng dụng chỉ tham chiếu khóa qua Key ID không đổi, toàn bộ quá trình này **trong suốt** — bạn không cần sửa code hay cấu hình gì.
 
-Kết hợp với envelope encryption ở mục 3.2, cơ chế này còn **rất rẻ**: khi thực hiện key rotation, chỉ các data key mới mới được bọc bằng backing key mới; các encrypted data key cũ vẫn giải mã được nhờ backing key cũ — và khối dữ liệu lớn thật sự hoàn toàn không bị đụng tới. Đây là lý do bạn có thể bật rotation cho hàng petabyte dữ liệu mà không tốn chi phí mã hóa lại.
+KMS key là một regional resource — khóa không thể rời region của nó (ngoại lệ là Multi-Region Keys). Khi copy snapshot mã hóa sang region khác, bạn phải re-encrypt bằng khóa của region đích.
 
-Hai đặc tính nữa hay bị hỏi:
-
-- **KMS key gắn với một region** — khóa không thể rời region của nó (ngoại lệ là Multi-Region Keys ở mục 3.4). Khi copy snapshot mã hóa sang region khác, bạn phải re-encrypt bằng khóa của region đích.
-- **Throttling:** KMS có giới hạn số request/giây. Khi vượt, API trả về `ThrottlingException` — xử lý bằng exponential backoff (thử lại với khoảng chờ tăng dần) hoặc xin tăng quota. Đây là nguyên nhân kinh điển khiến S3 replication hay batch job mã hóa hàng loạt bị lỗi.
+KMS có giới hạn số request/giây. Khi vượt, API trả về `ThrottlingException` — xử lý bằng exponential backoff (thử lại với khoảng chờ tăng dần) hoặc xin tăng quota. Đây là nguyên nhân kinh điển khiến S3 replication hay batch job mã hóa hàng loạt bị lỗi.
 
 ### 3.4. Multi-Region Keys
 
-Mặc định khóa KMS bị khóa chặt trong một region.
+Mặc định khóa KMS key bị giới hạn trong một region.
 
 **Multi-region keys** phá vỡ điều đó: một bộ khóa KMS giống hệt nhau được AWS sao chép và đặt ở nhiều region - có cùng Key ID và backing key. Gồm một primary key và các replica key.
 
@@ -137,14 +125,7 @@ Nhờ đó, bạn mã hóa dữ liệu ở region A và giải mã ở region B 
 
 > Lưu ý các khóa này được quản lý độc lập (mỗi cái có key policy riêng) dù chia sẻ cùng backing key.
 
-Use case điển hình:
-
-- DynamoDB Global Tables với client-side encryption
-- Aurora Global Database
-- Kiến trúc active-active đa region
-- Disaster recovery
-
-> Multi-region keys **không** phải lựa chọn mặc định — đa phần dữ liệu nên ở một region; chỉ dùng Multi-Region Keys khi thật sự có nhu cầu đa region, vì mỗi khóa ở mỗi region đều bị tính tiền riêng.
+> Multi-region keys **không** phải lựa chọn mặc định — đa phần dữ liệu nên ở một region. Chỉ dùng Multi-Region Keys khi thật sự có nhu cầu đa region, vì mỗi khóa ở mỗi region đều bị tính tiền riêng.
 
 ### 3.5. S3 Replication với dữ liệu đã mã hóa
 
@@ -402,44 +383,3 @@ Mẹo nhớ: thấy "CVE", "lỗ hổng phần mềm", "quét container image", 
 Use case: tuân thủ quy định về quyền riêng tư (GDPR, PCI-DSS...), trả lời câu hỏi "PII của khách hàng đang nằm rải rác ở những bucket nào?".
 
 Mẹo nhớ: thấy "PII", "dữ liệu nhạy cảm", "S3", "quyền riêng tư" → Macie.
-
-### 8.4. Ba dịch vụ, ba câu hỏi khác nhau
-
-| Dịch vụ       | Trả lời câu hỏi                                  | Phân tích cái gì                    |
-| ------------- | ------------------------------------------------ | ----------------------------------- |
-| **GuardDuty** | "Có ai đang tấn công tài khoản tôi không?"       | CloudTrail, VPC Flow Logs, DNS logs |
-| **Inspector** | "Workload của tôi có lỗ hổng không?"             | EC2, ECR image, Lambda (CVE)        |
-| **Macie**     | "Tôi có dữ liệu nhạy cảm (PII) lộ ra không?"     | Dữ liệu trong S3                    |
-
----
-
-## 9. So sánh nhanh & chọn đúng service
-
-Tổng hợp các cặp/bộ hay bị nhầm — đây là phần "ăn điểm" trong phòng thi:
-
-- **KMS vs CloudHSM:** mặc định dùng KMS (AWS quản lý, tích hợp sâu). Cần HSM phần cứng đơn-tenant, tự kiểm soát khóa hoàn toàn, FIPS 140-2 Level 3 → **CloudHSM**.
-- **Parameter Store vs Secrets Manager:** cần tự động xoay vòng hoặc creds RDS/database → **Secrets Manager**. Chỉ cần lưu config/secret đơn giản, tiết kiệm → **Parameter Store**.
-- **GuardDuty vs Inspector vs Macie:** phát hiện tấn công/hành vi bất thường → **GuardDuty**; tìm lỗ hổng (CVE) trên EC2/ECR/Lambda → **Inspector**; tìm PII trong S3 → **Macie**.
-- **WAF vs Shield vs Firewall Manager:** lọc web exploit L7 (SQLi/XSS) trên một resource → **WAF**; chống DDoS → **Shield** (Advanced cho premium); quản lý rule trên nhiều account trong Organization → **Firewall Manager**.
-- **ACM cho CloudFront:** chứng chỉ phải ở **us-east-1**; và ACM **không** gắn trực tiếp lên EC2.
-- **Encryption at rest:** server-side (AWS mã hóa, SSE-S3/SSE-KMS) vs client-side (bạn tự mã hóa trước khi gửi); SSE-C vẫn là **server-side** dù bạn cấp khóa.
-
----
-
-## Kết: bốn câu hỏi, một họ dịch vụ
-
-Quay lại buổi review với đội security. Giờ bạn có bản đồ để trả lời từng câu:
-
-1. "Dữ liệu mã hóa, ai giữ khóa?" → **KMS** cho hầu hết trường hợp (envelope encryption cho dữ liệu lớn, multi-region key cho app đa region); **CloudHSM** khi cần HSM phần cứng riêng.
-2. "Secret nằm ở đâu, có xoay vòng?" → **Secrets Manager** khi cần auto-rotation/creds DB; **Parameter Store** cho config đơn giản, miễn phí. Chứng chỉ TLS thì **ACM**.
-3. "Chặn web exploit và DDoS?" → **WAF** ở tầng 7, **Shield** chống DDoS, **Firewall Manager** quản lý toàn tổ chức.
-4. "Làm sao biết bị tấn công / rò rỉ?" → **GuardDuty** (mối đe dọa), **Inspector** (lỗ hổng), **Macie** (PII trong S3).
-
-Những điều cần mang theo vào phòng thi:
-
-- **KMS là trung tâm:** nhớ giới hạn 4 KB → envelope encryption (`GenerateDataKey`), ba loại quyền sở hữu khóa, key policy chặn cả root, và khóa gắn với region.
-- **KMS vs CloudHSM:** chỉ chọn CloudHSM khi đề nhấn mạnh HSM đơn-tenant / tự kiểm soát khóa / AWS không được chạm vào.
-- **Secrets Manager = rotation + tích hợp RDS;** Parameter Store = rẻ, đơn giản, không rotation sẵn.
-- **ACM:** cert miễn phí + tự gia hạn, nhưng CloudFront cần cert ở **us-east-1** và **không** dùng được trực tiếp trên EC2.
-- **WAF (L7) ≠ Shield (DDoS) ≠ Firewall Manager (quản lý đa account).** WAF không gắn được lên NLB.
-- **GuardDuty (đe dọa) ≠ Inspector (lỗ hổng/CVE) ≠ Macie (PII trong S3)** — bộ ba detective gần như chắc chắn xuất hiện trong đề.
