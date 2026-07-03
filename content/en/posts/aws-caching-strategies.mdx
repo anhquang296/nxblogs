@@ -163,12 +163,12 @@ TTL turns the question "how do I keep the cache absolutely correct" (very hard) 
 
 TTL appears at every AWS caching layer, but with different meanings and limits:
 
-| Service | Default TTL | Limit | Exam note |
-| --- | --- | --- | --- |
-| ElastiCache (Redis/Memcached) | Set by you when writing a key | Up to you | Usually paired with Lazy Loading to bound staleness |
-| DAX — item cache | 5 minutes | Configurable | Applies to `GetItem` / `BatchGetItem` |
-| CloudFront | Default TTL (configurable) | Min 0s … Max 1 year (default) | Governed by `Cache-Control` / `Expires` from the origin |
-| API Gateway cache | 300 seconds | Up to 3600 seconds; `0` = off | Set per stage, override per method |
+| Service                       | Default TTL                   | Limit                         | Exam note                                               |
+| ----------------------------- | ----------------------------- | ----------------------------- | ------------------------------------------------------- |
+| ElastiCache (Redis/Memcached) | Set by you when writing a key | Up to you                     | Usually paired with Lazy Loading to bound staleness     |
+| DAX — item cache              | 5 minutes                     | Configurable                  | Applies to `GetItem` / `BatchGetItem`                   |
+| CloudFront                    | Default TTL (configurable)    | Min 0s … Max 1 year (default) | Governed by `Cache-Control` / `Expires` from the origin |
+| API Gateway cache             | 300 seconds                   | Up to 3600 seconds; `0` = off | Set per stage, override per method                      |
 
 There's a classic trap to disambiguate: **DynamoDB TTL is not a cache TTL**. DynamoDB has an attribute called TTL, but it's used to **automatically delete expired items from the table** (e.g., cleaning up sessions or temporary data) — a data-cleanup mechanism that has nothing to do with keeping a copy around for speed. If the question asks "automatically remove old items from a DynamoDB table," that's DynamoDB TTL; if it asks "reduce DynamoDB read latency to microseconds," that's DAX.
 
@@ -182,14 +182,14 @@ TTL answers "when does an entry expire." Eviction answers a completely different
 
 For Redis (via ElastiCache), this behavior is controlled by the `maxmemory-policy` parameter. The policies split into two groups by the scope of eviction candidates: the `allkeys-*` group considers every key, while the `volatile-*` group only considers keys that have a TTL set.
 
-| Policy | Which key it drops | When it fits |
-| --- | --- | --- |
-| `noeviction` | Drops nothing; new writes are rejected (error) | When losing cached data is unacceptable |
-| `allkeys-lru` | The least recently used key (among all keys) | A good default for a pure cache |
-| `allkeys-lfu` | The least frequently used key | When "hotness" by frequency matters more than by recency |
-| `allkeys-random` | A random key | When all keys are roughly equal |
-| `volatile-lru` | LRU, but only among keys with a TTL | When the cache also holds data meant to be kept long-term |
-| `volatile-ttl` | The key with the shortest remaining TTL | When you want to prefer dropping things about to expire |
+| Policy           | Which key it drops                             | When it fits                                              |
+| ---------------- | ---------------------------------------------- | --------------------------------------------------------- |
+| `noeviction`     | Drops nothing; new writes are rejected (error) | When losing cached data is unacceptable                   |
+| `allkeys-lru`    | The least recently used key (among all keys)   | A good default for a pure cache                           |
+| `allkeys-lfu`    | The least frequently used key                  | When "hotness" by frequency matters more than by recency  |
+| `allkeys-random` | A random key                                   | When all keys are roughly equal                           |
+| `volatile-lru`   | LRU, but only among keys with a TTL            | When the cache also holds data meant to be kept long-term |
+| `volatile-ttl`   | The key with the shortest remaining TTL        | When you want to prefer dropping things about to expire   |
 
 LRU and LFU are the two foundational algorithms; their theory and implementation live in [Caching fundamentals](/posts/cache-fundamentals).
 
@@ -243,15 +243,15 @@ API Gateway can cache the response of each endpoint, so identical requests withi
 
 ElastiCache is a managed in-memory cache service, **sub-millisecond** latency, and the place where you implement the strategies from sections 2–3 yourself (mostly Cache-Aside). The SAA exam almost always asks one question: **Redis or Memcached?** The answer comes down to whether the workload needs the "advanced" features.
 
-| Criterion | Memcached | Redis (Valkey) |
-| --- | --- | --- |
-| Data model | Simple key-value | Many structures: string, hash, list, set, sorted set, bitmap, geospatial |
-| Multi-threaded | Yes (uses multiple cores) | Mostly single-threaded for command processing |
-| Persistence | No | Yes (snapshot / AOF) |
-| Replication & Multi-AZ | No | Yes (read replica, automatic failover) |
-| Backup / restore | No | Yes |
-| Pub/Sub, transactions | No | Yes |
-| Scaling | Add/remove nodes (simple sharding) | Cluster mode (sharding + replica) |
+| Criterion              | Memcached                          | Redis (Valkey)                                                           |
+| ---------------------- | ---------------------------------- | ------------------------------------------------------------------------ |
+| Data model             | Simple key-value                   | Many structures: string, hash, list, set, sorted set, bitmap, geospatial |
+| Multi-threaded         | Yes (uses multiple cores)          | Mostly single-threaded for command processing                            |
+| Persistence            | No                                 | Yes (snapshot / AOF)                                                     |
+| Replication & Multi-AZ | No                                 | Yes (read replica, automatic failover)                                   |
+| Backup / restore       | No                                 | Yes                                                                      |
+| Pub/Sub, transactions  | No                                 | Yes                                                                      |
+| Scaling                | Add/remove nodes (simple sharding) | Cluster mode (sharding + replica)                                        |
 
 A quick way to remember: **Memcached** fits when you need the simplest thing possible — a pure key-value cache, want to use multiple cores on a large node, scale horizontally by adding/removing nodes, and **accept losing the whole cache** when a node dies. **Redis** fits nearly every other case: when you need persistence, replicas and high availability, complex data structures (a leaderboard using a sorted set — see [Redis Sorted Set](/posts/redis-sorted-set-internals)), pub/sub, or transactions.
 
@@ -314,82 +314,3 @@ Don't forget the **cost** angle — a motivation often hidden in SAA questions:
 In other words, when a question stresses "reduce cost" alongside "reduce latency," caching is often part of the answer.
 
 > **Important note:** The "keyword cues" in this post are for quickly picking an answer in the exam room, where each scenario usually maps to exactly one service. In the real world, choosing a caching strategy takes much more deliberation: the business's actual consistency requirements, the latency budget, operational cost, and what damage stale data would actually cause. A keyword rarely maps as cleanly as it does on the exam.
-
----
-
-## 8. Tips & Tricks — reading the SAA keyword cues
-
-This is the most worthwhile part for the exam. Catch the keyword in the question, map it straight to a strategy or service.
-
-### By service
-
-| The question mentions… | Choose |
-| --- | --- |
-| Microseconds + DynamoDB, read-heavy | DAX |
-| Sub-millisecond, in-memory, cache SQL queries, session | ElastiCache |
-| Leaderboard, ranking, pub/sub, needs persistence/HA | ElastiCache for Redis |
-| Simple key-value cache, multi-threaded, large node, no durability needed | ElastiCache for Memcached |
-| Static content for global users, cache at the edge, CDN | CloudFront |
-| Reduce backend/Lambda calls for a read-heavy REST API | API Gateway caching |
-| Automatically delete expired items from a DynamoDB table | DynamoDB TTL (not a cache) |
-
-### By strategy
-
-| The question describes the problem… | Strategy |
-| --- | --- |
-| Only want to cache what's actually read; resilient to node failure | Cache-Aside / Lazy Loading |
-| A read right after a write must see the new version; fight stale data | Write-Through |
-| Extremely high writes, need a fast write path, accept the risk | Write-Back (rare in SAA) |
-| Write-heavy, read-light data polluting the cache | Write-Around |
-| Cap the maximum time data is allowed to be stale | TTL |
-| Cache out of memory, need to choose what to drop | Eviction policy (LRU/LFU…) |
-
-### A few common traps
-
-- "Strongly consistent read" + DynamoDB means **DAX doesn't help** (the request goes straight down to DynamoDB).
-- "No data loss" rules out **Write-Back** and rules out **Memcached** (no durability, no replication).
-- "Automatically delete old sessions" in DynamoDB is **DynamoDB TTL**, not DAX or ElastiCache.
-- CloudFront's Min TTL greater than 0 will **override** even `no-cache` from the origin.
-- `volatile-*` with no TTL set on any key behaves like `noeviction`.
-
----
-
-## 9. Summary comparison tables
-
-Strategies:
-
-| Strategy | Type | Problem it solves | Main trade-off | How it shows up on AWS |
-| --- | --- | --- | --- | --- |
-| Cache-Aside (Lazy Loading) | Read | Only caches what's read; resilient to node death | Miss penalty, prone to staleness | ElastiCache (you code it) |
-| Read-Through | Read | Centralizes cache-loading logic in the cache layer | Depends on the cache layer | DAX (transparent) |
-| Write-Through | Write | Cache always fresh after every write | Write penalty, cache bloat | ElastiCache, DAX |
-| Write-Back | Write | Extremely fast write path | Risk of data loss | Application pattern (not managed) |
-| Write-Around | Write | Avoids cache pollution by read-light data | Miss on the first read | ElastiCache + Lazy Loading |
-| TTL | Expiry | Caps how long data can be stale | Still stale within the TTL window | Every caching layer |
-| Eviction | Memory | Picks a key to drop when memory is full | May drop a still-used key | Redis `maxmemory-policy`, DAX LRU |
-
-Services:
-
-| Service | Layer | Latency | Caches | Recognition cue |
-| --- | --- | --- | --- | --- |
-| CloudFront | Edge (CDN) | milliseconds (near user) | Global static/dynamic content | Global, edge, offload origin |
-| API Gateway cache | API | — | REST API responses | TTL 300/3600, fewer backend calls |
-| ElastiCache | Application/DB | sub-millisecond | Any data (you code it) | Redis vs Memcached |
-| DAX | DynamoDB | microseconds | DynamoDB only | Transparent read-through/write-through |
-
----
-
-## Conclusion
-
-Back to the flash-sale product page from the opening. Now you can see clearly why "adding a cache" didn't fully rescue it: the latency dropped thanks to a read strategy (Lazy Loading), but the wrong price was because of a missing write strategy (Write-Through or deleting the key) and a missing TTL; and the midnight outage was because many keys expired at once — an expiration and stampede problem. A cache isn't a switch — it's four decisions that have to mesh.
-
-A few things to remember:
-
-- **The four questions** of every caching system: how to read, how to write, how long it lives (TTL), what to drop when full (eviction). Read SAA questions through this lens.
-- **Read:** Cache-Aside (Lazy Loading) is the default and resilient to node death; transparent Read-Through is DAX.
-- **Write:** Write-Through fights stale data; Write-Around avoids cache pollution; Write-Back is fast but risks data loss and has no managed service.
-- **AWS recommends** combining Lazy Loading + Write-Through + TTL, and caching is multi-layered (CloudFront, API Gateway, ElastiCache, DAX).
-- **Easily confused pairs:** DAX (microseconds, DynamoDB only, eventually consistent) vs ElastiCache (sub-ms, any source, you code it); DynamoDB TTL (deletes items) vs cache TTL (expires copies).
-- When a question mentions "reduce cost" next to "reduce latency," think caching — it cuts RCU, cuts origin load, cuts Lambda invocations.
-
-Recognize the **problem** the scenario describes first, and the strategy and service will reveal themselves.

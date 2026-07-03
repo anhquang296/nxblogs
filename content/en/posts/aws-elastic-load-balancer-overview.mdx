@@ -36,12 +36,12 @@ The core value every ELB type delivers:
 
 AWS splits ELB into four types, each working at a different **layer** of the networking model. A handy mnemonic about "layers": the lower the layer, the more "naive" and fast the load balancer (it only looks at IP and port); the higher the layer, the more it "understands" the content and routes intelligently — at the cost of more processing.
 
-| Type | Layer | What it can "see" | The problem it solves |
-| --- | --- | --- | --- |
-| **ALB** (Application Load Balancer) | Layer 7 | HTTP content: path, host, header | Smart routing for web/microservices |
-| **NLB** (Network Load Balancer) | Layer 4 | IP and port (TCP/UDP) | Extreme performance, static IP, any TCP/UDP protocol |
-| **GWLB** (Gateway Load Balancer) | Layer 3 | Raw IP packets | Insert a fleet of third-party security appliances transparently |
-| **CLB** (Classic Load Balancer) | Layer 4 + 7 | Limited | Legacy — do not pick it for new designs |
+| Type                                | Layer       | What it can "see"                | The problem it solves                                           |
+| ----------------------------------- | ----------- | -------------------------------- | --------------------------------------------------------------- |
+| **ALB** (Application Load Balancer) | Layer 7     | HTTP content: path, host, header | Smart routing for web/microservices                             |
+| **NLB** (Network Load Balancer)     | Layer 4     | IP and port (TCP/UDP)            | Extreme performance, static IP, any TCP/UDP protocol            |
+| **GWLB** (Gateway Load Balancer)    | Layer 3     | Raw IP packets                   | Insert a fleet of third-party security appliances transparently |
+| **CLB** (Classic Load Balancer)     | Layer 4 + 7 | Limited                          | Legacy — do not pick it for new designs                         |
 
 Before diving into each type, there is a set of concepts shared by all of them. Nail this framework and learning each type is just filling in the differences.
 
@@ -79,12 +79,12 @@ Suppose AZ-a has 2 targets and AZ-b has 8 targets. When **cross-zone load balanc
 
 The point that gets asked is that the **default differs by type**:
 
-| Type | Cross-zone default | Cost note |
-| --- | --- | --- |
-| **ALB** | On (cannot be turned off at the load balancer level) | Free, no inter-AZ data transfer charges |
-| **NLB** | Off | When on, inter-AZ traffic **is charged** as data transfer |
-| **GWLB** | Off | Same as NLB |
-| **CLB** | Off if created via API/CLI, on if created via Console | — |
+| Type     | Cross-zone default                                    | Cost note                                                 |
+| -------- | ----------------------------------------------------- | --------------------------------------------------------- |
+| **ALB**  | On (cannot be turned off at the load balancer level)  | Free, no inter-AZ data transfer charges                   |
+| **NLB**  | Off                                                   | When on, inter-AZ traffic **is charged** as data transfer |
+| **GWLB** | Off                                                   | Same as NLB                                               |
+| **CLB**  | Off if created via API/CLI, on if created via Console | —                                                         |
 
 ### 2.5. Sticky session
 
@@ -201,41 +201,3 @@ The **Classic Load Balancer** is AWS's first-generation load balancer, dating ba
 One frequently misunderstood point needs to be clear: CLB has **not** been retired. What ended in 2022 was the **EC2-Classic network**, not the Classic Load Balancer itself — CLB still runs inside a VPC. But it is **previous generation**, and AWS recommends moving to ALB or NLB for any new design.
 
 For the exam, CLB is almost never the right answer for a new architecture. Its role in questions is usually a distractor carrying the keyword "legacy" or "Classic" — see it and you can almost always eliminate it, unless the question explicitly talks about an old system that needs migrating.
-
----
-
-## 7. Which type? A decision map for the exam
-
-When reading an SAA question, follow the decision tree: start from the clearest need (smart HTTP routing, or inserting a security appliance, or performance/static IP) and eliminate from there.
-
-<ExcalidrawDiagram
-  src="/aws-elastic-load-balancer-decision-tree.excalidraw"
-  alt="Decision tree for choosing between ALB, GWLB, NLB and CLB for the SAA exam"
-/>
-
-The table below collects the **keywords** that often appear in questions and the load balancer type they point to:
-
-| Keyword in the question | Type |
-| --- | --- |
-| Routing by path/host/header, microservices, containers, WAF, Cognito, redirect, Lambda target | **ALB** |
-| Static IP / Elastic IP, millions of requests, ultra-low latency, TCP/UDP, gaming, IoT/MQTT, PrivateLink endpoint service | **NLB** |
-| Third-party security appliance, firewall/IDS/IPS, GENEVE, transparent inspection, centralized inspection VPC | **GWLB** |
-| Preserve the original client IP | **NLB** (and GWLB); ALB does it via `X-Forwarded-For` |
-| Legacy, Classic, EC2-Classic | **CLB** (almost always eliminate / migrate) |
-
----
-
-## Conclusion
-
-Back to the story we opened with: you do not need a "do-everything" load balancer, you need the right type for the right problem. When web traffic grows and needs smart routing, that is ALB. When you need speed, a static IP, or TCP/UDP protocols, that is NLB. When you need to insert a fleet of security appliances into the path transparently, that is GWLB. And CLB is just a relic of the past.
-
-What to pin down for the exam:
-
-- **Four types, four layers**: ALB (Layer 7, HTTP content), NLB (Layer 4, IP and port), GWLB (Layer 3, raw packets), CLB (legacy, avoid).
-- **The shared framework**: Listener accepts connections, Target Group collects destinations, Health Check keeps high availability — learn it once, use it for every type.
-- **Cross-zone defaults differ**: ALB on and free; NLB and GWLB off, and NLB charges inter-AZ data transfer when on.
-- **ALB has no static IP** (DNS only); **NLB has a static/Elastic IP** and preserves the client IP — this is a contrast pair that gets asked often.
-- **GWLB is the only one for third-party security appliances**: recognize it by GENEVE port 6081, the GWLB Endpoint, and the "transparent" requirement; do not pick NLB for this problem.
-- **NLB and GWLB** are the only two types that can front a PrivateLink endpoint service.
-
-Which load balancer type are you putting in front of your system, and why? Share below.

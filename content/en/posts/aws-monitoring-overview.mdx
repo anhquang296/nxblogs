@@ -27,12 +27,12 @@ This article is a map to help you draw a sharp line between those four "eyes." F
 
 Before the details, pin down this mental framework. All four services "look at" your system, but each looks at a different aspect:
 
-| Question                       | Service         | What it is                                                | Analogy                                                |
-| ------------------------------ | --------------- | --------------------------------------------------------- | ------------------------------------------------------ |
-| "How is the system running?"   | CloudWatch  | Performance & operational monitoring (metrics, logs, alarms) | A car's dashboard — speed, RPM, temperature         |
-| "Who did what?"                | CloudTrail  | Records the history of API calls (audit trail)            | A security camera — who came in, when, and did what    |
-| "Is the configuration compliant?" | AWS Config | Tracks resource configuration & evaluates compliance     | An inspector — photographs the state, checks the rules |
-| "React when something happens?" | EventBridge | Routes events to automated actions                       | A nervous system — an event triggers a reflex          |
+| Question                          | Service     | What it is                                                   | Analogy                                                |
+| --------------------------------- | ----------- | ------------------------------------------------------------ | ------------------------------------------------------ |
+| "How is the system running?"      | CloudWatch  | Performance & operational monitoring (metrics, logs, alarms) | A car's dashboard — speed, RPM, temperature            |
+| "Who did what?"                   | CloudTrail  | Records the history of API calls (audit trail)               | A security camera — who came in, when, and did what    |
+| "Is the configuration compliant?" | AWS Config  | Tracks resource configuration & evaluates compliance         | An inspector — photographs the state, checks the rules |
+| "React when something happens?"   | EventBridge | Routes events to automated actions                           | A nervous system — an event triggers a reflex          |
 
 The first three answer "what is/was happening" at three different layers: performance (CloudWatch), human/system behavior via API (CloudTrail), and configuration state (Config). The fourth — EventBridge — isn't about observing but about **acting**: it's the glue that ties the others together, turning an event into an automated reaction.
 
@@ -231,11 +231,11 @@ For more than that, you create a **Trail**:
 
 CloudTrail distinguishes three types of events — this is a favorite trap:
 
-| Event type            | What it is                                  | Default |
-| --------------------- | ------------------------------------------- | ------- |
+| Event type            | What it is                                    | Default |
+| --------------------- | --------------------------------------------- | ------- |
 | **Management events** | Control-plane operations (managing resources) | On      |
-| **Data events**       | Data-plane operations (very high volume)    | Off     |
-| **Insights events**   | Detecting unusual activity                  | Off     |
+| **Data events**       | Data-plane operations (very high volume)      | Off     |
+| **Insights events**   | Detecting unusual activity                    | Off     |
 
 Two features to remember:
 
@@ -299,14 +299,14 @@ Note: Config is a per-region service (the configuration recorder runs per region
 
 This is the most important part for the exam. All three sound like "monitoring," but each looks through a different **lens** at the same resource:
 
-| Criterion       | CloudWatch                    | CloudTrail                      | AWS Config                                           |
-| --------------- | ----------------------------- | ------------------------------- | ---------------------------------------------------- |
-| Core question   | How is the system performing? | Who did what (via API)?         | How is the resource configured & is it compliant?    |
-| Focus           | Performance & operations      | API activity / audit            | Configuration state & compliance                     |
-| Data            | Metrics, logs, events         | API call records                | Configuration items, compliance state                |
-| Time axis       | Real-time + measurement history | Event log over time           | Configuration snapshots & change history             |
-| Typical example | Alarm when CPU > 80%          | Detect who deleted a bucket     | Detect an SG open to `0.0.0.0/0`                     |
-| Control nature  | Monitoring                    | Audit / forensics               | Detective (detects), doesn't prevent                 |
+| Criterion       | CloudWatch                      | CloudTrail                  | AWS Config                                        |
+| --------------- | ------------------------------- | --------------------------- | ------------------------------------------------- |
+| Core question   | How is the system performing?   | Who did what (via API)?     | How is the resource configured & is it compliant? |
+| Focus           | Performance & operations        | API activity / audit        | Configuration state & compliance                  |
+| Data            | Metrics, logs, events           | API call records            | Configuration items, compliance state             |
+| Time axis       | Real-time + measurement history | Event log over time         | Configuration snapshots & change history          |
+| Typical example | Alarm when CPU > 80%            | Detect who deleted a bucket | Detect an SG open to `0.0.0.0/0`                  |
+| Control nature  | Monitoring                      | Audit / forensics           | Detective (detects), doesn't prevent              |
 
 A mantra to remember:
 
@@ -323,60 +323,3 @@ In practice these three are **not** mutually exclusive — they combine into one
 3. **CloudWatch** (via logs/alarms) or EventBridge sends the notification and can trigger an auto-fix — answering "how do we react."
 
 Three lenses, three answers, combining into the full picture of an incident.
-
----
-
-## 7. Tips & Tricks: spotting keywords in SAA questions
-
-In the exam you have only about 90 seconds per question. Recognition has to be almost reflexive. The table below maps common keywords to the answer:
-
-| Keyword/scenario in the question                                          | Answer                                              |
-| ------------------------------------------------------------------------- | --------------------------------------------------- |
-| CPU utilization, latency, error rate, metric, dashboard                   | **CloudWatch**                                      |
-| EC2 memory / RAM / disk space usage                                       | **CloudWatch Agent** (not available by default)     |
-| Need EC2 metrics every 1 minute instead of 5                              | **Enable Detailed Monitoring**                      |
-| Alert when a specific string appears in logs (`ERROR`...)                 | **CloudWatch Logs Metric Filter** → Alarm           |
-| Centralize logs from many accounts in one place, real time                | **CloudWatch Logs Subscription Filter** (→ Kinesis) |
-| Stream metrics near-real-time to a data lake (S3) / third-party tool      | **CloudWatch Metric Streams** (→ Firehose)          |
-| Automatically recover an EC2 instance when hardware fails                 | **CloudWatch Alarm** + EC2 recover action           |
-| Monitor endpoint uptime/latency from the outside                          | **CloudWatch Synthetics (Canary)**                  |
-| Find the top-N (IP/URL) contributors                                      | **CloudWatch Contributor Insights**                 |
-| Who called an API / deleted / modified a resource, source IP              | **CloudTrail**                                      |
-| Audit / governance / compliance forensics, long-term API history          | **CloudTrail** (trail → S3)                          |
-| Detect unusual API activity                                               | **CloudTrail Insights**                             |
-| Prove logs haven't been tampered with                                     | **CloudTrail log file integrity validation**        |
-| Is a resource configuration-compliant, configuration change history       | **AWS Config**                                      |
-| Automatically remediate a violating resource                              | **AWS Config** + SSM Automation (remediation)       |
-| Apply a set of compliance rules across an entire Organization             | **Config Conformance Pack**                         |
-| React to an event / serverless cron / route an event to Lambda            | **EventBridge**                                     |
-| React in real time to a specific API call                                 | **CloudTrail/Config + EventBridge**                 |
-
-A few quick tie-breakers when you're torn:
-
-- See "who" → almost certainly **CloudTrail**.
-- See "compliant / configuration / correctly configured" → **Config**.
-- See a performance measure (CPU, latency, metric, alarm) → **CloudWatch**.
-- See "react / trigger / when X happens then do Y" → **EventBridge**.
-- See "EC2 memory/disk" → don't forget the **CloudWatch Agent**.
-- See "prevent it in the first place" → that's **IAM/SCP**, NOT Config (Config only detects after the fact).
-
----
-
-## Conclusion
-
-Back to the four 3 a.m. questions, now you have a clear address for each:
-
-- "How is the system running?" → **CloudWatch** measures performance, stores logs, fires alarms.
-- "Who did what?" → **CloudTrail** records every API call like a security camera.
-- "Is the configuration compliant?" → **AWS Config** tracks state and evaluates compliance.
-- "How do we react?" → **EventBridge** turns events into automated actions.
-
-Things to burn into memory for the SAA exam:
-
-- **CloudWatch = performance**. Remember EC2 memory/disk needs the Agent, detailed monitoring for 1-minute metrics, metric filters turn logs into alarms, subscription filters centralize multi-account logs, billing alarms only in us-east-1.
-- **CloudTrail = "who did what"**. Event history is 90 days free but management events only; for long-term / data events, create a trail → S3. Distinguish management / data / insights events.
-- **AWS Config = configuration & compliance**. It's a detective control (detects, doesn't prevent), tracks change history, and can auto-remediate via SSM.
-- **EventBridge = react to events**. It's the glue that ties services together for event-driven architecture and automation.
-- **Three lenses, one picture**: Config says what is wrong, CloudTrail says who did it, CloudWatch/EventBridge help you react. In the exam they're mutually exclusive answers; in practice they complement each other.
-
-Master the boundaries between these four services, and you'll stop being fooled by "four answers that all sound right."

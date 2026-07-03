@@ -25,16 +25,16 @@ Here's the interesting part: **each question above maps to exactly one S3 securi
 
 Instead of memorizing 13 scattered features, tie each one to the **security question** it answers. They all group into four layers:
 
-| Question compliance asks                  | Defense layer             | S3 features                                                       |
-| ----------------------------------------- | ------------------------- | ----------------------------------------------------------------- |
-| "Is the data encrypted? Who holds the key?" | **Encryption**            | SSE-S3, SSE-KMS, SSE-C, DSSE-KMS, Client-Side, TLS in-transit      |
-| "Can we prevent tampering/deletion?"        | **Integrity & Retention** | Versioning, S3 Object Lock, Glacier Vault Lock, MFA Delete         |
+| Question compliance asks                    | Defense layer             | S3 features                                                            |
+| ------------------------------------------- | ------------------------- | ---------------------------------------------------------------------- |
+| "Is the data encrypted? Who holds the key?" | **Encryption**            | SSE-S3, SSE-KMS, SSE-C, DSSE-KMS, Client-Side, TLS in-transit          |
+| "Can we prevent tampering/deletion?"        | **Integrity & Retention** | Versioning, S3 Object Lock, Glacier Vault Lock, MFA Delete             |
 | "Who can do what, and how do we grant it?"  | **Access Control**        | Bucket Policy/IAM, Pre-signed URLs, Access Points, CORS, Object Lambda |
-| "Who accessed what, and when?"              | **Observability**         | S3 Server Access Logs, CloudTrail                                  |
+| "Who accessed what, and when?"              | **Observability**         | S3 Server Access Logs, CloudTrail                                      |
 
 Two ideas run through the whole post — pin them down first:
 
-- **Encryption and access control are two different things.** Encryption answers "if the data is taken, can the thief read it"; access control answers "who is allowed to touch the data". A perfectly encrypted bucket can still leak if the policy is wide open, and vice versa.
+- **Encryption and access control are two different things.** Encryption answers "if the data is taken, can the thief read it", access control answers "who is allowed to touch the data". A perfectly encrypted bucket can still leak if the policy is wide open, and vice versa.
 - **Versioning is the foundation.** The two most important anti-deletion features — Object Lock and MFA Delete — both require Versioning to be enabled first. Versioning means S3 retains every version of an object, so "delete" doesn't mean "lost".
 
 ---
@@ -90,7 +90,7 @@ DSSE-KMS is like SSE-KMS but applies **two layers** of encryption stacked on top
 With client-side encryption, you encrypt the data **before** sending it to S3 and hold the key yourself. S3 only ever receives and stores ciphertext — it never sees the original content or the key. On download, the client itself decrypts.
 
 - **The problem it solves:** "I don't trust handing the encryption work to a server, not even AWS."
-- **Use case:** extremely sensitive data; a zero-trust model toward the cloud provider.
+- **Use case:** extremely sensitive data, a zero-trust model toward the cloud provider.
 
 > Because the key travels over the network in every request, HTTPS is mandatory. Lose the key = lose the data, because AWS keeps no copy.
 
@@ -98,19 +98,19 @@ With client-side encryption, you encrypt the data **before** sending it to S3 an
 
 The four sections above are about data at rest. What about data **in motion** between the client and S3? That's encryption in transit, or SSL/TLS. S3 offers both an HTTP endpoint and an HTTPS endpoint.
 
-To enforce HTTPS only, you add a condition to the bucket policy that denies the request when `aws:SecureTransport` is `false`. SSE-C, as noted, mandates HTTPS already.
+To enforce HTTPS only, you add a condition to the bucket policy that denies the request when `aws:SecureTransport` is `false`.
+
+As noted, SSE-C mandates HTTPS already.
 
 ---
 
 ## 3. Default Encryption & enforcing encryption
 
-Knowing the encryption types is one thing; ensuring **no object slips through unencrypted** is another. This is where two supporting mechanisms come in.
+Knowing the encryption types is one thing, ensuring **no object slips through unencrypted** is another. This is where two supporting mechanisms come in.
 
 ### 3.1. Default Encryption
 
 Since the start of 2023, AWS enables default encryption on every bucket: every new object is automatically encrypted with SSE-S3, at no extra cost and with no configuration. You can change the bucket default to SSE-KMS if you want key control.
-
-- **The problem it solves:** human error — forgetting to enable encryption on upload.
 
 Default Encryption ensures the object is encrypted, but it **does not prevent** someone from deliberately uploading with a different encryption type. If you need to enforce a specific type, use a bucket policy.
 
@@ -118,7 +118,31 @@ Default Encryption ensures the object is encrypted, but it **does not prevent** 
 
 To force every upload to use exactly one encryption type (for example, accept only SSE-KMS), you write a **bucket policy** that denies the `s3:PutObject` action if the desired encryption header is missing or wrong.
 
-- **Remember the evaluation order:** the bucket policy is checked **before** Default Encryption applies. That means the policy is the "gatekeeper" — it can stop an invalid request right at the door, while Default Encryption is just a safety net that applies encryption to requests that were already allowed through.
+The policy below denies any `s3:PutObject` that isn't encrypted with SSE-KMS. The condition keys off `s3:x-amz-server-side-encryption` — the header the client uses to declare its encryption type on upload:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyNonKmsUploads",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::my-bucket/*",
+      "Condition": {
+        "StringNotEquals": {
+          "s3:x-amz-server-side-encryption": "aws:kms"
+        }
+      }
+    }
+  ]
+}
+```
+
+`StringNotEquals` is true whenever the header isn't `aws:kms` — including when the header is absent entirely — so this one statement blocks both wrong-type uploads and uploads that declare no encryption at all. To pin it down to a specific key, add a condition on the `s3:x-amz-server-side-encryption-aws-kms-key-id` header with that key's ARN.
+
+The bucket policy is checked before Default Encryption applies. That means the policy is the "gatekeeper" — it can stop an invalid request right at the door, while Default Encryption is just a safety net that applies encryption to requests that were already allowed through.
 
 ---
 
@@ -137,18 +161,12 @@ There are three concepts to keep distinct:
 - **Retention mode** — there are two:
   - **Governance mode:** most users can't delete/overwrite, but a few with a special permission (`s3:BypassGovernanceRetention`) can still override when needed. Suitable when you want strong protection but keep an "escape hatch" for admins.
   - **Compliance mode:** no one can delete/overwrite, **not even the root account**. Once set, the retention period can't be shortened and the mode can't be changed. Use it when regulations allow no exceptions whatsoever.
-- **Retention Period:** protects the object for a fixed period of time; it can be extended.
+- **Retention Period:** protects the object for a fixed period of time, it can be extended.
 - **Legal Hold:** protects the object **indefinitely**, completely independent of the retention period, freely turned on/off with the `s3:PutObjectLegalHold` permission. Think of it as a "freeze order" in a lawsuit: keep it as long as needed, remove it when done.
-
-- **Use case:** financial/medical records that must stay immutable for years; protecting backups from ransomware deletion.
 
 ### 4.2. Glacier Vault Lock
 
-While Object Lock protects objects in S3, **Glacier Vault Lock** protects data in the Amazon S3 Glacier cold-storage archive. It also follows the WORM model, but its defining feature is a **lock policy**: once locked, that policy becomes immutable — no one can ever modify or delete it again.
-
-- **The problem it solves:** proving to an auditor that long-term archived data absolutely cannot be altered.
-
-> Object Lock is for objects in S3 (requires versioning enabled). Vault Lock is for a Glacier vault, with the emphasis on a permanently locked policy.
+While Object Lock protects objects in S3, **Glacier Vault Lock** protects data in the Amazon S3 Glacier cold-storage archive. It also follows the WORM model, but its defining feature is a **lock policy** — once locked, that policy becomes immutable.
 
 ### 4.3. MFA Delete
 
@@ -177,7 +195,7 @@ To answer "who accessed which object, and when", you enable **S3 Server Access L
 
 A Pre-signed URL is a URL you sign that lets whoever holds it access a specific object for a limited time — inheriting exactly the permissions of the signer. This way you grant upload/download access **without making the bucket public**.
 
-- **Use case:** allow downloads of premium content only to logged-in users; a constantly changing list of who can download; let a user upload directly to an exact location in the bucket.
+- **Use case:** allow downloads of premium content only to logged-in users, a constantly changing list of who can download, let a user upload directly to an exact location in the bucket.
 - **Remember:** the URL is time-limited (CLI default is one hour, configurable). The bucket stays fully private.
 
 This feature has its own deep-dive — covering the upload flow with presigned POST, downloads, and CloudFront Signed Cookies integration for images: [S3 Presigned URL](/en/posts/s3-presigned-url).
@@ -280,14 +298,14 @@ Sometimes different applications need **different versions** of the same object:
 
 **S3 Object Lambda** lets you insert an AWS Lambda function in the middle to **transform the object at the moment it's read (GET)**, without storing copies. The required architecture: one bucket, one supporting S3 Access Point, and one **S3 Object Lambda Access Point**. The application calls the Object Lambda Access Point → it invokes the Lambda → the Lambda reads the original object through the supporting access point, transforms it, then returns the result to the caller.
 
-- **Use case:** redacting sensitive information like PII for analytics environments; converting formats (XML → JSON); resizing/watermarking images on the fly; enriching data from another source.
-- **Remember:** only **one bucket**; the key point is transforming on read, using the Access Point + Object Lambda Access Point pair.
+- **Use case:** redacting sensitive information like PII for analytics environments, converting formats (XML → JSON), resizing/watermarking images on the fly, enriching data from another source.
+- **Remember:** only **one bucket**, the key point is transforming on read, using the Access Point + Object Lambda Access Point pair.
 
 ### 6.3. S3 CORS
 
 CORS is a **browser** security mechanism, not an S3-specific one. An origin is defined by scheme + host + port (e.g. `https://www.example.com`). By default, a browser blocks JavaScript from one origin from calling resources on another origin — unless the target origin allows it via CORS headers.
 
-How it works: before the real request, the browser sends a "probe" request (a preflight) to S3; if the bucket's CORS configuration allows that origin, the browser then sends the real request.
+How it works: before the real request, the browser sends a "probe" request (a preflight) to S3, if the bucket's CORS configuration allows that origin, the browser then sends the real request.
 
 - **Classic exam use case:** a static website hosted on bucket A loads files (images, fonts, data) from bucket B → you must enable the **CORS configuration on bucket B** (the target bucket), allowing bucket A's origin.
 - **Remember:** see "browser", "cross-origin", "static website calling another bucket" → CORS, and the configuration goes on the **bucket being called**.

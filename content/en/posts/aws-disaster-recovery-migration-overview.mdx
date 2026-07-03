@@ -142,12 +142,12 @@ And here's the "aha": MGN uses **the exact same continuous block replication mec
 
 So what's the difference between DRS and MGN? Same engine, different purpose:
 
-| Criterion       | DRS (Disaster Recovery)                           | MGN (Migration)                                      |
-| --------------- | ------------------------------------------------- | ---------------------------------------------------- |
-| Purpose         | Protect a running system against disaster         | Move servers into AWS once                            |
-| Continuity      | Replicates forever, fails over only on incident   | Replicates until cutover, then stops                 |
-| After it's done | Source stays production, AWS is the DR site        | Source is decommissioned, AWS is production           |
-| Hint words      | "failover", "recovery", "DR"                       | "migrate", "lift-and-shift", "rehost"                |
+| Criterion       | DRS (Disaster Recovery)                         | MGN (Migration)                             |
+| --------------- | ----------------------------------------------- | ------------------------------------------- |
+| Purpose         | Protect a running system against disaster       | Move servers into AWS once                  |
+| Continuity      | Replicates forever, fails over only on incident | Replicates until cutover, then stops        |
+| After it's done | Source stays production, AWS is the DR site     | Source is decommissioned, AWS is production |
+| Hint words      | "failover", "recovery", "DR"                    | "migrate", "lift-and-shift", "rehost"       |
 
 > **Exam tip:** See "migrate / lift-and-shift many servers into AWS" → **MGN**. See "continuously replicate to protect against disaster / failover" → **DRS**. Same technology — don't let the question fool you.
 
@@ -249,13 +249,13 @@ When the network is too slow or too expensive to push tens of TB/PB over the wir
 
 AWS's rule of thumb: estimate the time to transfer over the network — **if it would take more than ~1 week**, using the **Snow Family** will be faster than pushing it online.
 
-| Criterion         | DataSync                                  | Snow Family                              |
-| ----------------- | ----------------------------------------- | ---------------------------------------- |
-| Channel           | Online (over the network)                 | Offline (physical device)                |
-| Sensible scale    | When the link is good enough              | When the network is slow/expensive, or data is huge |
-| How it runs       | On a schedule, incremental                | Copy onto the device, ship it back to AWS |
-| AWS target        | S3, EFS, FSx                              | Mainly into S3                            |
-| Plus point        | Automated, preserves metadata             | Independent of bandwidth; has edge compute |
+| Criterion      | DataSync                      | Snow Family                                         |
+| -------------- | ----------------------------- | --------------------------------------------------- |
+| Channel        | Online (over the network)     | Offline (physical device)                           |
+| Sensible scale | When the link is good enough  | When the network is slow/expensive, or data is huge |
+| How it runs    | On a schedule, incremental    | Copy onto the device, ship it back to AWS           |
+| AWS target     | S3, EFS, FSx                  | Mainly into S3                                      |
+| Plus point     | Automated, preserves metadata | Independent of bandwidth; has edge compute          |
 
 **Keywords:** `transfer large data online / scheduled` → **DataSync**; `network too slow / petabytes / offline` → **Snowball Edge**; `exabyte / 100PB` → **Snowmobile** (per the classic exam framing).
 
@@ -270,83 +270,3 @@ Its audience is very specific: enterprises already running VMware on-premises wh
 **Use case:** migrate VMware vSphere workloads to AWS "as-is"; use on-premises as the primary site and VMware Cloud on AWS as the DR site; or extend on-premises data center capacity into the cloud when needed.
 
 **Keywords:** `run VMware vSphere on AWS`, `migrate VMware workloads without re-platforming`, `vSphere / vSAN / NSX on AWS`, `extend on-premises VMware to cloud`.
-
----
-
-## 10. Telling them apart for good — comparison table
-
-This is the most confusing part, since many services "all sound like moving/copying data." Look through four lenses: what it moves, one-time vs continuous, online vs offline, and the purpose.
-
-| Criterion          | DRS                    | MGN                      | DMS                           | DataSync              | Snow Family           | AWS Backup             |
-| ------------------ | ---------------------- | ------------------------ | ----------------------------- | --------------------- | --------------------- | ---------------------- |
-| Purpose            | DR (failover)          | Server migration         | Database migration            | Move files/objects    | Move large datasets   | Centralized backup     |
-| What it moves      | Whole server (block)   | Whole server (block)     | Database (data + schema)      | Files / objects       | Files / objects       | Recovery points        |
-| One-time / continuous | Continuous          | One-time (cutover)       | One-time or continuous (CDC)  | Scheduled (incremental) | One-time           | Scheduled + on-demand  |
-| Online / Offline   | Online                 | Online                   | Online                        | Online                | Offline               | Online                 |
-| Different engine?  | —                      | —                        | Needs SCT if engines differ    | —                   | —                     | —                      |
-
-A mantra to remember:
-
-- **DRS = disaster protection** for servers (replicates forever, fails over on incident).
-- **MGN = move servers** into AWS (replicates until cutover, then stops).
-- **DMS = move databases** (source keeps running; add SCT for a different engine).
-- **DataSync = move files online** on a schedule.
-- **Snow Family = move data offline** via physical devices.
-- **AWS Backup = centralized backup** (Vault Lock for immutability).
-
----
-
-## 11. Tips & Tricks: spotting keywords in SAA questions
-
-In the exam you have about 90 seconds per question. The table below maps common keywords to the answer:
-
-| Keyword/scenario in the question                                                  | Answer                                          |
-| --------------------------------------------------------------------------------- | ----------------------------------------------- |
-| "How much data loss is acceptable", data loss tolerance                           | **RPO**                                          |
-| "How much downtime is acceptable", time to recover                                | **RTO**                                          |
-| Cheapest DR, can tolerate many hours of downtime                                  | **Backup & Restore**                             |
-| Keep the database running & replicating, build the rest at failover               | **Pilot Light**                                  |
-| A full copy running scaled-down, scale up on disaster                             | **Warm Standby**                                 |
-| Active-active, no downtime, RTO near zero                                         | **Multi-Site / Hot Site**                        |
-| Centralized backup across many services from one place                            | **AWS Backup**                                   |
-| Immutable backup / ransomware protection / can't be deleted even by root          | **AWS Backup Vault Lock** (Compliance mode)      |
-| Back up to another region / another account                                       | **AWS Backup** cross-region/cross-account        |
-| Continuously replicate servers for fast failover on disaster                      | **Elastic Disaster Recovery (DRS)**              |
-| Lift-and-shift / rehost a fleet of servers to AWS                                 | **Application Migration Service (MGN)**          |
-| Migrate a database while the source keeps running, low downtime                   | **Database Migration Service (DMS)**             |
-| Migrate a database with a different engine (Oracle→Aurora...)                     | **DMS + Schema Conversion Tool (SCT)**           |
-| Discover on-premises servers & dependencies to plan                               | **Application Discovery Service** (+ Migration Hub) |
-| Import an existing on-premises VM as EC2                                          | **VM Import/Export**                             |
-| Move large files online, on a schedule, into S3/EFS/FSx                           | **DataSync**                                     |
-| Network too slow, move petabytes offline                                          | **Snowball Edge**                                |
-| Move exabyte / ~100PB (per the classic exam framing)                              | **Snowmobile**                                   |
-| Run VMware vSphere on AWS, no re-platforming                                      | **VMware Cloud on AWS**                          |
-
-A few quick tie-breakers when you're torn:
-
-- See "failover / recovery / disaster protection" for servers → **DRS** (don't confuse with MGN).
-- See "migrate / lift-and-shift / rehost" servers → **MGN**.
-- See two differently named database engines → **DMS + SCT**.
-- See "can't be deleted / immutable / ransomware protection" → **Backup Vault Lock** (not IAM).
-- See "network too slow / data too large / offline transfer" → **Snow Family**.
-- See "cheapest" among the DR options → lean toward **Backup & Restore**; see "RTO near zero" → **Multi-Site**.
-
----
-
-## Conclusion
-
-Back to the two problems from the opening, now every question has a clear address:
-
-- "How much data is lost? How long to recover?" → measured by **RPO/RTO**, and you choose one of the 4 strategies (Backup & Restore → Pilot Light → Warm Standby → Multi-Site) to balance money against speed.
-- "How do we move the whole company to AWS?" → **MGN** for servers, DMS (+SCT) for databases, DataSync/Snow Family for bulk data, VMware Cloud on AWS for VMware workloads.
-
-Things to burn into memory for the SAA exam:
-
-- **RPO = how much data you lose** (drives backup frequency); RTO = how much downtime (drives DR strategy). Smaller = more expensive.
-- **The 4 DR strategies** along the money ↔ speed axis: Backup & Restore (cheap, slow) → Pilot Light → Warm Standby → Multi-Site (expensive, fastest).
-- **AWS Backup** = centralized backup; remember cross-region/cross-account and Vault Lock (WORM, ransomware protection, Compliance mode = hard lock).
-- **DRS vs MGN**: the same block-replication engine; DRS for disaster protection (continuous), MGN for a one-time lift-and-shift.
-- **DMS** migrates databases while the source keeps running; a different engine → needs SCT.
-- **DataSync** (online, scheduled) vs Snow Family (offline, slow network/huge data); VMware Cloud on AWS to lift VMware as-is into the cloud.
-
-Master the boundaries between these services, and you'll stop being fooled by "four answers that all sound right" in the exam room.

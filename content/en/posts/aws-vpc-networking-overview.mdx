@@ -29,14 +29,14 @@ This post is the map to tell them apart. For each service I'll go through: what 
 
 Every service in this post falls into one of six groups, each answering a different connectivity question:
 
-| Connectivity question                                   | Group                        | Key services                              |
-| ------------------------------------------------------- | ---------------------------- | ----------------------------------------- |
-| "How do I connect a VPC to an on-prem data center?"     | **Hybrid**                   | Site-to-Site VPN, Direct Connect          |
-| "How do I connect many VPCs / many accounts?"           | **VPC to VPC & scale**       | VPC Peering, Transit Gateway              |
-| "How do I reach AWS services privately, off the internet?" | **Private access**        | VPC Endpoints / PrivateLink               |
-| "How do I let IPv6 instances out but block inbound?"    | **IPv6 outbound**            | Egress-Only Internet Gateway              |
-| "How do I inspect and filter traffic for security?"     | **Inspection & filtering**   | Traffic Mirroring, Network Firewall       |
-| "Why is the data-transfer bill so high?"                | **Cost**                     | Data-transfer pricing rules               |
+| Connectivity question                                      | Group                      | Key services                        |
+| ---------------------------------------------------------- | -------------------------- | ----------------------------------- |
+| "How do I connect a VPC to an on-prem data center?"        | **Hybrid**                 | Site-to-Site VPN, Direct Connect    |
+| "How do I connect many VPCs / many accounts?"              | **VPC to VPC & scale**     | VPC Peering, Transit Gateway        |
+| "How do I reach AWS services privately, off the internet?" | **Private access**         | VPC Endpoints / PrivateLink         |
+| "How do I let IPv6 instances out but block inbound?"       | **IPv6 outbound**          | Egress-Only Internet Gateway        |
+| "How do I inspect and filter traffic for security?"        | **Inspection & filtering** | Traffic Mirroring, Network Firewall |
+| "Why is the data-transfer bill so high?"                   | **Cost**                   | Data-transfer pricing rules         |
 
 One idea runs through the whole post — pin it down first: when you connect two private networks (VPC to VPC, or VPC to on-prem), the foundational rule is that their address ranges must **not overlap**. Each network is described by a CIDR (an IP range). If two networks share an IP range, the router can't tell which side an address belongs to — so every form of peer-to-peer connection requires non-overlapping CIDRs. Keep that in mind, and let's walk through each group.
 
@@ -267,29 +267,3 @@ From those rules come the classic optimizations:
 - **Use Direct Connect** for steady large-volume transfers with on-prem: the per-GB price over DX is lower than over the internet, and it's stable.
 
 - **Remember:** "reduce data-transfer cost" means same AZ + private IPs, VPC Endpoints for S3/DynamoDB, CloudFront for egress, Direct Connect for large on-prem volumes. And always remember: ingress is free, egress is what costs.
-
----
-
-## 11. Exam wrap-up
-
-The scenarios and easily-confused pairs — pin them down before you walk into the exam:
-
-| Scenario / easily-confused pair                            | Quick answer                                                                             |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Connect on-prem to AWS **now**, over the internet, encrypted | **Site-to-Site VPN** (up in minutes; ~1.25 Gbps/tunnel)                                 |
-| Need a private, stable, high-bandwidth path, off the internet | **Direct Connect** (but takes weeks to months to provision)                              |
-| DX failed, need a cheap backup                             | **Site-to-Site VPN** as the failover path                                                |
-| DX but requires encryption in transit                     | **VPN over Direct Connect** (VPN runs on a Public VIF)                                    |
-| DX needs to reach many VPCs in many regions               | **Direct Connect Gateway**                                                                |
-| Reach AWS public services (S3) over DX, avoid the internet | **Public VIF**                                                                           |
-| Connect a few VPCs over private IPs                        | **VPC Peering** (no overlapping CIDR, non-transitive, must edit route tables)             |
-| Connect hundreds of VPCs / cross-account / transitive routing | **Transit Gateway**                                                                   |
-| Increase Site-to-Site VPN bandwidth beyond 1.25 Gbps      | **Transit Gateway + ECMP**                                                                |
-| Need IP multicast                                          | **Transit Gateway** (the only AWS service that supports it)                               |
-| Access **S3/DynamoDB** privately, free                    | **Gateway Endpoint**                                                                      |
-| Access other AWS services / a private service, or from on-prem | **Interface Endpoint / PrivateLink** (uses an ENI + Security Group)                  |
-| Expose your own service to many VPCs securely             | **PrivateLink + NLB**                                                                     |
-| IPv6 outbound only, block inbound                          | **Egress-Only Internet Gateway** (NAT Gateway is the IPv4 version)                        |
-| Filter/inspect a whole VPC at Layer 3–7, filter by domain | **AWS Network Firewall**                                                                  |
-| Copy traffic to feed an IDS / packet analysis             | **VPC Traffic Mirroring**                                                                 |
-| Reduce data-transfer cost                                 | Same AZ + private IPs; Gateway Endpoint for S3; CloudFront for egress; DX for on-prem     |

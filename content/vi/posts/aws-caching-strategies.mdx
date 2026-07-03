@@ -122,7 +122,7 @@ async function updateProduct(id: string, data: Product) {
   await saveProductToDb(id, data)
 
   await redis.set(`product:${id}`, JSON.stringify(data), 'EX', 300)
-  
+
   return data
 }
 ```
@@ -130,6 +130,7 @@ async function updateProduct(id: string, data: Product) {
 Bài toán nó giải quyết: **data consistency**. Vì cache được cập nhật theo từng lần ghi, một lần đọc ngay sau đó luôn thấy bản mới nhất. Đây là điểm khác biệt then chốt so với Lazy Loading vốn để cache "trôi" khỏi database giữa các lần miss.
 
 Đổi lại có ba nhược điểm
+
 - Một là **write penalty**: mỗi lần ghi tốn hai chuyến đi (cache và database), thêm độ trễ cho đường ghi.
 - Hai là cache phình to với cả những dữ liệu chẳng ai đọc — vì ta ghi vào cache mọi thứ được ghi, kể cả thứ sẽ không bao giờ được truy vấn lại.
 - Ba là vấn đề "missing data": ngay sau khi tạo một cache node mới (hoặc node bị thay), cache rỗng, và những dữ liệu chỉ-được-ghi-trong-quá-khứ sẽ không có trong cache cho tới lần ghi tiếp theo. Vì lý do thứ hai và thứ ba, AWS khuyến nghị **kết hợp** Write-Through với Lazy Loading và gắn TTL, thay vì dùng đơn lẻ.
@@ -280,7 +281,7 @@ const client = new DynamoDB.DocumentClient({ service: dax })
 
 async function getProduct(id: string) {
   const result = await client.get({ TableName: 'Products', Key: { id } }).promise()
-  
+
   return result.Item
 }
 ```
@@ -316,82 +317,3 @@ Và cache trên AWS là nhiều tầng, không phải một điểm. Một reque
 Nói cách khác, khi đề nhấn "giảm chi phí" bên cạnh "giảm độ trễ", cache thường là một phần của đáp án.
 
 > **Lưu ý quan trọng:** Các "keyword nhận diện" trong bài là để chọn nhanh đáp án trong phòng thi, nơi mỗi tình huống thường ánh xạ tới đúng một dịch vụ. Ngoài thực tế, chọn chiến lược cache phải cân nhắc kỹ hơn nhiều: yêu cầu consistency thật sự của nghiệp vụ, ngân sách độ trễ, chi phí vận hành, và rủi ro dữ liệu cũ gây hậu quả gì. Một keyword hiếm khi ánh xạ sạch sẽ như trong đề.
-
----
-
-## 8. Tips & Tricks — đọc vị keyword đề thi SAA
-
-Đây là phần đáng nhớ nhất khi đi thi. Bắt keyword trong đề, ánh xạ thẳng sang chiến lược hoặc dịch vụ.
-
-### Theo dịch vụ
-
-| Đề nhắc tới…                                                | Chọn                            |
-| ----------------------------------------------------------- | ------------------------------- |
-| Micro-giây + DynamoDB, read-heavy                           | DAX                             |
-| Sub-millisecond, in-memory, cache query SQL, session        | ElastiCache                     |
-| Leaderboard, bảng xếp hạng, pub/sub, cần persistence/HA     | ElastiCache for Redis           |
-| Cache key-value đơn giản, đa luồng, node lớn, không cần bền | ElastiCache for Memcached       |
-| Static content cho người dùng toàn cầu, cache ở biên, CDN   | CloudFront                      |
-| Giảm số lần gọi backend/Lambda cho REST API đọc nhiều       | API Gateway caching             |
-| Tự xóa item hết hạn khỏi bảng DynamoDB                      | DynamoDB TTL (không phải cache) |
-
-### Theo chiến lược
-
-| Đề mô tả vấn đề…                                          | Chiến lược                  |
-| --------------------------------------------------------- | --------------------------- |
-| Chỉ muốn cache thứ thực sự được đọc; bền trước sự cố node | Cache-Aside / Lazy Loading  |
-| Đọc ngay sau ghi phải thấy bản mới; chống dữ liệu cũ      | Write-Through               |
-| Ghi cực nhiều, cần đường ghi nhanh, chấp nhận rủi ro      | Write-Back (hiếm trong SAA) |
-| Dữ liệu ghi-nhiều-đọc-ít làm ô nhiễm cache                | Write-Around                |
-| Giới hạn tối đa thời gian dữ liệu được phép cũ            | TTL                         |
-| Cache đầy bộ nhớ, cần chọn cái để bỏ                      | Eviction policy (LRU/LFU…)  |
-
-### Vài cái bẫy hay gặp
-
-- "Strongly consistent read" + DynamoDB thì **DAX không giúp** (request đi thẳng xuống DynamoDB).
-- "Không được mất dữ liệu" thì loại **Write-Back** và loại **Memcached** (không bền, không replication).
-- "Tự động xóa session cũ" trong DynamoDB là **DynamoDB TTL**, không phải DAX hay ElastiCache.
-- Min TTL của CloudFront lớn hơn 0 sẽ **đè** cả `no-cache` từ origin.
-- `volatile-*` mà không gắn TTL cho key nào thì hành xử như `noeviction`.
-
----
-
-## 9. Bảng so sánh tổng hợp
-
-Chiến lược:
-
-| Chiến lược                 | Loại   | Bài toán giải quyết                         | Đánh đổi chính             | Hiện hình trên AWS                |
-| -------------------------- | ------ | ------------------------------------------- | -------------------------- | --------------------------------- |
-| Cache-Aside (Lazy Loading) | Read   | Chỉ cache thứ được đọc; bền trước node chết | Miss penalty, dễ stale     | ElastiCache (tự code)             |
-| Read-Through               | Read   | Gom logic nạp cache vào lớp cache           | Phụ thuộc lớp cache        | DAX (trong suốt)                  |
-| Write-Through              | Write  | Cache luôn mới sau mỗi ghi                  | Write penalty, phình cache | ElastiCache, DAX                  |
-| Write-Back                 | Write  | Đường ghi cực nhanh                         | Rủi ro mất dữ liệu         | Pattern ứng dụng (không managed)  |
-| Write-Around               | Write  | Tránh ô nhiễm cache bởi dữ liệu ít đọc      | Miss ở lần đọc đầu         | ElastiCache + Lazy Loading        |
-| TTL                        | Expiry | Chặn trần thời gian dữ liệu cũ              | Vẫn cũ trong phạm vi TTL   | Mọi tầng cache                    |
-| Eviction                   | Memory | Chọn key bỏ khi đầy bộ nhớ                  | Có thể bỏ key còn dùng     | Redis `maxmemory-policy`, DAX LRU |
-
-Dịch vụ:
-
-| Dịch vụ           | Tầng        | Độ trễ               | Cache cho                    | Điểm nhận diện                        |
-| ----------------- | ----------- | -------------------- | ---------------------------- | ------------------------------------- |
-| CloudFront        | Biên (CDN)  | mili-giây (gần user) | Nội dung tĩnh/động toàn cầu  | Global, edge, giảm tải origin         |
-| API Gateway cache | API         | —                    | Phản hồi REST API            | TTL 300/3600, giảm gọi backend        |
-| ElastiCache       | Ứng dụng/DB | sub-millisecond      | Bất kỳ dữ liệu nào (tự code) | Redis vs Memcached                    |
-| DAX               | DynamoDB    | micro-giây           | Chỉ DynamoDB                 | Read-through/write-through trong suốt |
-
----
-
-## Kết luận
-
-Quay lại trang sản phẩm flash sale ở đầu bài. Bây giờ bạn thấy rõ vì sao "thêm cache" không cứu được nó một cách trọn vẹn: latency giảm là nhờ một read strategy (Lazy Loading), nhưng giá hiển thị sai là vì thiếu một write strategy (Write-Through hoặc xóa key) và thiếu TTL; còn cú sập lúc nửa đêm là do nhiều key cùng hết hạn — một vấn đề về expiration và stampede. Cache không phải một cái công tắc, mà là bốn quyết định ăn khớp nhau.
-
-Vài điều cần nhớ:
-
-- **Bốn câu hỏi** của mọi hệ thống cache: đọc thế nào, ghi thế nào, sống bao lâu (TTL), bỏ gì khi đầy (eviction). Đọc đề SAA qua khung này.
-- **Read:** Cache-Aside (Lazy Loading) là mặc định và bền trước node chết; Read-Through trong suốt chính là DAX.
-- **Write:** Write-Through chống dữ liệu cũ; Write-Around tránh ô nhiễm cache; Write-Back nhanh nhưng rủi ro mất dữ liệu và không có dịch vụ managed.
-- **AWS recommend** kết hợp Lazy Loading + Write-Through + TTL, và cache là nhiều tầng (CloudFront, API Gateway, ElastiCache, DAX).
-- **Cặp đôi dễ nhầm:** DAX (micro-giây, chỉ DynamoDB, eventually consistent) vs ElastiCache (sub-ms, mọi nguồn, tự code); DynamoDB TTL (xóa item) vs cache TTL (hết hạn bản sao).
-- Khi đề nhắc "giảm chi phí" cạnh "giảm độ trễ", hãy nghĩ tới cache — nó cắt RCU, cắt tải origin, cắt số lần invoke Lambda.
-
-Nhận ra **bài toán** mà tình huống mô tả trước, rồi chiến lược và dịch vụ sẽ tự lộ ra.

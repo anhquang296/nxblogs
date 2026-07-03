@@ -86,7 +86,10 @@ Lex is the service for building conversational chatbots, using the same ASR + NL
 
 **Typical flow — booking an appointment by phone:**
 
-<ExcalidrawDiagram src="/lex-connect-appointment-flow.excalidraw" alt="Phone appointment-booking flow from Connect to Lex, Lambda then written into the CRM" />
+<ExcalidrawDiagram
+  src="/lex-connect-appointment-flow.excalidraw"
+  alt="Phone appointment-booking flow from Connect to Lex, Lambda then written into the CRM"
+/>
 
 A customer dials Connect's virtual contact-center number (**call**). Connect streams the call audio to Lex (**stream**); Lex recognizes the speech and identifies the "book an appointment" **intent** along with the slots it needs (date, time). Once the intent is clear, Lex calls a Lambda function (**invoke**) to run the business logic — check availability and write the booking into the CRM system (**schedule**). The whole thing runs automatically, with no human agent.
 
@@ -121,7 +124,10 @@ Comprehend Medical is a version of Comprehend specialized for clinical text, und
 
 **Typical flow — feeding Comprehend Medical:**
 
-<ExcalidrawDiagram src="/comprehend-medical-flow.excalidraw" alt="Three ingestion paths from S3, Kinesis Data Firehose and Transcribe into Comprehend Medical" />
+<ExcalidrawDiagram
+  src="/comprehend-medical-flow.excalidraw"
+  alt="Three ingestion paths from S3, Kinesis Data Firehose and Transcribe into Comprehend Medical"
+/>
 
 Comprehend Medical has three common ingestion paths. Clinical documents are kept in the Amazon S3 object store and submitted for batch analysis (**documents**). Continuously generated data is streamed through Kinesis Data Firehose for near-real-time processing (**real-time**). And spoken input — a doctor dictating notes, or a patient conversation — is first run through Amazon Transcribe to turn it into text (**text**). All three converge on Comprehend Medical, which extracts the medical entities and PHI (**extract**).
 
@@ -185,41 +191,3 @@ Textract uses advanced OCR to extract not just text but **structured data** (key
 **Use case:** Process invoices, IDs, forms, and financial/tax/medical documents.
 
 **Keywords:** `extract text from documents`, `scanned documents / PDF`, `forms & tables`, `OCR`, `process invoices / IDs`.
-
----
-
-## Tips & Tricks — Recognize the Keyword and Pick the Service
-
-This is the most important part for the exam. Read the prompt, catch the keyword, map it straight to a service.
-
-### By input data type
-
-| When the prompt says...                              | Pick               |
-| ---------------------------------------------------- | ------------------ |
-| Images, video, faces, objects                        | Rekognition        |
-| Spoken audio → need text out                         | Transcribe         |
-| Text → need speech out                               | Polly              |
-| Text that needs translating to another language      | Translate          |
-| Text to analyze for sentiment / entities / topics    | Comprehend         |
-| Medical / clinical text                              | Comprehend Medical |
-| Scanned documents / PDF / forms / tables             | Textract           |
-| Conversation / chatbot / contact center             | Lex (+ Connect)    |
-| A search query over a document store                | Kendra             |
-| Behavior history → need recommendations              | Personalize        |
-
-### Pre-trained or build your own
-
-| When the prompt says...                                                  | Pick                          |
-| ------------------------------------------------------------------------ | ----------------------------- |
-| "data scientists", "train your own model", "custom model", "custom algorithm" | SageMaker                |
-| A common AI task (image, speech, translation, NLP...) via a ready API     | The matching pre-trained service |
-
----
-
-## Wrapping Up
-
-One line to remember:
-
-> **Recognize the data type and the task first, and the service falls out.**
-
-In the exam, the keyword → service reflex saves you precious time. But in real life, the right question isn't "which service matches the keyword", but whether a pre-trained service is accurate enough for the problem, what it costs per request, what compliance constraints the data carries, and when it's worth training your own model with SageMaker.

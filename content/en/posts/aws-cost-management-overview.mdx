@@ -29,13 +29,13 @@ This article is the map that helps you draw clear lines between those services. 
 
 Before the details, pin down this framework. Cost management on AWS goes through five stages, each answering a different question with its own set of tools:
 
-| Stage                    | The question it answers                         | Primary services                                                   |
-| ------------------------ | ----------------------------------------------- | ------------------------------------------------------------------ |
-| **Estimate** (before)    | "How much will this cost before I build it?"    | Pricing Calculator                                                 |
-| **Understand & analyze** | "Where did the money go?"                        | Cost Explorer, Cost & Usage Report, Billing Console                |
-| **Alert & control**      | "Tell me when I exceed a limit / something's off" | AWS Budgets, Cost Anomaly Detection, CloudWatch Billing Alarm    |
-| **Organize & allocate**  | "Split cost by team/environment/project"        | Cost Allocation Tags, Cost Categories, Consolidated Billing, Billing Conductor |
-| **Optimize**             | "How do I pay less?"                             | Savings Plans, Reserved Instances, Spot, Trusted Advisor, Compute Optimizer, Cost Optimization Hub |
+| Stage                    | The question it answers                           | Primary services                                                                                   |
+| ------------------------ | ------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| **Estimate** (before)    | "How much will this cost before I build it?"      | Pricing Calculator                                                                                 |
+| **Understand & analyze** | "Where did the money go?"                         | Cost Explorer, Cost & Usage Report, Billing Console                                                |
+| **Alert & control**      | "Tell me when I exceed a limit / something's off" | AWS Budgets, Cost Anomaly Detection, CloudWatch Billing Alarm                                      |
+| **Organize & allocate**  | "Split cost by team/environment/project"          | Cost Allocation Tags, Cost Categories, Consolidated Billing, Billing Conductor                     |
+| **Optimize**             | "How do I pay less?"                              | Savings Plans, Reserved Instances, Spot, Trusted Advisor, Compute Optimizer, Cost Optimization Hub |
 
 Keep this framework in mind; now let's walk through each stage.
 
@@ -196,12 +196,12 @@ The final stage: pay less for the same workload. There are two directions: choos
 
 This is the most fundamental knowledge about compute cost optimization, and it shows up densely in the SAA exam. For the very same EC2 instance, you can pay in four very different ways:
 
-| Model                  | Commitment            | Discount            | Characteristics & use case                                                          |
-| ---------------------- | --------------------- | ------------------- | ----------------------------------------------------------------------------------- |
-| **On-Demand**          | None                  | 0% (list price)     | Maximum flexibility, pay per hour/second. For unpredictable, short-term, experimental workloads. |
-| **Reserved Instances** | 1 or 3 years          | Up to ~72%          | Commit to a specific configuration. For steady, always-on workloads (e.g. a production DB). |
-| **Savings Plans**      | 1 or 3 years          | Up to ~72%          | Commit to a $/hour rate, more flexible than RIs. For steady workloads whose configuration changes often. |
-| **Spot Instances**     | None                  | Up to ~90%          | Use spare capacity, can be reclaimed (2-minute warning). For interruption-tolerant workloads. |
+| Model                  | Commitment   | Discount        | Characteristics & use case                                                                               |
+| ---------------------- | ------------ | --------------- | -------------------------------------------------------------------------------------------------------- |
+| **On-Demand**          | None         | 0% (list price) | Maximum flexibility, pay per hour/second. For unpredictable, short-term, experimental workloads.         |
+| **Reserved Instances** | 1 or 3 years | Up to ~72%      | Commit to a specific configuration. For steady, always-on workloads (e.g. a production DB).              |
+| **Savings Plans**      | 1 or 3 years | Up to ~72%      | Commit to a $/hour rate, more flexible than RIs. For steady workloads whose configuration changes often. |
+| **Spot Instances**     | None         | Up to ~90%      | Use spare capacity, can be reclaimed (2-minute warning). For interruption-tolerant workloads.            |
 
 A few distinctions to keep straight:
 
@@ -230,33 +230,3 @@ It supports: EC2 instances, Auto Scaling groups, EBS volumes, Lambda functions, 
 The problem with having many recommendation sources (Cost Explorer suggests rightsizing, Compute Optimizer suggests sizes, there are Savings Plans purchase suggestions, etc.) is that they're scattered and sometimes overlap.
 
 **Cost Optimization Hub** is a centralized page in Billing and Cost Management that gathers all optimization recommendations in one place — rightsizing, deleting idle resources, purchasing Savings Plans/RIs — already deduplicated and normalized to estimated savings on a single, comparable measure, across all accounts in the organization. It's where to start when you want a full optimization picture. The service is free.
-
----
-
-## 7. Quick comparison & picking the right tool
-
-- **Cost Explorer vs CUR:** want a quick, visual look → **Cost Explorer**; want the most detailed raw data, queryable with Athena / fed into BI → **CUR**.
-- **Budgets vs Cost Anomaly Detection:** want alerts on a threshold you set → **Budgets**; want automatic anomaly detection with no threshold → **Anomaly Detection**.
-- **Budgets vs CloudWatch Billing Alarm:** both alert, but Budgets is more flexible and modern; the Billing Alarm is the old way and its metric is only in us-east-1.
-- **Trusted Advisor vs Compute Optimizer:** Trusted Advisor surfaces broad waste (multiple pillars); Compute Optimizer specializes in rightsizing based on real metrics.
-- **Savings Plans vs Reserved Instances:** both discount up to ~72% for steady workloads, but Savings Plans commit to a $/hour rate and are therefore more flexible when you change instance types often.
-
----
-
-## Conclusion: four questions, one toolkit
-
-Back to month-end with a bill 40% higher than expected. Now you have a map for each question:
-
-- "Where did the money go?" → **Cost Explorer** for a quick look, **CUR** for deep dissection.
-- "Why the sudden spike?" → **Cost Anomaly Detection** could have warned you ahead of time.
-- "How do I know in advance next time?" → **AWS Budgets** with thresholds and (if needed) Budget Actions to auto-stop.
-- "How do I pay less?" → **Savings Plans / RIs / Spot** for the pricing model, **Trusted Advisor / Compute Optimizer / Cost Optimization Hub** to clean up waste.
-
-What to take into the exam room:
-
-- **Cost management is a lifecycle:** estimate → understand → alert → organize → optimize. Each stage has its own tools.
-- Analysis is you actively opening something to look; alerting is the system actively telling you. Don't confuse Cost Explorer (analysis) with Budgets/Anomaly Detection (alerting).
-- **CUR** = most detailed, into S3, queryable with Athena. Cost Explorer = visual, interactive.
-- **Budgets** = a threshold you set; Anomaly Detection = ML that learns on its own, no threshold needed.
-- **Consolidated Billing via Organizations** brings volume discounts and RI/SP sharing — the reason multi-account almost always goes with Organizations.
-- **Most of these tools are free;** the notable exceptions: the Cost Explorer API ($0.01/request), the third budget onward (~$0.02/day), and the full Trusted Advisor (needs Business/Enterprise Support).

@@ -151,62 +151,21 @@ Nhân tiện, về bản thân NAT: nếu bài toán là cắt chi phí NAT cho 
 
 Mục 5 mới đụng tới NAT Gateway và Endpoint. Để đủ cho phòng thi, đây là bảng tổng hợp cấu trúc giá của toàn bộ các thành phần networking hay gặp. Mẫu số chung: gần như cái nào cũng có **phí theo giờ** (thuê cái hộp) cộng **phí theo GB** (lưu lượng đi qua). Cái nào miễn phí thì rất đáng nhớ vì đó thường là đáp án tối ưu.
 
-| Thành phần                           | Phí cố định (theo giờ)                                                                                                                                                           | Phí theo GB                                                                                                                                                        | Ghi nhớ cho thi                                                |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| **Gateway Endpoint**                 | Không                                                                                                                                                                            | Không                                                                                                                                                              | **Miễn phí** — luôn ưu tiên cho S3/DynamoDB                    |
-| **VPC Peering**                      | Không                                                                                                                                                                            | Theo data transfer thường (same-AZ miễn phí)                                                                                                                       | Rẻ cho ít VPC; không bắc cầu, không trùng CIDR                 |
-| **Interface Endpoint / PrivateLink** | ~$0.01/giờ mỗi AZ                                                                                                                                                                | ~$0.01/GB xử lý                                                                                                                                                    | Cho dịch vụ khác S3/DynamoDB; có tính tiền                     |
-| **NAT Gateway**                      | ~$0.045/giờ                                                                                                                                                                      | ~$0.045/GB xử lý + data transfer                                                                                                                                   | Đắt; tránh cho S3/DynamoDB bằng Gateway Endpoint               |
-| **Transit Gateway**                  | ~$0.05/giờ mỗi attachment                                                                                                                                                        | ~$0.02/GB xử lý                                                                                                                                                    | Cho hàng chục/trăm VPC; đắt hơn peering nhưng dễ quản lý       |
-| **Site-to-Site VPN**                 | ~$0.05/giờ mỗi kết nối                                                                                                                                                           | Theo data transfer thường                                                                                                                                          | Nối on-premises qua internet, mã hóa, dựng nhanh               |
-| **Direct Connect**                   | Phí cổng (port-hour) theo băng thông                                                                                                                                             | DTO ~$0.02/GB (rẻ hơn nhiều egress)                                            | Đường riêng, ổn định; rẻ cho khối lượng lớn, đều đặn           |
-| **Global Accelerator**               | ~$0.025/giờ mỗi accelerator                                                                                                                                                      | DT-Premium theo cặp region | Phụ phí nằm trên giá egress thường; tính theo chiều áp đảo     |
-| **Public IPv4 address**              | ~$0.005/giờ mỗi địa chỉ                                                                                                                                                          | —                                                                                                                                                                  | Tính cho **mọi** IPv4 public, kể cả EIP đang dùng (từ 02/2024) |
-| **Elastic / Application LB**         | Phí giờ + theo LCU | Gộp trong LCU                                                                                                                                                      | LCU đã gồm cả xử lý dữ liệu                                    |
+| Thành phần                           | Phí cố định (theo giờ)               | Phí theo GB                                  | Ghi nhớ cho thi                                                |
+| ------------------------------------ | ------------------------------------ | -------------------------------------------- | -------------------------------------------------------------- |
+| **Gateway Endpoint**                 | Không                                | Không                                        | **Miễn phí** — luôn ưu tiên cho S3/DynamoDB                    |
+| **VPC Peering**                      | Không                                | Theo data transfer thường (same-AZ miễn phí) | Rẻ cho ít VPC; không bắc cầu, không trùng CIDR                 |
+| **Interface Endpoint / PrivateLink** | ~$0.01/giờ mỗi AZ                    | ~$0.01/GB xử lý                              | Cho dịch vụ khác S3/DynamoDB; có tính tiền                     |
+| **NAT Gateway**                      | ~$0.045/giờ                          | ~$0.045/GB xử lý + data transfer             | Đắt; tránh cho S3/DynamoDB bằng Gateway Endpoint               |
+| **Transit Gateway**                  | ~$0.05/giờ mỗi attachment            | ~$0.02/GB xử lý                              | Cho hàng chục/trăm VPC; đắt hơn peering nhưng dễ quản lý       |
+| **Site-to-Site VPN**                 | ~$0.05/giờ mỗi kết nối               | Theo data transfer thường                    | Nối on-premises qua internet, mã hóa, dựng nhanh               |
+| **Direct Connect**                   | Phí cổng (port-hour) theo băng thông | DTO ~$0.02/GB (rẻ hơn nhiều egress)          | Đường riêng, ổn định; rẻ cho khối lượng lớn, đều đặn           |
+| **Global Accelerator**               | ~$0.025/giờ mỗi accelerator          | DT-Premium theo cặp region                   | Phụ phí nằm trên giá egress thường; tính theo chiều áp đảo     |
+| **Public IPv4 address**              | ~$0.005/giờ mỗi địa chỉ              | —                                            | Tính cho **mọi** IPv4 public, kể cả EIP đang dùng (từ 02/2024) |
+| **Elastic / Application LB**         | Phí giờ + theo LCU                   | Gộp trong LCU                                | LCU đã gồm cả xử lý dữ liệu                                    |
 
 Vài điểm dễ thành câu hỏi:
 
 - **Direct Connect rẻ ở phần mỗi GB.** **Direct Connect** là đường cáp riêng nối thẳng on-premises vào AWS, không qua internet. Phần data transfer ra (DTO) chỉ ~$0.02/GB so với ~$0.09/GB của internet egress. Vì vậy với khối lượng lớn và đều đặn, Direct Connect không chỉ ổn định và bảo mật hơn mà còn **rẻ hơn** — bù lại phí cổng cố định, nên phải đủ lưu lượng mới hòa vốn.
 - **Transit Gateway tính tiền theo attachment.** **Transit Gateway** là trung tâm định tuyến nối nhiều VPC và mạng on-premises. Mỗi thứ cắm vào nó (mỗi attachment) tính phí theo giờ, cộng ~$0.02/GB lưu lượng xử lý. Với vài VPC thì **VPC Peering** (không phí cố định) thường rẻ hơn; nhưng khi số VPC lớn hoặc cần định tuyến bắc cầu, Transit Gateway thắng về vận hành dù tốn phí attachment.
 - **Public IPv4 giờ tốn tiền — kể cả khi đang dùng.** Từ tháng 2/2024, AWS tính ~$0.005/giờ (cỡ $3.6/tháng) cho **mỗi** địa chỉ IPv4 public, bất kể nó có gắn vào tài nguyên hay không — khác hẳn quy tắc cũ chỉ tính Elastic IP khi để không. Ngoại lệ: IP bạn tự mang lên qua BYOIP thì không bị tính. Đây là lý do dọn bớt IPv4 public không dùng (và chuyển sang IPv6) trở thành một đòn tối ưu mới.
-
----
-
-## 7. Tổng hợp cho phòng thi
-
-Những tình huống "giảm chi phí" hay gặp và chốt nhanh cho từng cái — ghim lại trước khi vào phòng thi:
-
-| Tình huống                                             | Chốt nhanh                                                                    |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| Hai EC2 trong cùng VPC nói chuyện với nhau             | Dùng **private IP** (không dùng public/Elastic IP) — rẻ và nhanh hơn          |
-| Muốn chi phí thấp nhất tuyệt đối cho lưu lượng nội bộ  | Gom về **cùng một AZ** (đánh đổi: mất HA)                                     |
-| Private subnet cần truy cập **S3 / DynamoDB** rẻ nhất  | **Gateway Endpoint** (miễn phí), thay vì đẩy qua NAT Gateway                  |
-| Cần truy cập riêng tư dịch vụ AWS **khác** S3/DynamoDB | **Interface Endpoint / PrivateLink** (có tính phí)                            |
-| Phục vụ nội dung tĩnh ra internet, rẻ và nhanh         | **CloudFront** trước S3 (origin pull miễn phí, egress rẻ hơn, cache)          |
-| Giảm egress khi xử lý dữ liệu lớn                      | Đặt **compute ngay cạnh dữ liệu**, chỉ để kết quả nhỏ rời AWS                 |
-| Truyền khối lượng lớn, đều đặn với on-premises, giá rẻ | **Direct Connect** (DTO ~$0.02/GB), không qua internet                        |
-| Nối vài VPC với chi phí thấp                           | **VPC Peering** (không phí cố định)                                           |
-| Nối hàng chục/trăm VPC, cần định tuyến tập trung       | **Transit Gateway** (chấp nhận phí attachment + xử lý)                        |
-| Hóa đơn có dòng "Public IPv4 address" lạ               | Mỗi IPv4 public ~$3.6/tháng — dọn IP không dùng, cân nhắc IPv6                |
-| Câu hỏi chỉ nói "giảm chi phí data transfer"           | Cùng AZ + private IP; Gateway Endpoint; CloudFront cho egress; DX cho on-prem |
-
-Và nếu quên hết mọi con số, chỉ cần giữ lại một câu: **ingress miễn phí, egress tốn tiền; càng giữ lưu lượng gần nhau và trong AWS thì càng rẻ.**
-
----
-
-## Kết: cùng một byte, nhưng đường đi quyết định hóa đơn
-
-Quay lại hóa đơn cuối tháng với dòng Data Transfer và NAT Gateway phình to. Giờ bạn có bản đồ để đọc nó:
-
-- Dòng **NAT Gateway** cao? Khả năng lớn là lưu lượng S3/DynamoDB đang đi vòng qua NAT thay vì qua Gateway Endpoint miễn phí.
-- Dòng **Data Transfer** cao? Soi xem có egress ra internet không cần thiết không (phục vụ trực tiếp từ S3 thay vì CloudFront), có lưu lượng cross-AZ do trải HA, hay có ai đó đang dùng public IP cho lưu lượng lẽ ra nên đi private.
-
-Những điều cần mang theo vào phòng thi:
-
-- **Chi phí networking nằm ở "đường đi", không phải "khối lượng".** Cùng một GB: cùng AZ + private IP thì miễn phí; cross-AZ ~$0.01–0.02; inter-region ~$0.02; ra internet ~$0.09.
-- **Ingress miễn phí, egress là chiều đắt nhất.** Mọi đòn tối ưu đều xoay quanh việc giảm egress: giữ lưu lượng trong AWS, đặt compute cạnh dữ liệu, dùng CloudFront để phục vụ ra ngoài.
-- **Gateway Endpoint (S3/DynamoDB) là miễn phí** — đây là đáp án kinh điển cho bài toán "giảm chi phí NAT". Interface Endpoint cho dịch vụ khác thì có tính phí.
-- **Mỗi "cái hộp" networking có phí thuê theo giờ cộng phí theo GB.** NAT Gateway, Interface Endpoint, Transit Gateway, VPN, Global Accelerator đều thế; Gateway Endpoint và VPC Peering thì không có phí thuê cố định.
-- **Direct Connect rẻ trên mỗi GB** (DTO ~$0.02) nên hợp với khối lượng lớn đều đặn; **public IPv4 nay tốn tiền** kể cả khi đang dùng (từ 02/2024).
-
-Không cần thuộc lòng bảng giá — giá sẽ đổi. Hãy thuộc cái bậc thang đắt-rẻ và quy luật vào-ra. Khi đề đưa ra một tình huống và bốn phương án "nghe đều đúng", chính cái bản đồ này sẽ cho bạn biết byte đang chảy qua đâu, và ai là người trả tiền.

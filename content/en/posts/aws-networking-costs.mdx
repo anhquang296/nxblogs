@@ -151,62 +151,21 @@ While we're on NAT itself: if the problem is cutting NAT cost for ordinary inter
 
 Section 5 only touched NAT Gateway and Endpoint. To be complete for the exam, here's a summary of the pricing structure of all the networking components you'll commonly meet. The common denominator: nearly every one has an **hourly fee** (renting the box) plus a **per-GB fee** (traffic through it). The ones that are free are very much worth remembering, because they're usually the optimal answer.
 
-| Component                            | Fixed fee (per hour)                                                                                                                                                                                    | Per-GB fee                                                                                                                                                       | Remember for the exam                                                         |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| **Gateway Endpoint**                 | None                                                                                                                                                                                                    | None                                                                                                                                                             | **Free** — always prefer it for S3/DynamoDB                                   |
-| **VPC Peering**                      | None                                                                                                                                                                                                    | Normal data transfer (same-AZ is free)                                                                                                                           | Cheap for a few VPCs; no transitive routing, no overlapping CIDR              |
-| **Interface Endpoint / PrivateLink** | ~$0.01/hr per AZ                                                                                                                                                                                        | ~$0.01/GB processed                                                                                                                                              | For services other than S3/DynamoDB; it costs money                           |
-| **NAT Gateway**                      | ~$0.045/hr                                                                                                                                                                                              | ~$0.045/GB processed + data transfer                                                                                                                             | Expensive; avoid it for S3/DynamoDB via a Gateway Endpoint                    |
-| **Transit Gateway**                  | ~$0.05/hr per attachment                                                                                                                                                                                | ~$0.02/GB processed                                                                                                                                              | For dozens/hundreds of VPCs; pricier than peering but easier to manage        |
-| **Site-to-Site VPN**                 | ~$0.05/hr per connection                                                                                                                                                                                | Normal data transfer                                                                                                                                             | Connects on-premises over the internet, encrypted, quick to set up            |
-| **Direct Connect**                   | Port-hour fee by bandwidth                                                                                                                                                                              | DTO ~$0.02/GB (much cheaper than egress)                                   | A private, stable line; cheap for large, steady volumes                       |
-| **Global Accelerator**               | ~$0.025/hr per accelerator                                                                                                                                                                              | DT-Premium by region pair | The surcharge sits on top of normal egress; charged on the dominant direction |
-| **Public IPv4 address**              | ~$0.005/hr per address                                                                                                                                                                                  | —                                                                                                                                                                | Charged for **every** public IPv4, including an in-use EIP (since 02/2024)    |
-| **Elastic / Application LB**         | Hourly fee + per LCU | Included in the LCU                                                                                                                                              | The LCU already includes data processing                                      |
+| Component                            | Fixed fee (per hour)       | Per-GB fee                               | Remember for the exam                                                         |
+| ------------------------------------ | -------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------- |
+| **Gateway Endpoint**                 | None                       | None                                     | **Free** — always prefer it for S3/DynamoDB                                   |
+| **VPC Peering**                      | None                       | Normal data transfer (same-AZ is free)   | Cheap for a few VPCs; no transitive routing, no overlapping CIDR              |
+| **Interface Endpoint / PrivateLink** | ~$0.01/hr per AZ           | ~$0.01/GB processed                      | For services other than S3/DynamoDB; it costs money                           |
+| **NAT Gateway**                      | ~$0.045/hr                 | ~$0.045/GB processed + data transfer     | Expensive; avoid it for S3/DynamoDB via a Gateway Endpoint                    |
+| **Transit Gateway**                  | ~$0.05/hr per attachment   | ~$0.02/GB processed                      | For dozens/hundreds of VPCs; pricier than peering but easier to manage        |
+| **Site-to-Site VPN**                 | ~$0.05/hr per connection   | Normal data transfer                     | Connects on-premises over the internet, encrypted, quick to set up            |
+| **Direct Connect**                   | Port-hour fee by bandwidth | DTO ~$0.02/GB (much cheaper than egress) | A private, stable line; cheap for large, steady volumes                       |
+| **Global Accelerator**               | ~$0.025/hr per accelerator | DT-Premium by region pair                | The surcharge sits on top of normal egress; charged on the dominant direction |
+| **Public IPv4 address**              | ~$0.005/hr per address     | —                                        | Charged for **every** public IPv4, including an in-use EIP (since 02/2024)    |
+| **Elastic / Application LB**         | Hourly fee + per LCU       | Included in the LCU                      | The LCU already includes data processing                                      |
 
 A few points that easily become questions:
 
 - **Direct Connect is cheap on the per-GB part.** **Direct Connect** is a private cable running straight from on-premises into AWS, never over the internet. Its outbound data transfer (DTO) is only ~$0.02/GB versus ~$0.09/GB for internet egress. So for large, steady volumes Direct Connect isn't just more stable and more secure but also **cheaper** — offset by the fixed port fee, so you need enough traffic to break even.
 - **Transit Gateway bills per attachment.** A **Transit Gateway** is a routing hub that connects many VPCs and on-premises networks. Each thing plugged into it (each attachment) is charged hourly, plus ~$0.02/GB of traffic processed. For a few VPCs, **VPC Peering** (no fixed fee) is usually cheaper; but when the VPC count is large or you need transitive routing, the Transit Gateway wins on operations despite the attachment fee.
 - **Public IPv4 now costs money — even while in use.** Since February 2024, AWS charges ~$0.005/hr (about $3.6/month) for **every** public IPv4 address, whether or not it's attached to a resource — a sharp change from the old rule that only billed an Elastic IP while it sat idle. The exception: an IP you bring up yourself via BYOIP isn't charged. This is why cleaning up unused public IPv4 (and moving to IPv6) has become a new optimization move.
-
----
-
-## 7. The exam-room cheat sheet
-
-The "reduce cost" scenarios you'll commonly meet, with the quick call for each — pin these before you walk into the exam:
-
-| Scenario                                                        | Quick call                                                                    |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Two EC2 instances in the same VPC talking to each other         | Use a **private IP** (not public/Elastic IP) — cheaper and faster             |
-| Want the absolute lowest cost for internal traffic              | Consolidate into the **same AZ** (trade-off: lose HA)                         |
-| A private subnet needs the cheapest access to **S3 / DynamoDB** | **Gateway Endpoint** (free), instead of pushing through a NAT Gateway         |
-| Need private access to AWS services **other than** S3/DynamoDB  | **Interface Endpoint / PrivateLink** (it costs money)                         |
-| Serve static content to the internet, cheap and fast            | **CloudFront** in front of S3 (free origin pull, cheaper egress, caching)     |
-| Reduce egress when processing large data                        | Put **compute right next to the data**, let only the small result leave AWS   |
-| Transfer large, steady volumes with on-premises, cheaply        | **Direct Connect** (DTO ~$0.02/GB), not over the internet                     |
-| Connect a few VPCs at low cost                                  | **VPC Peering** (no fixed fee)                                                |
-| Connect dozens/hundreds of VPCs, need centralized routing       | **Transit Gateway** (accept the attachment + processing fee)                  |
-| The bill has a strange "Public IPv4 address" line               | Each public IPv4 is ~$3.6/month — clean up unused IPs, consider IPv6          |
-| The question only says "reduce data transfer cost"              | Same AZ + private IP; Gateway Endpoint; CloudFront for egress; DX for on-prem |
-
-And if you forget every number, just hold onto one sentence: **ingress is free, egress costs money; the closer you keep traffic together and inside AWS, the cheaper it is.**
-
----
-
-## Conclusion: same byte, but the route decides the bill
-
-Back to the end-of-month bill with its bloated Data Transfer and NAT Gateway lines. Now you have a map to read it:
-
-- High **NAT Gateway** line? Most likely S3/DynamoDB traffic is detouring through NAT instead of going over a free Gateway Endpoint.
-- High **Data Transfer** line? Check for unnecessary internet egress (serving directly from S3 instead of CloudFront), cross-AZ traffic from spreading for HA, or someone using a public IP for traffic that should have gone private.
-
-What to carry into the exam room:
-
-- **Networking cost lives in the "route," not the "volume."** Same GB: same AZ + private IP is free; cross-AZ ~$0.01–0.02; inter-region ~$0.02; out to the internet ~$0.09.
-- **Ingress is free, egress is the most expensive direction.** Every optimization revolves around reducing egress: keep traffic inside AWS, put compute next to the data, use CloudFront to serve outward.
-- **Gateway Endpoint (S3/DynamoDB) is free** — this is the classic answer to the "reduce NAT cost" problem. The Interface Endpoint for other services does cost money.
-- **Every networking "box" has an hourly rental fee plus a per-GB fee.** NAT Gateway, Interface Endpoint, Transit Gateway, VPN, Global Accelerator are all like this; Gateway Endpoint and VPC Peering have no fixed rental fee.
-- **Direct Connect is cheap per GB** (DTO ~$0.02), so it suits large steady volumes; **public IPv4 now costs money** even while in use (since 02/2024).
-
-You don't need to memorize the price list — prices will change. Memorize the cheap-to-expensive ladder and the in-versus-out rule. When the exam hands you a scenario and four options that all "sound right," this very map will tell you where the byte is flowing, and who's footing the bill.

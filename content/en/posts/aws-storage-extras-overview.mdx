@@ -28,13 +28,13 @@ This article is a map to tell them apart cleanly. For each service we'll cover w
 
 Before the details, pin down this framing. Instead of learning them in a random order, tie each service to the **problem** it was born to solve:
 
-| Problem                                     | The question it answers                                    | Service            |
-| ------------------------------------------- | ----------------------------------------------------------- | ------------------ |
-| **Move large data — offline**               | "Move hundreds of TB–PB when the network is too slow/costly" | AWS Snow Family    |
-| **Move / sync data — online**               | "Move data over the network, automated and scheduled"       | AWS DataSync       |
-| **Specialized file system**                 | "Need Windows SMB / HPC / ONTAP / ZFS, not EFS"             | Amazon FSx         |
-| **Hybrid bridge on-premises ↔ AWS**         | "Still running on-premises but want to use AWS storage"     | AWS Storage Gateway |
-| **Transfer files over FTP protocols**       | "App/partner only speaks FTP/FTPS/SFTP"                     | AWS Transfer Family |
+| Problem                               | The question it answers                                      | Service             |
+| ------------------------------------- | ------------------------------------------------------------ | ------------------- |
+| **Move large data — offline**         | "Move hundreds of TB–PB when the network is too slow/costly" | AWS Snow Family     |
+| **Move / sync data — online**         | "Move data over the network, automated and scheduled"        | AWS DataSync        |
+| **Specialized file system**           | "Need Windows SMB / HPC / ONTAP / ZFS, not EFS"              | Amazon FSx          |
+| **Hybrid bridge on-premises ↔ AWS**   | "Still running on-premises but want to use AWS storage"      | AWS Storage Gateway |
+| **Transfer files over FTP protocols** | "App/partner only speaks FTP/FTPS/SFTP"                      | AWS Transfer Family |
 
 Two mental axes run through the whole article:
 
@@ -249,51 +249,17 @@ To choose correctly, step back and look at the whole landscape. Every storage op
 
 And Snow Family, DataSync, and Transfer Family are not "storage locations" — they are tools to move data in and out of the storage above.
 
-| Service              | Type        | Scope / protocol                 | Typical use case                                           |
-| -------------------- | ----------- | -------------------------------- | --------------------------------------------------------- |
-| **EBS**              | Block       | Single AZ, attached to EC2       | Disks for databases, boot volumes                         |
-| **Instance Store**   | Block       | Ephemeral, attached to EC2       | High-speed cache/scratch, data loss acceptable            |
-| **EFS**              | File (NFS)  | Multi-AZ, Linux                  | Shared file share across multiple Linux EC2               |
-| **FSx**              | File        | SMB/NFS/Lustre/iSCSI by flavor   | Windows share, HPC/ML, ONTAP/ZFS workloads                |
-| **S3**               | Object      | Region, via API/HTTP             | Universal object storage, data lakes, static assets       |
-| **Glacier**          | Object      | Region, archive                  | Long-term, rarely accessed, low-cost storage              |
-| **Storage Gateway**  | Hybrid      | NFS/SMB/iSCSI/VTL                | On-prem using AWS storage (backup, DR, tiered)            |
-| **Snow Family**      | Data move   | Physical device (offline)        | Migrate very large data, edge computing                   |
-| **DataSync**         | Data move   | Over the network (online), scheduled | Periodic migrate/sync on-premises ↔ AWS, AWS ↔ AWS    |
-| **Transfer Family**  | File transfer | SFTP/FTPS/FTP → S3/EFS         | Receive/send files via FTP with partners, store in S3/EFS |
+| Service             | Type          | Scope / protocol                     | Typical use case                                          |
+| ------------------- | ------------- | ------------------------------------ | --------------------------------------------------------- |
+| **EBS**             | Block         | Single AZ, attached to EC2           | Disks for databases, boot volumes                         |
+| **Instance Store**  | Block         | Ephemeral, attached to EC2           | High-speed cache/scratch, data loss acceptable            |
+| **EFS**             | File (NFS)    | Multi-AZ, Linux                      | Shared file share across multiple Linux EC2               |
+| **FSx**             | File          | SMB/NFS/Lustre/iSCSI by flavor       | Windows share, HPC/ML, ONTAP/ZFS workloads                |
+| **S3**              | Object        | Region, via API/HTTP                 | Universal object storage, data lakes, static assets       |
+| **Glacier**         | Object        | Region, archive                      | Long-term, rarely accessed, low-cost storage              |
+| **Storage Gateway** | Hybrid        | NFS/SMB/iSCSI/VTL                    | On-prem using AWS storage (backup, DR, tiered)            |
+| **Snow Family**     | Data move     | Physical device (offline)            | Migrate very large data, edge computing                   |
+| **DataSync**        | Data move     | Over the network (online), scheduled | Periodic migrate/sync on-premises ↔ AWS, AWS ↔ AWS        |
+| **Transfer Family** | File transfer | SFTP/FTPS/FTP → S3/EFS               | Receive/send files via FTP with partners, store in S3/EFS |
 
 For a deeper look at object storage and how to choose an S3 storage tier, see [S3 Storage Classes: Choosing the Right One for Your Data](/en/posts/s3-storage-classes).
-
----
-
-## Conclusion: five problems, five services
-
-Back to the five questions from the start. Now you have a map to handle each one:
-
-- "500 TB to get to S3, the network is too slow" → **Snow Family** (ship a physical device).
-- "Need a Windows-style file share" → **FSx for Windows File Server**.
-- "Need extremely high throughput for HPC/ML" → **FSx for Lustre**.
-- "Still running on-premises but want to use AWS storage" → **Storage Gateway**.
-- "A partner only sends files over SFTP, and I want them in S3" → **Transfer Family**.
-
-The easily confused pairs — pin these down before the exam:
-
-| What's asked                                            | What to pick                                                  |
-| ------------------------------------------------------- | ------------------------------------------------------------- |
-| Huge data, weak network → migrate                       | **Snow Family** (offline) — not DataSync                       |
-| Sync/migrate over the network, scheduled                | **DataSync** (online) — not Snow                               |
-| Move once (and you're done)                             | **DataSync / Snow**                                           |
-| Continuous hybrid access (on-premises + cloud coexist)  | **Storage Gateway** — not DataSync                          |
-| Linux NFS file share                                    | **EFS**                                                       |
-| Windows / HPC / ONTAP / ZFS file share                  | **FSx** (the matching flavor)                                 |
-| Receive files over FTP/SFTP into S3/EFS                 | **Transfer Family**                                           |
-| Back up tape to the cloud without changing software     | **Tape Gateway** (a Storage Gateway type)                     |
-
-A few core takeaways:
-
-- **Snow vs DataSync = physical vs network.** The classic decision threshold: if going online would take more than ~1 week, lean toward Snow.
-- **DataSync/Snow are migration (one-time / scheduled); Storage Gateway is a long-term hybrid setup.** Don't confuse "move it and you're done" with "permanent bridge."
-- **Snow doesn't load straight into Glacier:** always to S3 first, then a Lifecycle rule moves it to Glacier.
-- **EFS is NFS-Linux; FSx is everything else** (Windows-SMB, Lustre-HPC, ONTAP-multi-protocol, OpenZFS-ZFS).
-- **Storage Gateway has 4 types** based on what the on-premises app "speaks": S3 File (NFS/SMB→S3), FSx File (access FSx Windows), Volume (iSCSI block), Tape (VTL→S3/Glacier).
-- **Transfer Family = a managed FTP/SFTP/FTPS front door for S3/EFS** — you don't run an FTP server yourself.

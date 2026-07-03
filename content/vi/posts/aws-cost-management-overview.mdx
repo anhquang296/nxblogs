@@ -29,13 +29,13 @@ Bài viết này là tấm bản đồ giúp bạn phân biệt rạch ròi các
 
 Trước khi đi vào chi tiết, hãy ghim cái khung tư duy này. Quản lý chi phí trên AWS đi qua năm giai đoạn, mỗi giai đoạn trả lời một câu hỏi khác nhau và có nhóm công cụ riêng:
 
-| Giai đoạn               | Câu hỏi nó trả lời                              | Dịch vụ chính                                                       |
-| ----------------------- | ----------------------------------------------- | ------------------------------------------------------------------- |
-| **Ước tính** (trước)    | "Cái này sẽ tốn bao nhiêu trước khi tôi xây?"  | Pricing Calculator                                                  |
-| **Hiểu & phân tích**    | "Tiền đã chảy đi đâu?"                           | Cost Explorer, Cost & Usage Report, Billing Console                 |
-| **Cảnh báo & kiểm soát**| "Báo cho tôi khi vượt mức / có bất thường"      | AWS Budgets, Cost Anomaly Detection, CloudWatch Billing Alarm       |
-| **Tổ chức & phân bổ**   | "Chia chi phí theo team/môi trường/dự án"       | Cost Allocation Tags, Cost Categories, Consolidated Billing, Billing Conductor |
-| **Tối ưu**              | "Làm sao trả ít tiền hơn?"                       | Savings Plans, Reserved Instances, Spot, Trusted Advisor, Compute Optimizer, Cost Optimization Hub |
+| Giai đoạn                | Câu hỏi nó trả lời                            | Dịch vụ chính                                                                                      |
+| ------------------------ | --------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| **Ước tính** (trước)     | "Cái này sẽ tốn bao nhiêu trước khi tôi xây?" | Pricing Calculator                                                                                 |
+| **Hiểu & phân tích**     | "Tiền đã chảy đi đâu?"                        | Cost Explorer, Cost & Usage Report, Billing Console                                                |
+| **Cảnh báo & kiểm soát** | "Báo cho tôi khi vượt mức / có bất thường"    | AWS Budgets, Cost Anomaly Detection, CloudWatch Billing Alarm                                      |
+| **Tổ chức & phân bổ**    | "Chia chi phí theo team/môi trường/dự án"     | Cost Allocation Tags, Cost Categories, Consolidated Billing, Billing Conductor                     |
+| **Tối ưu**               | "Làm sao trả ít tiền hơn?"                    | Savings Plans, Reserved Instances, Spot, Trusted Advisor, Compute Optimizer, Cost Optimization Hub |
 
 Giữ cái khung này trong đầu, giờ ta đi qua từng giai đoạn.
 
@@ -196,12 +196,12 @@ Giai đoạn cuối: trả ít tiền hơn cho cùng khối lượng công việ
 
 Đây là kiến thức nền tảng nhất về tối ưu chi phí compute, và xuất hiện dày đặc trong đề SAA. Cùng một EC2 instance, bạn có thể trả tiền theo bốn cách rất khác nhau:
 
-| Mô hình                | Cam kết               | Mức giảm giá        | Đặc tính & use case                                                                 |
-| ---------------------- | --------------------- | ------------------- | ----------------------------------------------------------------------------------- |
-| **On-Demand**          | Không                 | 0% (giá gốc)        | Linh hoạt tối đa, trả theo giờ/giây. Cho tải khó đoán, ngắn hạn, thử nghiệm.        |
-| **Reserved Instances** | 1 hoặc 3 năm          | Tới ~72%            | Cam kết một cấu hình cụ thể. Cho tải ổn định, chạy liên tục (ví dụ DB production).  |
-| **Savings Plans**      | 1 hoặc 3 năm          | Tới ~72%            | Cam kết một mức $/giờ, linh hoạt hơn RI. Cho tải ổn định nhưng hay đổi cấu hình.|
-| **Spot Instances**     | Không                 | Tới ~90%            | Dùng capacity dư, có thể bị thu hồi (báo trước 2 phút). Cho tải chịu được gián đoạn. |
+| Mô hình                | Cam kết      | Mức giảm giá | Đặc tính & use case                                                                  |
+| ---------------------- | ------------ | ------------ | ------------------------------------------------------------------------------------ |
+| **On-Demand**          | Không        | 0% (giá gốc) | Linh hoạt tối đa, trả theo giờ/giây. Cho tải khó đoán, ngắn hạn, thử nghiệm.         |
+| **Reserved Instances** | 1 hoặc 3 năm | Tới ~72%     | Cam kết một cấu hình cụ thể. Cho tải ổn định, chạy liên tục (ví dụ DB production).   |
+| **Savings Plans**      | 1 hoặc 3 năm | Tới ~72%     | Cam kết một mức $/giờ, linh hoạt hơn RI. Cho tải ổn định nhưng hay đổi cấu hình.     |
+| **Spot Instances**     | Không        | Tới ~90%     | Dùng capacity dư, có thể bị thu hồi (báo trước 2 phút). Cho tải chịu được gián đoạn. |
 
 Vài điểm cần phân biệt:
 
@@ -230,33 +230,3 @@ Nó hỗ trợ: EC2 instance, Auto Scaling group, EBS volume, Lambda function, E
 Vấn đề khi có nhiều nguồn khuyến nghị (Cost Explorer gợi ý rightsizing, Compute Optimizer gợi ý kích thước, gợi ý mua Savings Plans...) là chúng nằm rải rác và đôi khi trùng nhau.
 
 **Cost Optimization Hub** là trang tập trung trong Billing and Cost Management gom tất cả khuyến nghị tối ưu lại một chỗ — rightsizing, xóa resource nhàn rỗi, mua Savings Plans/RI — đã khử trùng lặp và quy về mức tiết kiệm ước tính theo cùng một thước đo, xuyên suốt các account trong tổ chức. Đây là nơi nên bắt đầu khi muốn một bức tranh tối ưu toàn cảnh. Dịch vụ miễn phí.
-
----
-
-## 7. So sánh nhanh & chọn đúng công cụ
-
-- **Cost Explorer vs CUR:** muốn xem nhanh, trực quan → **Cost Explorer**; muốn dữ liệu thô chi tiết nhất, query bằng Athena/đổ vào BI → **CUR**.
-- **Budgets vs Cost Anomaly Detection:** muốn cảnh báo theo ngưỡng do bạn đặt → **Budgets**; muốn phát hiện bất thường tự động không cần ngưỡng → **Anomaly Detection**.
-- **Budgets vs CloudWatch Billing Alarm:** cùng để cảnh báo, nhưng Budgets linh hoạt và hiện đại hơn; Billing Alarm là cách cũ và metric chỉ ở us-east-1.
-- **Trusted Advisor vs Compute Optimizer:** Trusted Advisor soi lãng phí diện rộng (nhiều pillar); Compute Optimizer chuyên sâu rightsizing dựa trên metric thực tế.
-- **Savings Plans vs Reserved Instances:** cùng giảm tới ~72% cho tải ổn định, nhưng Savings Plans cam kết theo $/giờ nên linh hoạt hơn khi bạn hay đổi loại instance.
-
----
-
-## Kết: bốn câu hỏi, một bộ công cụ
-
-Quay lại cuối tháng với hóa đơn cao hơn 40%. Giờ bạn có bản đồ để xử lý từng câu hỏi:
-
-- "Tiền chảy đi đâu?" → **Cost Explorer** để xem nhanh, **CUR** để mổ xẻ sâu.
-- "Tại sao đột nhiên tăng?" → **Cost Anomaly Detection** đã có thể báo cho bạn từ trước.
-- "Làm sao biết trước lần sau?" → **AWS Budgets** với ngưỡng và (nếu cần) Budget Actions để tự chặn.
-- "Làm sao trả ít hơn?" → **Savings Plans / RI / Spot** cho mô hình giá, **Trusted Advisor / Compute Optimizer / Cost Optimization Hub** để dọn lãng phí.
-
-Những điều cần mang theo vào phòng thi:
-
-- **Quản lý chi phí là một vòng đời:** ước tính → hiểu → cảnh báo → tổ chức → tối ưu. Mỗi giai đoạn có công cụ riêng.
-- Phân tích là chủ động mở lên xem; cảnh báo là hệ thống chủ động báo. Đừng lẫn Cost Explorer (phân tích) với Budgets/Anomaly Detection (cảnh báo).
-- **CUR** = chi tiết nhất, ra S3, query bằng Athena. Cost Explorer = trực quan, tương tác.
-- **Budgets** = ngưỡng bạn đặt; Anomaly Detection = ML tự học, không cần ngưỡng.
-- **Consolidated Billing qua Organizations** mang lại volume discount và chia sẻ RI/SP — lý do multi-account gần như luôn đi với Organizations.
-- **Phần lớn công cụ là miễn phí;** ngoại lệ đáng nhớ: Cost Explorer API ($0.01/request), budget thứ ba trở đi (~$0.02/ngày), và Trusted Advisor đầy đủ (cần Business/Enterprise Support).

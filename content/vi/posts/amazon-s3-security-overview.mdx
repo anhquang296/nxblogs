@@ -34,7 +34,7 @@ Thay vì học 13 tính năng rời rạc, hãy gắn mỗi tính năng với **
 
 Hai ý xuyên suốt cần ghim trước khi đi vào chi tiết:
 
-- **Mã hóa và kiểm soát truy cập là hai chuyện khác nhau.** Mã hóa trả lời "nếu dữ liệu bị lấy ra thì kẻ trộm có đọc được không"; kiểm soát truy cập trả lời "ai được chạm vào dữ liệu". Một bucket mã hóa hoàn hảo vẫn có thể bị rò nếu policy mở toang, và ngược lại.
+- **Mã hóa và kiểm soát truy cập là hai chuyện khác nhau.** Mã hóa trả lời "nếu dữ liệu bị lấy ra thì kẻ trộm có đọc được không", kiểm soát truy cập trả lời "ai được chạm vào dữ liệu". Một bucket mã hóa hoàn hảo vẫn có thể bị rò nếu policy mở toang, và ngược lại.
 - **Versioning là nền móng.** Hai tính năng chống xóa quan trọng nhất — Object Lock và MFA Delete — đều yêu cầu bật Versioning trước. Versioning nghĩa là S3 giữ lại mọi phiên bản của object, nên "xóa" không đồng nghĩa với "mất".
 
 ---
@@ -90,7 +90,7 @@ DSSE-KMS giống SSE-KMS nhưng áp dụng **hai lớp** mã hóa chồng lên n
 Với mã hóa phía client (client-side encryption), bạn mã hóa dữ liệu **trước khi** gửi lên S3 và tự giữ khóa. S3 chỉ nhận và lưu ciphertext — nó không bao giờ thấy nội dung gốc hay khóa. Khi tải về, chính client giải mã.
 
 - **Vấn đề nó giải quyết:** "tôi không tin tưởng giao việc mã hóa cho server, kể cả AWS."
-- **Use case:** dữ liệu cực kỳ nhạy cảm; mô hình zero-trust với nhà cung cấp cloud.
+- **Use case:** dữ liệu cực kỳ nhạy cảm, mô hình zero-trust với nhà cung cấp cloud.
 
 > Vì khóa truyền qua đường mạng trong mỗi request, HTTPS là bắt buộc. Mất khóa = mất luôn dữ liệu, vì AWS không giữ bản sao nào.
 
@@ -98,19 +98,19 @@ Với mã hóa phía client (client-side encryption), bạn mã hóa dữ liệu
 
 Bốn mục trên nói về dữ liệu nằm yên. Còn dữ liệu đang **di chuyển** giữa client và S3 thì sao? Đó là mã hóa in-transit, hay SSL/TLS. S3 cung cấp cả endpoint HTTP lẫn HTTPS.
 
-Để ép buộc chỉ dùng HTTPS, ta thêm vào bucket policy một điều kiện từ chối khi `aws:SecureTransport` bằng `false`. SSE-C, như đã nói, bắt buộc HTTPS sẵn.
+Để ép buộc chỉ dùng HTTPS, ta thêm vào bucket policy một điều kiện từ chối khi `aws:SecureTransport` bằng `false`.
+
+Như đã nói, SSE-C bắt buộc HTTPS sẵn.
 
 ---
 
 ## 3. Default Encryption & ép buộc mã hóa
 
-Biết các kiểu mã hóa là một chuyện; đảm bảo **không object nào lọt qua mà chưa mã hóa** lại là chuyện khác. Đây là nơi hai cơ chế bổ trợ xuất hiện.
+Biết các kiểu mã hóa là một chuyện, đảm bảo **không object nào lọt qua mà chưa mã hóa** lại là chuyện khác. Đây là nơi hai cơ chế bổ trợ xuất hiện.
 
 ### 3.1. Default Encryption
 
 Từ đầu năm 2023, AWS bật mã hóa mặc định cho mọi bucket, mọi object mới tự động được mã hóa bằng SSE-S3, không tốn thêm phí và không cần cấu hình. Bạn có thể đổi mặc định của bucket sang SSE-KMS nếu muốn kiểm soát khóa.
-
-- **Vấn đề nó giải quyết:** lỗi do con người — quên không bật mã hóa khi upload.
 
 Default Encryption đảm bảo object được mã hóa, nhưng **không ngăn** ai đó cố tình upload với một kiểu mã hóa khác. Nếu cần ép buộc một kiểu cụ thể, dùng bucket policy.
 
@@ -118,7 +118,29 @@ Default Encryption đảm bảo object được mã hóa, nhưng **không ngăn*
 
 Muốn bắt buộc mọi upload phải dùng đúng một kiểu mã hóa (ví dụ chỉ chấp nhận SSE-KMS), ta viết một **bucket policy** từ chối lệnh `s3:PutObject` nếu thiếu hoặc sai header mã hóa mong muốn.
 
-- **Cần nhớ thứ tự đánh giá:** bucket policy được kiểm tra **trước** khi Default Encryption áp dụng. Nghĩa là policy là "người gác cổng" — nó có thể chặn đứng một request không hợp lệ ngay từ đầu, còn Default Encryption chỉ là lưới an toàn áp mã hóa cho những request đã được cho qua.
+Ví dụ policy dưới đây từ chối mọi `s3:PutObject` không mã hóa bằng SSE-KMS. Điều kiện dựa trên `s3:x-amz-server-side-encryption` — header mà client khai báo kiểu mã hóa khi upload:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyNonKmsUploads",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::my-bucket/*",
+      "Condition": {
+        "StringNotEquals": {
+          "s3:x-amz-server-side-encryption": "aws:kms"
+        }
+      }
+    }
+  ]
+}
+```
+
+Bucket policy được kiểm tra trước khi Default Encryption áp dụng. Nghĩa là policy là "người gác cổng" — nó có thể chặn đứng một request không hợp lệ ngay từ đầu, còn Default Encryption chỉ là lưới an toàn áp mã hóa cho những request đã được cho qua.
 
 ---
 
@@ -137,18 +159,12 @@ Có ba khái niệm cần tách bạch:
 - **Retention mode** — có hai loại:
   - **Governance mode:** đa số người dùng không thể xóa/ghi đè, nhưng một số ít có quyền đặc biệt (`s3:BypassGovernanceRetention`) vẫn vượt được khi cần. Phù hợp khi bạn muốn bảo vệ mạnh nhưng giữ một "đường thoát" cho admin.
   - **Compliance mode:** không một ai xóa/ghi đè được, **kể cả root account**. Đã đặt là không thể rút ngắn thời hạn hay đổi mode. Dùng khi quy định pháp lý không cho phép bất kỳ ngoại lệ nào.
-- **Retention Period:** bảo vệ object trong một khoảng thời gian cố định; có thể gia hạn thêm.
+- **Retention Period:** bảo vệ object trong một khoảng thời gian cố định, có thể gia hạn thêm.
 - **Legal Hold:** bảo vệ object **vô thời hạn**, độc lập hoàn toàn với retention period, bật/tắt tự do bằng quyền `s3:PutObjectLegalHold`. Hình dung như một "lệnh phong tỏa" trong vụ kiện: giữ chừng nào còn cần, gỡ khi xong.
-
-- **Use case:** hồ sơ tài chính/y tế phải giữ bất biến nhiều năm; chống ransomware xóa backup.
 
 ### 4.2. Glacier Vault Lock
 
-Trong khi Object Lock bảo vệ object trong S3, **Glacier Vault Lock** bảo vệ dữ liệu trong kho lưu trữ lạnh Amazon S3 Glacier. Nó cũng theo mô hình WORM, nhưng điểm đặc trưng là một **lock policy** (chính sách khóa): một khi đã khóa, chính sách đó trở thành bất biến — không ai sửa hay xóa được nữa, mãi mãi.
-
-- **Vấn đề nó giải quyết:** chứng minh với kiểm toán viên rằng dữ liệu lưu trữ dài hạn tuyệt đối không thể bị thay đổi.
-
-> Object Lock dành cho object trong S3 (cần enable versioning). Vault Lock dành cho Glacier vault, nhấn mạnh ở chính sách khóa vĩnh viễn.
+Trong khi Object Lock bảo vệ object trong S3, **Glacier Vault Lock** bảo vệ dữ liệu trong kho lưu trữ lạnh Amazon S3 Glacier. Nó cũng theo mô hình WORM, nhưng điểm đặc trưng nằm ở **lock policy** -- một khi đã khóa, chính sách đó trở thành bất biến.
 
 ### 4.3. MFA Delete
 
@@ -177,7 +193,7 @@ Muốn trả lời "ai đã truy cập object nào, lúc nào", bạn bật **S3
 
 Pre-signed URL là URL do bạn ký, cho phép người cầm nó truy cập một object cụ thể trong thời gian giới hạn — kế thừa đúng quyền của người đã ký. Nhờ đó bạn cấp quyền tải lên/tải xuống mà **không cần mở bucket ra public**.
 
-- **Use case:** cho phép tải nội dung premium chỉ với người đã đăng nhập; danh sách người được tải thay đổi liên tục; cho người dùng upload thẳng vào đúng vị trí trong bucket.
+- **Use case:** cho phép tải nội dung premium chỉ với người đã đăng nhập, danh sách người được tải thay đổi liên tục, cho người dùng upload thẳng vào đúng vị trí trong bucket.
 - **Cần nhớ:** URL có thời hạn (CLI mặc định một giờ, cấu hình được). Bucket vẫn private hoàn toàn.
 
 Đây là tính năng có riêng một bài đi sâu — gồm cả luồng upload bằng presigned POST, download, và tích hợp CloudFront Signed Cookies cho ảnh: [S3 Presigned URL](/vi/posts/s3-presigned-url).
@@ -280,14 +296,14 @@ Access Points là để **mở rộng quản lý quyền** (nhiều team/prefix)
 
 **S3 Object Lambda** cho phép chèn một hàm AWS Lambda vào giữa, để **biến đổi object ngay lúc nó được đọc (GET)**, không cần lưu bản sao. Kiến trúc cần: một bucket, một S3 Access Point hỗ trợ, và một **S3 Object Lambda Access Point**. Ứng dụng gọi Object Lambda Access Point → nó kích hoạt Lambda → Lambda đọc object gốc qua access point hỗ trợ, biến đổi, rồi trả kết quả về cho người gọi.
 
-- **Use case:** che (redact) thông tin nhạy cảm như PII cho môi trường phân tích; chuyển đổi định dạng (XML → JSON); resize/đóng dấu mờ ảnh on-the-fly; làm giàu dữ liệu từ nguồn khác.
-- **Cần nhớ:** chỉ **một bucket** duy nhất; điểm mấu chốt là biến đổi lúc đọc, dùng cặp Access Point + Object Lambda Access Point.
+- **Use case:** che (redact) thông tin nhạy cảm như PII cho môi trường phân tích, chuyển đổi định dạng (XML → JSON), resize/đóng dấu mờ ảnh on-the-fly, làm giàu dữ liệu từ nguồn khác.
+- **Cần nhớ:** chỉ **một bucket** duy nhất, điểm mấu chốt là biến đổi lúc đọc, dùng cặp Access Point + Object Lambda Access Point.
 
 ### 6.3. S3 CORS
 
 CORS là cơ chế bảo mật của **trình duyệt**, không phải của riêng S3. Một origin được định nghĩa bởi scheme + host + port (ví dụ `https://www.example.com`). Theo mặc định, trình duyệt chặn JavaScript của một origin gọi tài nguyên ở origin khác — trừ khi origin đích cho phép qua các header CORS.
 
-Cách hoạt động: trước request thật, trình duyệt gửi một request "thăm dò" (preflight) tới S3; nếu cấu hình CORS của bucket cho phép origin đó, trình duyệt mới gửi request thật.
+Cách hoạt động: trước request thật, trình duyệt gửi một request "thăm dò" (preflight) tới S3, nếu cấu hình CORS của bucket cho phép origin đó, trình duyệt mới gửi request thật.
 
 - **Use case kinh điển trong đề thi:** một website tĩnh host trên bucket A nạp file (ảnh, font, dữ liệu) từ bucket B → bạn phải bật cấu hình **CORS trên bucket B** (bucket đích), cho phép origin của bucket A.
 - **Cần nhớ:** thấy "trình duyệt", "cross-origin", "website tĩnh gọi bucket khác" → CORS, và cấu hình đặt ở **bucket được gọi**.

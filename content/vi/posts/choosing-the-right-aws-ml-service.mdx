@@ -86,7 +86,10 @@ Lex là service xây chatbot hội thoại, dùng chung công nghệ ASR + NLU v
 
 **Flow điển hình — đặt lịch hẹn qua điện thoại:**
 
-<ExcalidrawDiagram src="/lex-connect-appointment-flow.excalidraw" alt="Luồng đặt lịch qua điện thoại từ Connect tới Lex, Lambda rồi ghi vào CRM" />
+<ExcalidrawDiagram
+  src="/lex-connect-appointment-flow.excalidraw"
+  alt="Luồng đặt lịch qua điện thoại từ Connect tới Lex, Lambda rồi ghi vào CRM"
+/>
 
 Khách hàng gọi vào số tổng đài ảo của Connect (**call**). Connect stream âm thanh cuộc gọi sang Lex (**stream**); Lex nhận dạng giọng nói rồi xác định **intent** "đặt lịch hẹn" cùng các slot cần thiết (ngày, giờ). Khi intent đã rõ, Lex gọi một hàm Lambda (**invoke**) để chạy nghiệp vụ — kiểm tra lịch trống rồi ghi lịch hẹn vào hệ thống CRM (**schedule**). Toàn bộ diễn ra tự động, không cần nhân viên trực tổng đài.
 
@@ -121,7 +124,10 @@ Comprehend Medical là phiên bản Comprehend chuyên cho văn bản y khoa, hi
 
 **Flow điển hình — nạp dữ liệu vào Comprehend Medical:**
 
-<ExcalidrawDiagram src="/comprehend-medical-flow.excalidraw" alt="Ba đường nạp dữ liệu từ S3, Kinesis Data Firehose và Transcribe vào Comprehend Medical" />
+<ExcalidrawDiagram
+  src="/comprehend-medical-flow.excalidraw"
+  alt="Ba đường nạp dữ liệu từ S3, Kinesis Data Firehose và Transcribe vào Comprehend Medical"
+/>
 
 Comprehend Medical có ba đường nạp dữ liệu phổ biến. Tài liệu lâm sàng được lưu trong kho object Amazon S3 rồi đưa vào phân tích theo lô (**documents**). Dữ liệu phát sinh liên tục thì stream qua Kinesis Data Firehose để xử lý gần thời gian thực (**real-time**). Còn lời nói — ví dụ bác sĩ đọc ghi chú hay hội thoại với bệnh nhân — thì cho qua Amazon Transcribe để chuyển thành văn bản trước (**text**). Cả ba đều hội tụ về Comprehend Medical để trích xuất thực thể y tế và PHI (**extract**).
 
@@ -185,41 +191,3 @@ Textract dùng OCR nâng cao để trích xuất không chỉ chữ mà cả **d
 **Use case:** Xử lý hóa đơn, giấy tờ tùy thân, biểu mẫu, tài liệu tài chính/thuế/y tế.
 
 **Keyword nhận diện:** `trích xuất text từ tài liệu`, `tài liệu scan / PDF`, `form và bảng (forms & tables)`, `OCR`, `xử lý hóa đơn / giấy tờ`.
-
----
-
-## Tips & Tricks — Nhận diện keyword và chọn service
-
-Đây là phần quan trọng nhất khi đi thi. Đọc đề, bắt keyword, ánh xạ thẳng sang service.
-
-### Theo loại dữ liệu đầu vào
-
-| Đề nhắc tới...                                      | Chọn               |
-| -------------------------------------------------- | ------------------ |
-| Ảnh, video, khuôn mặt, vật thể                     | Rekognition        |
-| Âm thanh lời nói → cần ra văn bản                  | Transcribe         |
-| Văn bản → cần ra giọng nói                         | Polly              |
-| Văn bản cần dịch sang ngôn ngữ khác                | Translate          |
-| Văn bản cần phân tích cảm xúc / entity / chủ đề    | Comprehend         |
-| Văn bản y tế / lâm sàng                            | Comprehend Medical |
-| Tài liệu scan / PDF / form / bảng                  | Textract           |
-| Hội thoại / chatbot / tổng đài                     | Lex (+ Connect)    |
-| Câu hỏi tìm kiếm trong kho tài liệu                | Kendra             |
-| Lịch sử hành vi → cần gợi ý                        | Personalize        |
-
-### Pre-trained hay tự build
-
-| Đề nhắc tới...                                                        | Chọn                          |
-| -------------------------------------------------------------------- | ----------------------------- |
-| "data scientist", "train model riêng", "custom model", "thuật toán riêng" | SageMaker                |
-| Tác vụ AI phổ biến (ảnh, giọng nói, dịch, NLP...) qua API có sẵn      | Service pre-trained tương ứng |
-
----
-
-## Kết lại
-
-Một câu để nhớ:
-
-> **Nhận ra loại dữ liệu và tác vụ trước, service sẽ tự lộ ra.**
-
-Trong phòng thi, phản xạ keyword → service giúp bạn tiết kiệm thời gian quý giá. Nhưng ngoài thực tế, câu hỏi đúng không phải "service nào khớp keyword", mà là một service pre-trained có đủ chính xác cho bài toán không, chi phí theo lượng request ra sao, dữ liệu có ràng buộc tuân thủ gì, và khi nào thì đáng để tự train model bằng SageMaker.
