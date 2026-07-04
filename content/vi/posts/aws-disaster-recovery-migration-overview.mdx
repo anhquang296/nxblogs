@@ -161,22 +161,49 @@ Vậy DRS và MGN khác gì nhau? Cùng một engine, khác mục đích:
 
 **AWS Database Migration Service (DMS)** chuyên di chuyển database vào AWS. Điểm bán hàng cốt lõi: trong suốt quá trình di chuyển, database nguồn vẫn hoạt động bình thường — ứng dụng không phải tắt.
 
-Cách hoạt động:
+DMS là một server do AWS quản lý chạy phần mềm replication: bạn khai báo cho nó biết lấy dữ liệu từ đâu, ghi vào đâu, rồi tạo một task để chuyển dữ liệu. Cụ thể, một migration với DMS xoay quanh ba thành phần sau.
 
-- DMS chạy trên một replication instance (một EC2 instance do DMS quản lý) đứng giữa nguồn và đích.
-- Nó hỗ trợ migrate một lần (full load) và/hoặc nhân bản liên tục bằng CDC. Nhờ CDC, bạn có thể full load trước rồi để DMS bắt kịp các thay đổi mới, đến khi hai bên gần như đồng bộ thì cắt sang đích với downtime tí xíu.
-- Bản thân DMS kháng lỗi (resilient).
+### 6.1. Ba thành phần của DMS
 
-Có hai kiểu di chuyển, và đây là phần đề thi hay xoáy:
+- **Replication instance:** một EC2 instance do DMS quản lý, đứng giữa nguồn và đích — mọi công việc đọc, chuyển đổi và ghi dữ liệu đều diễn ra trên instance này. Một replication instance có thể chạy nhiều task cùng lúc. Nó hỗ trợ Multi-AZ: DMS duy trì một bản standby ở Availability Zone khác, instance chính gặp sự cố thì bản standby tiếp quản task đang chạy — nhờ vậy DMS kháng lỗi (resilient). Nếu không muốn tự chọn và quản lý instance, có thể dùng DMS Serverless để AWS tự cấp phát và co giãn tài nguyên replication.
+- **Endpoint (nguồn và đích):** nơi khai báo thông tin kết nối tới mỗi database — loại engine (Oracle, PostgreSQL...), địa chỉ server, port, SSL, và tài khoản có quyền truy cập. DMS bắt buộc test kết nối thành công trước khi endpoint được dùng trong task; khi test thành công, nó còn tải sẵn thông tin schema (định nghĩa bảng, khóa chính...) để phục vụ bước cấu hình task. Một endpoint có thể được nhiều task dùng chung.
+- **Replication task:** định nghĩa "chuyển cái gì và chuyển như thế nào" — chọn bảng/schema cần chuyển (table mapping), quy tắc biến đổi nếu cần (ví dụ đổi tên schema trên đích), và quan trọng nhất là kiểu migration.
 
-### 6.1. Homogeneous vs Heterogeneous + Schema Conversion Tool
+### 6.2. Ba kiểu migration và flow thực tế
+
+Khi tạo task, bạn chọn một trong ba kiểu:
+
+- **Full load** (migrate existing data): copy toàn bộ dữ liệu hiện có từ nguồn sang đích một lần. Phù hợp khi bạn chấp nhận được một khoảng downtime đủ dài để copy xong.
+- **Full load + CDC** (migrate existing data and replicate ongoing changes): vừa bulk copy dữ liệu có sẵn, vừa bắt các thay đổi phát sinh trên nguồn trong lúc copy. Full load xong, DMS áp các thay đổi đã gom được sang đích rồi tiếp tục replicate liên tục. Đây chính là kiểu làm nên điểm bán hàng của DMS: nguồn không phải dừng.
+- **CDC only** (replicate data changes only): chỉ replicate thay đổi. Dùng khi phần dữ liệu có sẵn được chuyển bằng công cụ khác hiệu quả hơn (ví dụ native export/import của engine), còn DMS lo phần giữ hai bên đồng bộ từ thời điểm bắt đầu bulk load.
+
+**CDC (change data capture)** là kỹ thuật bắt thay đổi dữ liệu bằng cách đọc transaction log của database — nơi engine ghi lại mọi thao tác ghi (với MySQL là binlog, với Oracle là redo log). DMS đọc log này qua API riêng của từng engine, nên nó thấy được mọi INSERT/UPDATE/DELETE mà không phải quét bảng hay chen vào các query đang chạy trên nguồn.
+
+Ghép ba thành phần và kiểu migration lại, một migration điển hình với DMS diễn ra như sau:
+
+1. Tạo replication instance (hoặc dùng DMS Serverless).
+2. Tạo source endpoint và target endpoint, test kết nối cả hai.
+3. Tạo task kiểu full load + CDC rồi chạy: task bulk copy dữ liệu có sẵn, đồng thời CDC gom các thay đổi phát sinh.
+4. Full load xong, DMS áp các thay đổi đã gom rồi replicate liên tục; độ trễ replication giảm dần về gần 0.
+5. Cutover: dừng ứng dụng một nhịp ngắn, chờ các thay đổi cuối cùng chảy sang đích, rồi trỏ ứng dụng vào database mới.
+
+<ExcalidrawDiagram
+  src="/aws-dms-architecture.excalidraw"
+  alt="Kiến trúc DMS: replication instance đứng giữa hai endpoint, full load đọc bảng và CDC đọc transaction log từ nguồn rồi ghi sang đích"
+/>
+
+> **Exam tip:** Thấy "migrate database với downtime gần bằng 0" hoặc "nguồn vẫn phục vụ ứng dụng trong lúc migrate" là dấu hiệu của **DMS với full load + CDC**.
+
+Có hai kiểu di chuyển xét theo engine, và đây là phần đề thi hay xoáy:
+
+### 6.3. Homogeneous vs Heterogeneous + Schema Conversion Tool
 
 - **Homogeneous migration** — cùng một loại engine (ví dụ Oracle → Oracle, PostgreSQL → PostgreSQL). Vì cấu trúc schema tương thích, bạn chỉ cần DMS để chuyển dữ liệu.
-- **Heterogeneous migration** — khác loại engine (ví dụ Microsoft SQL Server → Aurora, Oracle → PostgreSQL). Lúc này schema và mã (stored procedure, kiểu dữ liệu...) không tương thích, nên cần thêm SCT: dùng để chuyển đổi schema sang engine đích trước, **rồi** mới dùng DMS để chuyển dữ liệu.
+- **Heterogeneous migration** — khác loại engine (ví dụ Microsoft SQL Server → Aurora, Oracle → PostgreSQL). Lúc này schema và mã (stored procedure, kiểu dữ liệu...) không tương thích, nên cần bước chuyển đổi schema trước: dùng DMS Schema Conversion (bản managed chạy ngay trong console) hoặc AWS Schema Conversion Tool (SCT — bản tải về máy) để chuyển schema sang engine đích, **rồi** mới dùng DMS để chuyển dữ liệu.
 
 DMS hỗ trợ rất nhiều nguồn và đích: nguồn có thể là database on-premises, trên EC2, RDS, Aurora, S3, Azure SQL...; đích có thể là RDS, Aurora, Redshift, DynamoDB, S3, OpenSearch, Kinesis, Kafka...
 
-### 6.2. Di chuyển RDS & Aurora
+### 6.4. Di chuyển RDS & Aurora
 
 Khi câu hỏi xoay quanh chuyển dữ liệu **giữa các database AWS**, có vài đường quen thuộc ngoài DMS:
 
@@ -188,7 +215,7 @@ Khi câu hỏi xoay quanh chuyển dữ liệu **giữa các database AWS**, có
 
 **Use case:** di chuyển database lên AWS hoặc đổi engine với downtime tối thiểu; đồng bộ liên tục giữa hai database; gom dữ liệu nhiều nguồn về một kho phân tích.
 
-**Keyword:** `migrate database`, `source database stays available`, `continuous replication / CDC`, `homogeneous vs heterogeneous`, `different database engine → SCT`, `Oracle to Aurora / SQL Server to PostgreSQL`.
+**Keyword:** `migrate database`, `source database stays available`, `replication instance`, `full load + CDC`, `CDC only`, `near-zero downtime cutover`, `homogeneous vs heterogeneous`, `different database engine → SCT`, `Oracle to Aurora / SQL Server to PostgreSQL`.
 
 ---
 

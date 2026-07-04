@@ -161,22 +161,49 @@ So what's the difference between DRS and MGN? Same engine, different purpose:
 
 **AWS Database Migration Service (DMS)** specializes in migrating databases into AWS. Its core selling point: throughout the migration, the source database keeps operating normally — the application doesn't have to go down.
 
-How it works:
+In essence, DMS is an AWS-managed server running replication software: you tell it where to pull data from and where to write it, then create a task to move the data. Concretely, a DMS migration revolves around three components.
 
-- DMS runs on a replication instance (an EC2 instance managed by DMS) sitting between source and target.
-- It supports one-time migration (full load) and/or continuous replication via CDC. Thanks to CDC, you can do a full load first, let DMS catch up on new changes, and once both sides are nearly in sync, cut over to the target with tiny downtime.
-- DMS itself is resilient.
+### 6.1. The three components of DMS
 
-There are two migration flavors, and this is the part the exam loves to probe:
+- **Replication instance:** an EC2 instance managed by DMS, sitting between source and target — all the reading, transforming, and writing of data happens on this instance. A single replication instance can run multiple tasks at once. It supports Multi-AZ: DMS maintains a standby replica in another Availability Zone, and if the primary instance fails, the standby takes over the running tasks — which is what makes DMS resilient. If you'd rather not pick and manage an instance yourself, DMS Serverless lets AWS provision and scale the replication capacity for you.
+- **Endpoint (source and target):** where you declare the connection details for each database — engine type (Oracle, PostgreSQL...), server address, port, SSL, and an account with the required access. DMS requires a successful connection test before an endpoint can be used in a task; on success, it also downloads schema information (table definitions, primary keys...) to use during task configuration. One endpoint can be shared by multiple tasks.
+- **Replication task:** defines "what to move and how to move it" — which tables/schemas to migrate (table mapping), transformation rules if needed (for example renaming a schema on the target), and most importantly the migration type.
 
-### 6.1. Homogeneous vs heterogeneous + the Schema Conversion Tool
+### 6.2. The three migration types and the actual flow
+
+When creating a task, you pick one of three types:
+
+- **Full load** (migrate existing data): copy all existing data from source to target once. A good fit when you can afford a downtime window long enough for the copy to finish.
+- **Full load + CDC** (migrate existing data and replicate ongoing changes): bulk copy the existing data while also capturing changes happening on the source during the copy. Once the full load finishes, DMS applies the accumulated changes to the target and then keeps replicating continuously. This is the type behind DMS's selling point: the source never has to stop.
+- **CDC only** (replicate data changes only): replicate changes only. Use it when the existing data is moved more efficiently by another tool (for example the engine's native export/import), and DMS handles keeping both sides in sync from the moment the bulk load starts.
+
+**CDC (change data capture)** is a technique for capturing data changes by reading the database's transaction log — where the engine records every write operation (the binlog for MySQL, the redo log for Oracle). DMS reads this log through each engine's native API, so it sees every INSERT/UPDATE/DELETE without scanning tables or getting in the way of queries running on the source.
+
+Putting the three components and the migration type together, a typical DMS migration goes like this:
+
+1. Create a replication instance (or use DMS Serverless).
+2. Create the source endpoint and the target endpoint, and test both connections.
+3. Create a full load + CDC task and start it: the task bulk-copies existing data while CDC collects incoming changes.
+4. After the full load finishes, DMS applies the collected changes and keeps replicating; the replication latency shrinks toward zero.
+5. Cutover: pause the application briefly, let the last changes flow through to the target, then point the application at the new database.
+
+<ExcalidrawDiagram
+  src="/aws-dms-architecture.excalidraw"
+  alt="DMS architecture: the replication instance sits between two endpoints, full load reads tables and CDC reads the transaction log from the source, writing to the target"
+/>
+
+> **Exam tip:** Phrases like "migrate a database with near-zero downtime" or "the source keeps serving the application during migration" point to **DMS with full load + CDC**.
+
+There are two migration flavors by engine, and this is the part the exam loves to probe:
+
+### 6.3. Homogeneous vs heterogeneous + the Schema Conversion Tool
 
 - **Homogeneous migration** — the same engine type (e.g. Oracle → Oracle, PostgreSQL → PostgreSQL). Since the schema structures are compatible, you only need DMS to move the data.
-- **Heterogeneous migration** — a different engine type (e.g. Microsoft SQL Server → Aurora, Oracle → PostgreSQL). Now the schema and code (stored procedures, data types...) are incompatible, so you also need the SCT: use it to convert the schema to the target engine first, **then** use DMS to move the data.
+- **Heterogeneous migration** — a different engine type (e.g. Microsoft SQL Server → Aurora, Oracle → PostgreSQL). Now the schema and code (stored procedures, data types...) are incompatible, so you need a schema conversion step first: use DMS Schema Conversion (the managed option right in the console) or the AWS Schema Conversion Tool (SCT — the downloadable version) to convert the schema to the target engine, **then** use DMS to move the data.
 
 DMS supports many sources and targets: the source can be a database on-premises, on EC2, RDS, Aurora, S3, Azure SQL...; the target can be RDS, Aurora, Redshift, DynamoDB, S3, OpenSearch, Kinesis, Kafka...
 
-### 6.2. RDS & Aurora migrations
+### 6.4. RDS & Aurora migrations
 
 When the question revolves around moving data **between AWS databases**, there are a few familiar paths besides DMS:
 
@@ -188,7 +215,7 @@ When the question revolves around moving data **between AWS databases**, there a
 
 **Use case:** migrate a database into AWS or change engines with minimal downtime; keep two databases continuously in sync; consolidate data from multiple sources into one analytics store.
 
-**Keywords:** `migrate database`, `source database stays available`, `continuous replication / CDC`, `homogeneous vs heterogeneous`, `different database engine → SCT`, `Oracle to Aurora / SQL Server to PostgreSQL`.
+**Keywords:** `migrate database`, `source database stays available`, `replication instance`, `full load + CDC`, `CDC only`, `near-zero downtime cutover`, `homogeneous vs heterogeneous`, `different database engine → SCT`, `Oracle to Aurora / SQL Server to PostgreSQL`.
 
 ---
 
