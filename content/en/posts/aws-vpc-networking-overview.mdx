@@ -53,7 +53,9 @@ Its foundation is IPsec — a protocol suite that wraps packets in an encrypted 
 
 ### 2.1. The path of a request, from on-prem to EC2
 
-To see how the pieces above — route table, BGP, route propagation, Security Group — work together, trace one concrete request. Say the on-prem server has IP `192.168.1.10` and an EC2 instance in the VPC has private IP `10.0.1.20`; the VPC uses CIDR `10.0.0.0/16`, and the on-prem network uses `192.168.0.0/16`.
+To see how the pieces above — route table, BGP, route propagation, Security Group — work together, trace one concrete request.
+
+Say the on-prem server has IP `192.168.1.10`, an EC2 instance in the VPC has private IP `10.0.1.20`, the VPC uses CIDR `10.0.0.0/16`, and the on-prem network uses `192.168.0.0/16`.
 
 1. **The on-prem server creates the request.** The server sends a packet to destination `10.0.1.20`. It knows nothing about the VPN — it just sees an address on another network, so it hands the packet to its default gateway (the internal router).
 2. **The on-prem router routes it into the tunnel.** The on-prem router has a route declaring that the `10.0.0.0/16` range (the VPC's CIDR) must go through the VPN tunnel. This is the critical config step: without this route, the packet never enters the tunnel.

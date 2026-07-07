@@ -53,7 +53,9 @@ Nền tảng của nó là IPsec — bộ giao thức bọc gói tin trong một
 
 ### 2.1. Luồng đi của một request, từ on-premises tới EC2
 
-Để thấy các mảnh ghép trên — route table, BGP, route propagation, Security Group — phối hợp ra sao, hãy lần theo một request cụ thể. Giả sử server on-premises có IP `192.168.1.10`, EC2 trong VPC có private IP `10.0.1.20`; VPC dùng CIDR `10.0.0.0/16`, còn mạng on-premises dùng `192.168.0.0/16`.
+Để thấy các mảnh ghép trên — route table, BGP, route propagation, Security Group — phối hợp ra sao, hãy lần theo một request cụ thể.
+
+Giả sử server on-premises có IP `192.168.1.10`, EC2 trong VPC có private IP `10.0.1.20`, VPC dùng CIDR `10.0.0.0/16`, còn mạng on-premises dùng `192.168.0.0/16`.
 
 1. **Server on-prem tạo request.** Server gửi gói tin đến đích `10.0.1.20`. Nó không biết gì về VPN — chỉ thấy đây là một địa chỉ thuộc mạng khác, nên đẩy gói tin tới default gateway (router nội bộ).
 2. **Router on-prem định tuyến vào tunnel.** Router on-premises có một route khai rằng dải `10.0.0.0/16` (CIDR của VPC) phải đi qua VPN tunnel. Đây là bước cấu hình quan trọng: thiếu route này thì gói tin không bao giờ vào được tunnel.
