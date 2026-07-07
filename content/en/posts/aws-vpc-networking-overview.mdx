@@ -74,10 +74,11 @@ A natural question: the route table can update itself via BGP, so why doesn't th
 
 ### 2.2. AWS VPN CloudHub
 
-When you have several sites (branches) that want to connect to each other, **VPN CloudHub** is a trick that reuses the same Virtual Private Gateway as a hub: one Virtual Private Gateway + multiple Customer Gateways. The result is that the sites not only reach the VPC but can also **talk to each other** through the Virtual Private Gateway, in a hub-and-spoke topology (one center radiating to many spokes).
+When you have several sites (branches) that want to connect to each other, **VPN CloudHub** is a configuration pattern (not a separate service) that reuses the same Virtual Private Gateway as a hub: one Virtual Private Gateway + multiple Customer Gateways. The result is that the sites not only reach the VPC but can also **talk to each other** through the Virtual Private Gateway, in a hub-and-spoke topology (one center radiating to many spokes).
 
-- **The problem it solves:** connect multiple branches to each other and to AWS, at low cost, over the internet.
-- **Remember:** CloudHub runs on top of existing VPN connections, so it keeps VPN's characteristics — over the internet, with no guaranteed bandwidth or latency.
+Because VPN CloudHub is simply multiple Site-to-Site VPN connections terminating on the same Virtual Private Gateway, it inherits the characteristics of Site-to-Site VPN: data is encrypted, travels over the public internet, and operation relies on BGP and its re-advertisement mechanism.
+
+Once the Site-to-Site VPN connections are established, BGP lets each on-premises site advertise its address range to the central VGW. The VGW then re-advertises what it has learned back to the Customer Gateways. That is how the on-premises sites can communicate with each other through the VGW.
 
 Because it runs over the internet, the throughput and latency of Site-to-Site VPN are **not guaranteed**, and each tunnel is capped around **1.25 Gbps**. When you need more than that, or a stable dedicated path, you move to Direct Connect.
 
@@ -112,7 +113,7 @@ For resiliency, AWS recommends two tiers:
 - **High resiliency:** two DX connections at two different Direct Connect Locations.
 - **Maximum resiliency:** multiple connections, terminating on separate devices, at multiple locations.
 
-- **Use case:** steady large-volume data transfer, hybrid apps needing stable latency, or reaching AWS public services while avoiding the internet entirely.
+> Use DX for steady large-volume data transfer, hybrid apps that need stable latency, or reaching AWS public services while avoiding the internet entirely.
 
 ---
 
@@ -122,8 +123,6 @@ The two services above aren't mutually exclusive — pairing them solves exactly
 
 - **You need a private path but it must be encrypted:** run a Site-to-Site VPN (IPsec) **on top of** Direct Connect (over a Public VIF). You get both the privacy and stability of DX and the encryption of VPN — satisfying compliance requirements that mandate "encryption in transit."
 - **You need a backup for DX:** a single DX connection that fails leaves on-prem cut off from AWS, and provisioning a second DX is slow. The cheap, fast fix: use a **Site-to-Site VPN as the backup path** for DX. When DX dies, traffic fails over to the VPN (over the internet) — accepting lower performance to keep the connection from dropping.
-
-- **Remember:** "DX failed, need a cheap backup" means Site-to-Site VPN. "DX but requires encryption in transit" means VPN over Direct Connect.
 
 ---
 
@@ -144,11 +143,9 @@ The "not transitive" rule above is the one most often missed — the diagram bel
   alt="VPC Peering is not transitive, A peered with B and B peered with C but A cannot reach C"
 />
 
-A few pluses: peering works **cross-region** and **cross-account**; and you can reference the other VPC's Security Group directly in your rules (handy for declaring permissions) — this works across accounts but only within the same region.
+VPC Peering works **cross-region** and **cross-account**; and you can reference the other VPC's Security Group directly in your rules (handy for declaring permissions) — this works across accounts but only within the same region.
 
-- **Use case:** connect a small number of VPCs over a private path, simply.
-
-> When the VPC count grows large, the VPC peering connections between them form a tangled mesh that becomes unmanageable — and that's exactly when Transit Gateway enters.
+> Use VPC Peering only when you need to connect a small number of VPCs over a simple, private path. When the VPC count grows large, the VPC peering connections between them form a tangled mesh that becomes unmanageable — and that's exactly when Transit Gateway enters.
 
 ---
 
@@ -201,7 +198,7 @@ When you see "access S3/DynamoDB privately, off the internet, save cost," the an
 
 **AWS PrivateLink** is the technology behind Interface Endpoints, and the most secure way for **a service provider to expose their service to thousands of other VPCs** without peering, without an Internet Gateway, without touching route tables: the consumer provisions an Interface Endpoint connecting to a NLB placed in front of the provider's service.
 
-- **Remember an on-prem trap:** a Gateway Endpoint **cannot** be reached from on-prem (over DX/VPN). If the question says "need to access S3 privately from the on-prem data center," the answer is an **Interface Endpoint** for S3, not a Gateway Endpoint.
+> A Gateway Endpoint **cannot** be reached from on-prem (over DX/VPN). If the question says "need to access S3 privately from the on-prem data center," the answer is an **Interface Endpoint** for S3, not a Gateway Endpoint.
 
 ---
 
