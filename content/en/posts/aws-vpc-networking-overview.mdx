@@ -48,7 +48,7 @@ One idea runs through the whole post — pin it down first: when you connect two
 
 Its foundation is IPsec — a protocol suite that wraps packets in an encrypted "tunnel," so that even as data crosses the internet, an eavesdropper in the middle sees only meaningless bytes. A VPN connection needs two ends, each a "gateway":
 
-- **Virtual Private Gateway** is the VPN gateway on the AWS side — you attach it to the VPC. You can set a custom Autonomous System Number on the Virtual Private Gateway if you want.
+- **Virtual Private Gateway** is the VPN gateway on the AWS side — you attach it to the VPC.
 - **Customer Gateway** represents the on-prem device (a physical or software router). In AWS, you declare the Customer Gateway with the public IP address of that device.
 
 ### 2.1. The path of a request, from on-prem to EC2
@@ -74,7 +74,7 @@ A natural question: the route table can update itself via BGP, so why doesn't th
 
 ### 2.2. AWS VPN CloudHub
 
-When you have several sites (branches) that want to connect to each other, **VPN CloudHub** is a trick that reuses the same Virtual Private Gateway as a hub: one Virtual Private Gateway + multiple Customer Gateways (one Customer Gateway per site, each with a different BGP Autonomous System Number). The result is that the sites not only reach the VPC but can also **talk to each other** through the Virtual Private Gateway, in a hub-and-spoke topology (one center radiating to many spokes).
+When you have several sites (branches) that want to connect to each other, **VPN CloudHub** is a trick that reuses the same Virtual Private Gateway as a hub: one Virtual Private Gateway + multiple Customer Gateways. The result is that the sites not only reach the VPC but can also **talk to each other** through the Virtual Private Gateway, in a hub-and-spoke topology (one center radiating to many spokes).
 
 - **The problem it solves:** connect multiple branches to each other and to AWS, at low cost, over the internet.
 - **Remember:** CloudHub runs on top of existing VPN connections, so it keeps VPN's characteristics — over the internet, with no guaranteed bandwidth or latency.
