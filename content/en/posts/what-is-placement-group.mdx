@@ -8,7 +8,10 @@ enableComment: true
 
 # What is a Placement Group? Strategies for Optimizing Instance Placement
 
-<ExcalidrawDiagram src="/ec2-instance-placement-groups-diagram.excalidraw" alt="Cluster, Spread, and Partition strategies arranging EC2 instances across hardware" />
+<ExcalidrawDiagram
+  src="/ec2-instance-placement-groups-diagram.excalidraw"
+  alt="Cluster, Spread, and Partition strategies arranging EC2 instances across hardware"
+/>
 
 When working with traditional physical infrastructure, you have full control over placing Server A next to Server B (plugged into the same switch for faster networking) or placing Server C in a different building (for disaster protection). But when moving to the Cloud, everything is virtualized -- how do we control this?
 
@@ -22,8 +25,8 @@ Simply put, a Placement Group is a logical configuration that allows you to "hin
 
 When you launch a group of virtual servers, AWS places them randomly by default to optimize for AWS. However, with PG, you can request AWS to:
 
-- Place them **as close together as possible** (to optimize throughput, reduce latency).
-- Or place them **as far apart as possible** (to optimize availability, reduce hardware risk).
+- Place them **as close together as possible** (to optimize throughput and latency).
+- Or place them **as far apart as possible** (to optimize availability and hardware risk).
 
 Currently, AWS provides 3 main strategies: **Cluster**, **Spread**, and **Partition**.
 
@@ -37,7 +40,7 @@ This is the "strength in unity" strategy.
 
 - **Mechanism:** AWS will try to place your instances within the same Availability Zone (AZ), and even on the same or adjacent server racks.
 - **Advantages:**
-  - Extremely low network latency.
+  - Extremely low latency.
   - Extremely high throughput between nodes (up to 10-100 Gbps).
 
 - **Disadvantages:** "All or nothing." Since they are clustered together, if that rack experiences a power or network failure, your entire cluster of instances could go down at once.
@@ -68,36 +71,14 @@ This is the "hybrid child," the perfect balance between Cluster and Spread desig
   - Still ensures fault isolation: if Partition 1's rack fails, Partition 2 continues running normally.
 - **Special feature:** Instances can access **Metadata** to know exactly which Partition they are in, enabling applications to self-coordinate data placement (Topology-aware).
 
-- **Use Case:** Large-scale distributed data systems (Big Data) such as **Hadoop HDFS, Cassandra, Kafka**. (For example: Kafka can replicate data to a partition on a different rack to ensure safety).
+- **Use Case:** Large-scale distributed data systems such as **Hadoop HDFS, Cassandra, Kafka**. (For example: Kafka can replicate data to a partition on a different rack to ensure safety).
 
----
-
-## 3. Quick Comparison Table
-
-| Feature           | Cluster                      | Spread                    | Partition                           |
-| ------------------ | ---------------------------- | ------------------------- | ----------------------------------- |
-| **Primary Goal** | Network Performance | Availability | Balance (Distributed Systems)      |
-| **Physical Location**  | Same Rack / Same AZ        | Completely Different Racks       | Same Rack (within 1 partition), Different Racks (between partitions) |
-| **Limits** | No instance limit | Max 7 instances / AZ | Max 7 partitions / AZ |
-| **Multi-AZ Support** | No (Single AZ only) | Yes | Yes |
-| **Best For** | HPC, Super computing | Database, Critical Apps | HDFS, Kafka, Cassandra |
-
----
-
-## 4. How to Use
-
-A typical example is when you need to deploy a backend API application that requires high availability. You immediately think of the Spread strategy to distribute your instances across different racks, and even different AZs.
-
-You need to go to the AWS Console and create a Spread Placement Group.
-
-Then deploy your instances and assign them to the Placement Group you just created. That's it -- super simple.
-
-## 5. Important Notes
+## 3. Important Notes
 
 To use Placement Groups effectively, you need to remember the following rules:
 
 1. **Cost:** The good news is that creating a Placement Group is completely **free**. You only pay for the resources (EC2, EBS, etc.) you use inside it.
-2. **Scope:** Placement Groups (regardless of type) **do not support Multi-Region**. You cannot group instances located in Singapore and Virginia into a single PG.
+2. **Scope:** Placement Groups **do not support Multi-Region**. You cannot group instances located in Singapore and Virginia into a single PG.
 3. **Optimization strategy:**
 
 - Need speed? Choose **Cluster**.

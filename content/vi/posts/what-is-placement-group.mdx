@@ -8,7 +8,10 @@ enableComment: true
 
 # Placement Group là gì? Chiến lược tối ưu vị trí Instance
 
-<ExcalidrawDiagram src="/ec2-instance-placement-groups-diagram.excalidraw" alt="Ba chiến lược Cluster, Spread và Partition sắp xếp EC2 instance trên phần cứng" />
+<ExcalidrawDiagram
+  src="/ec2-instance-placement-groups-diagram.excalidraw"
+  alt="Ba chiến lược Cluster, Spread và Partition sắp xếp EC2 instance trên phần cứng"
+/>
 
 Khi làm việc với hạ tầng vật lý truyền thống, bạn có toàn quyền quyết định server A đặt cạnh server B (cắm chung switch để mạng nhanh) hay đặt server C ở tòa nhà khác (để phòng cháy nổ). Nhưng khi lên Cloud, mọi thứ được ảo hóa, làm sao chúng ta kiểm soát được điều này?
 
@@ -22,38 +25,38 @@ Hiểu đơn giản, Placement Group là một cấu hình logic cho phép bạn
 
 Khi bạn khởi tạo một nhóm các máy chủ ảo, mặc định AWS sẽ đặt chúng một cách ngẫu nhiên để tối ưu cho AWS. Tuy nhiên, với PG, bạn có thể yêu cầu AWS:
 
-- Đặt chúng **gần nhau nhất có thể** (để tối ưu throughput, giảm latency).
-- Hoặc đặt chúng **xa nhau nhất có thể** (để tối ưu availability, giảm rủi ro phần cứng).
+- Đặt chúng **gần nhau nhất có thể** (để tối ưu throughput, latency).
+- Hoặc đặt chúng **xa nhau nhất có thể** (để tối ưu availability, rủi ro phần cứng).
 
-Hiện tại, AWS cung cấp 3 chiến lược (strategies) chính: **Cluster**, **Spread**, và **Partition**.
+Hiện tại, AWS cung cấp 3 chiến lược chính: **Cluster**, **Spread**, và **Partition**.
 
 ---
 
 ## 2. Các loại Placement Group
 
-### A. Cluster Placement Group (Gom cụm)
+### A. Cluster Placement Group
 
 Đây là chiến lược "đoàn kết là sức mạnh".
 
 - **Cơ chế:** AWS sẽ cố gắng đặt các instances của bạn nằm trong cùng một Availability Zone (AZ), thậm chí là nằm chung hoặc sát các tủ rack (giá đỡ server).
 - **Ưu điểm:**
-  - Độ trễ mạng (Latency) cực thấp.
-  - Băng thông (Throughput) cực cao giữa các node (lên đến 10-100 Gbps).
+  - Latency cực thấp.
+  - Throughput cực cao giữa các node (lên đến 10-100 Gbps).
 
 - **Nhược điểm:** "Được ăn cả, ngã về không". Vì nằm chụm lại một chỗ, nếu tủ rack đó gặp sự cố về điện hoặc mạng, toàn bộ cụm instance của bạn có thể "sập" cùng lúc.
 - **Use Case:** Phù hợp cho các ứng dụng tính toán hiệu năng cao (HPC), render đồ họa, hoặc các ứng dụng xử lý dữ liệu lớn cần giao tiếp mạng liên tục và tức thì.
 
-### B. Spread Placement Group (Phân tán)
+### B. Spread Placement Group
 
 Trái ngược với Cluster, đây là chiến lược "chia để trị" nhằm tối đa hóa sự an toàn, tránh "bỏ trứng vào một giỏ".
 
 - **Cơ chế:** Các instances được đảm bảo đặt trên các phần cứng (tủ rack, nguồn điện, mạng) hoàn toàn khác nhau.
-- **Ưu điểm:** Độ sẵn sàng (Availability) cực cao. Việc hỏng hóc phần cứng ở instance này chắc chắn không ảnh hưởng đến instance kia.
+- **Ưu điểm:** Availability cực cao. Việc hỏng hóc phần cứng ở instance này chắc chắn không ảnh hưởng đến instance kia.
 - **Nhược điểm:** Bị giới hạn số lượng. Bạn chỉ được tối đa **7 running instances** cho mỗi AZ trong một Spread PG. Lý do đơn giản là không gian vật lý để tách biệt hoàn toàn là có hạn.
 
-- **Use Case:** Thích hợp cho các ứng dụng quan trọng (Critical applications), các cụm Cơ sở dữ liệu (Database cluster) nơi mà sự sống còn của từng node là ưu tiên hàng đầu.
+- **Use Case:** Thích hợp cho các ứng dụng quan trọng, các cụm cơ sở dữ liệu nơi mà sự sống còn của từng node là ưu tiên hàng đầu.
 
-### C. Partition Placement Group (Phân vùng)
+### C. Partition Placement Group
 
 Đây là "đứa con lai", sự cân bằng hoàn hảo giữa Cluster và Spread dành cho các hệ thống phân tán hiện đại.
 
@@ -68,36 +71,14 @@ Trái ngược với Cluster, đây là chiến lược "chia để trị" nhằ
   - Vẫn đảm bảo cô lập lỗi: Nếu rack của Partition 1 bị hỏng, Partition 2 vẫn chạy bình thường.
 - **Tính năng đặc biệt:** Instance có thể truy cập **Metadata** để biết chính xác mình đang nằm ở Partition nào, giúp ứng dụng tự điều phối data (Topology-aware).
 
-- **Use Case:** Các hệ thống phân tán dữ liệu lớn (Big Data) như **Hadoop HDFS, Cassandra, Kafka**. (Ví dụ: Kafka sẽ biết để replicate data sang partition khác rack nhằm đảm bảo an toàn).
+- **Use Case:** Các hệ thống phân tán dữ liệu lớn như **Hadoop HDFS, Cassandra, Kafka**. (Ví dụ: Kafka sẽ biết để replicate data sang partition khác rack nhằm đảm bảo an toàn).
 
----
-
-## 3. Bảng so sánh nhanh
-
-| Đặc điểm           | Cluster                      | Spread                    | Partition                           |
-| ------------------ | ---------------------------- | ------------------------- | ----------------------------------- |
-| **Mục tiêu chính** | Hiệu năng mạng (Performance) | Độ an toàn (Availability) | Cân bằng (Distributed Systems)      |
-| **Vị trí vật lý**  | Chung Rack / Chung AZ        | Khác Rack hoàn toàn       | Chung Rack (trong 1 partition), Khác Rack (giữa các partition) |
-| **Giới hạn** | Không giới hạn số lượng | Max 7 instances / AZ | Max 7 partitions / AZ |
-| **Hỗ trợ Multi-AZ** | Không (Chỉ 1 AZ) | Có | Có |
-| **Phù hợp nhất** | HPC, Super computing | Database, Critical Apps | HDFS, Kafka, Cassandra |
-
----
-
-## 4. Cách sử dụng
-
-Một ví dụ điển hình là bạn cần triển khai 1 ứng dụng backend API cần tính sẳn sàng cao, bạn nghĩ ngay trong đầu đến chiến lược spread để phân bố các instance của bạn trên các rack khác nhau, thậm chí là AZ khác nhau.
-
-Bạn cần vào aws console tạo ngay 1 placement group spread
-
-Tiếp đó là triển khai các instance của bạn, mount các instance đó vào placement group vừa được tạo là xong, quá đơn giản
-
-## 5. Những lưu ý quan trọng
+## 3. Những lưu ý quan trọng
 
 Để sử dụng Placement Group hiệu quả, bạn cần ghi nhớ các "luật chơi" sau:
 
 1. **Chi phí:** Tin vui là việc tạo Placement Group hoàn toàn **Miễn phí**. Bạn chỉ phải trả tiền cho tài nguyên (EC2, EBS,...) mà bạn sử dụng bên trong nó.
-2. **Phạm vi:** Placement Group (dù là loại nào) **không hỗ trợ Multi-Region**. Bạn không thể gom nhóm các instance nằm ở Singapore và Virginia vào chung một PG.
+2. **Phạm vi:** Placement Group **không hỗ trợ Multi-Region**. Bạn không thể gom nhóm các instance nằm ở Singapore và Virginia vào chung một PG.
 3. **Chiến lược tối ưu:**
 
 - Cần tốc độ? Chọn **Cluster**.
