@@ -7,6 +7,7 @@ import { Tags } from '@/components/tags'
 import { Avatar } from '@/components/avatar'
 import { RedisSortedSetSimulator } from '@/components/redis-sorted-set-simulator'
 import { ExcalidrawDiagram } from '@/components/excalidraw-diagram'
+import { CredlyBadge } from '@/components/credly-badge'
 
 function Figure({ alt, ...props }: ComponentProps<typeof ImageZoom>) {
   return (
@@ -43,5 +44,6 @@ export function useMDXComponents() {
     Avatar: Avatar,
     RedisSortedSetSimulator: RedisSortedSetSimulator,
     ExcalidrawDiagram: ExcalidrawDiagram,
+    CredlyBadge: CredlyBadge,
   }
 }
